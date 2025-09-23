@@ -145,11 +145,9 @@ pub fn compute_delta(db: &sled::Db, root: &Path, opt: &Options) -> Result<DeltaS
     walk(db, &mut seen, root, 0, opt, &mut delta);
     // Removed: iterate DB prefix under root and count keys not in seen
     let prefix = root.to_string_lossy().as_bytes().to_vec();
-    for kv in db.scan_prefix(prefix) {
-        if let Ok((k, _)) = kv {
-            if !seen.contains(&k.to_vec()) {
-                delta.removed += 1;
-            }
+    for (k, _) in db.scan_prefix(prefix).flatten() {
+        if !seen.contains(&k.to_vec()) {
+            delta.removed += 1;
         }
     }
     Ok(delta)

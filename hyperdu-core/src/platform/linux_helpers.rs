@@ -110,6 +110,7 @@ pub fn statx_dev(stx: &libc::statx) -> u64 {
 /// Check if current device matches parent for one-file-system.
 /// Uses statx on glibc; fstatat metadata fallback on musl.
 #[inline]
+#[allow(dead_code)]
 pub fn check_one_file_system(
     dirfd: libc::c_int,
     name: &[u8],
@@ -125,7 +126,7 @@ pub fn check_one_file_system(
         if let Some(stx) = do_statx(dirfd, name, libc::AT_SYMLINK_NOFOLLOW, libc::STATX_INO) {
             return statx_dev(&stx) == parent_dev;
         }
-        return false;
+        false
     }
 
     #[cfg(target_env = "musl")]
@@ -152,6 +153,7 @@ pub fn check_one_file_system(
 }
 
 /// Process directory entry for stats
+#[allow(dead_code)]
 pub struct EntryStats {
     pub logical: u64,
     pub physical: u64,
@@ -164,6 +166,7 @@ pub struct EntryStats {
 /// Get stats for a directory entry (glibc: statx path)
 #[cfg(not(target_env = "musl"))]
 #[inline]
+#[allow(dead_code)]
 pub fn get_entry_stats(
     dirfd: libc::c_int,
     name: &[u8],
@@ -226,6 +229,7 @@ pub fn get_entry_stats(
 /// Get stats for a directory entry (musl: fstatat metadata path)
 #[cfg(target_env = "musl")]
 #[inline]
+#[allow(dead_code)]
 pub fn get_entry_stats(
     dirfd: libc::c_int,
     name: &[u8],

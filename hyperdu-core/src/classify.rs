@@ -147,10 +147,7 @@ pub fn classify_directory(root: &Path, opt: &Options, mode: ClassifyMode) -> Typ
                             Err(_) => continue,
                         };
                         let mut buf = [0u8; 8192];
-                        let n = match f.read(&mut buf) {
-                            Ok(n) => n,
-                            Err(_) => 0,
-                        };
+                        let n: usize = f.read(&mut buf).unwrap_or_default();
                         cat = deep_category_from_bytes(&buf[..n]);
                     }
                 }

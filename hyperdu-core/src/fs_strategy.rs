@@ -171,7 +171,7 @@ fn fs_type_for_path_linux(p: &Path) -> Option<String> {
                             let mp = pre_parts[4];
                             if path.to_string_lossy().starts_with(mp) {
                                 let post_parts: Vec<&str> = post[3..].split_whitespace().collect();
-                                if post_parts.len() >= 1 {
+                                if !post_parts.is_empty() {
                                     let fs = post_parts[0].to_string();
                                     let l = mp.len();
                                     if best.as_ref().map(|(bl, _)| l > *bl).unwrap_or(true) {
@@ -242,8 +242,8 @@ pub fn detect_and_apply(path: &Path, opt: &mut Options) -> Option<FsApplyReport>
         "btrfs" => (Box::new(BtrfsStrategy), "fstype=btrfs".into()),
         "zfs" => (Box::new(ZfsStrategy), "fstype=zfs".into()),
         "drvfs" => (Box::new(DrvfsStrategy), "fstype=drvfs (WSL)".into()),
-        _ if looks_network => (Box::new(NetworkStrategy), format!("network={}", l)),
-        _ => (Box::new(GenericStrategy), format!("fstype={}", l)),
+        _ if looks_network => (Box::new(NetworkStrategy), format!("network={l}")),
+        _ => (Box::new(GenericStrategy), format!("fstype={l}")),
     };
     let mut changes = Vec::new();
     let outcome = strat.apply(opt, &mut changes);
