@@ -16,8 +16,6 @@ thread_local! {
 }
 
 pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
-    let dir = dctx.dir;
-    let resume = dctx.resume;
     let opt = ctx.options;
     // Try io_uring ring (once per thread)
     let mut used = false;
@@ -65,6 +63,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
 #[allow(clippy::too_many_arguments)]
 fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let dir = dctx.dir;
+    let depth = dctx.depth;
     let resume = dctx.resume;
     let opt = ctx.options;
     // Always-inflight STATX pipeline: enumerate via getdents64, keep ring saturated
@@ -362,11 +361,10 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
         let mut bpos: isize = 0;
         while bpos < nread {
             let ptr = unsafe { buf.as_ptr().add(bpos as usize) };
-            let reclen = unsafe { crate::platform::linux_helpers::dirent_reclen(ptr as *const u8) };
-            let dtype = unsafe { crate::platform::linux_helpers::dirent_dtype(ptr as *const u8) };
-            let name_slice = unsafe {
-                crate::platform::linux_helpers::dirent_name_slice(ptr as *const u8, reclen)
-            };
+            let reclen = unsafe { crate::platform::linux_helpers::dirent_reclen(ptr) };
+            let dtype = unsafe { crate::platform::linux_helpers::dirent_dtype(ptr) };
+            let name_slice =
+                unsafe { crate::platform::linux_helpers::dirent_name_slice(ptr, reclen) };
             if name_slice == b"." || name_slice == b".." {
                 bpos += reclen;
                 continue;
