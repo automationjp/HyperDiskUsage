@@ -560,7 +560,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                         };
                         let mode = stx.stx_mode as u32;
                         let ftype = mode & libc::S_IFMT;
-                        if ftype == libc::S_IFDIR || (ftype == 0 && dt == libc::DT_DIR as u8) {
+                        if ftype == libc::S_IFDIR || (ftype == 0 && dt == libc::DT_DIR) {
                             if opt.max_depth == 0 || depth < opt.max_depth {
                                 use std::ffi::OsStr;
                                 let child = dir.join(OsStr::from_bytes(nm.as_bytes()));
@@ -582,7 +582,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                             }
                         } else if ftype == libc::S_IFREG
                             || (opt.follow_links && ftype == libc::S_IFLNK)
-                            || (ftype == 0 && dt == libc::DT_REG as u8)
+                            || (ftype == 0 && dt == libc::DT_REG)
                         {
                             if ftype == libc::S_IFREG {
                                 let dev =
@@ -632,11 +632,11 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                     if let Some((ref nm, dt)) = items[slot] {
                         use std::ffi::OsStr;
                         let child = dir.join(OsStr::from_bytes(nm.as_bytes()));
-                        if dt == libc::DT_DIR as u8 {
-                            if opt.max_depth == 0 || depth < opt.max_depth {
-                                if !crate::filters::path_excluded(&child, opt) {
-                                    ctx.enqueue_dir(child, depth + 1);
-                                }
+                        if dt == libc::DT_DIR {
+                            if (opt.max_depth == 0 || depth < opt.max_depth)
+                                && !crate::filters::path_excluded(&child, opt)
+                            {
+                                ctx.enqueue_dir(child, depth + 1);
                             }
                         } else if let Ok(md) = std::fs::symlink_metadata(&child) {
                             if md.file_type().is_file() {

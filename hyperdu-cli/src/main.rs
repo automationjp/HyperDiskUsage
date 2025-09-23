@@ -1224,7 +1224,7 @@ fn main() -> Result<()> {
                         format!("reason='{}'", rep.reason),
                     ];
                     if let Some(t) = rep.recommended_threads {
-                        meta.push(format!("threads_reco={}", t));
+                        meta.push(format!("threads_reco={t}"));
                     }
                     if rep.disable_uring {
                         meta.push("disable_uring=1".into());
@@ -1275,8 +1275,8 @@ fn main() -> Result<()> {
                 let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
                 let recent_rate = (delta_n as f64) / delta_dt;
                 println!(
-                    "progress: processed {} files | rate: {:.0} f/s (recent {:.0} f/s)",
-                    total_stat.files, total_rate, recent_rate
+                    "progress: processed {files} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)",
+                    files = total_stat.files
                 );
                 *last.lock().unwrap() = (total_stat.files, now);
             }
@@ -1368,8 +1368,8 @@ fn main() -> Result<()> {
         // CSV / JSON exports (auto-save on --verbose)
         let auto_json = args.verbose.then(|| PathBuf::from("hyperdu-report.json"));
         let auto_csv = args.verbose.then(|| PathBuf::from("hyperdu-report.csv"));
-        if let Some(csv_path) = args.csv.as_ref().or_else(|| auto_csv.as_ref()) {
-            let mut wtr = csv::Writer::from_path(&csv_path)?;
+        if let Some(csv_path) = args.csv.as_ref().or(auto_csv.as_ref()) {
+            let mut wtr = csv::Writer::from_path(csv_path)?;
             wtr.write_record(["path", "logical", "physical", "files"])?;
             for (p, s) in &v {
                 wtr.write_record([
@@ -1382,7 +1382,7 @@ fn main() -> Result<()> {
             wtr.flush()?;
             println!("wrote CSV: {}", csv_path.display());
         }
-        if let Some(json_path) = args.json.as_ref().or_else(|| auto_json.as_ref()) {
+        if let Some(json_path) = args.json.as_ref().or(auto_json.as_ref()) {
             let mut file = File::create(json_path)?;
             let json = serde_json::to_string_pretty(&v.iter().map(|(p, s)| serde_json::json!({"path": p, "logical": s.logical, "physical": s.physical, "files": s.files})).collect::<Vec<_>>())?;
             file.write_all(json.as_bytes())?;
@@ -1403,7 +1403,7 @@ fn main() -> Result<()> {
             );
             let auto_cjson = args.verbose.then(|| PathBuf::from("class-report.json"));
             let auto_ccsv = args.verbose.then(|| PathBuf::from("class-report.csv"));
-            if let Some(p) = args.class_report.as_ref().or_else(|| auto_cjson.as_ref()) {
+            if let Some(p) = args.class_report.as_ref().or(auto_cjson.as_ref()) {
                 let mut file = File::create(p)?;
                 let json = serde_json::to_string_pretty(&serde_json::json!({
                     "by_category": class_stats.by_category,
@@ -1413,11 +1413,7 @@ fn main() -> Result<()> {
                 file.write_all(json.as_bytes())?;
                 println!("wrote class-report: {}", p.display());
             }
-            if let Some(p) = args
-                .class_report_csv
-                .as_ref()
-                .or_else(|| auto_ccsv.as_ref())
-            {
+            if let Some(p) = args.class_report_csv.as_ref().or(auto_ccsv.as_ref()) {
                 let mut wtr = csv::Writer::from_path(p)?;
                 wtr.write_record(["kind", "key", "files", "bytes"])?;
                 for (k, v) in class_stats.by_category.iter() {
@@ -1527,8 +1523,7 @@ fn main() -> Result<()> {
                             let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
                             let recent_rate = (delta_n as f64) / delta_dt;
                             println!(
-                                "progress: processed {} files | rate: {:.0} f/s (recent {:.0} f/s)",
-                                total_files, total_rate, recent_rate
+                                "progress: processed {total_files} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)"
                             );
                             *last.lock().unwrap() = (total_files, now);
                         }
