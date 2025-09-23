@@ -54,6 +54,48 @@ impl Drop for KeepAlive {
     }
 }
 
+// Cross-platform filesystem stats (total/free) for a given path's volume
+fn fs_total_free(path: &Path) -> Option<(u64, u64)> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        // Ensure path ends with backslash and is NUL-terminated for root volume query
+        if let Some(&ch) = wide.last() {
+            if ch != '\\' as u16 && ch != '/' as u16 { wide.push('\\' as u16); }
+        }
+        if *wide.last().unwrap_or(&0) != 0 { wide.push(0); }
+        unsafe {
+            let mut free_avail: u64 = 0;
+            let mut total: u64 = 0;
+            let mut total_free: u64 = 0;
+            if GetDiskFreeSpaceExW(PCWSTR(wide.as_ptr()), Some(&mut free_avail), Some(&mut total), Some(&mut total_free)).is_ok() {
+                return Some((total, total_free));
+            }
+        }
+        None
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "android", target_os = "freebsd"))]
+    {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        let c = CString::new(path.as_os_str().as_bytes()).ok()?;
+        let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
+        let rc = unsafe { libc::statvfs(c.as_ptr(), &mut s as *mut _) };
+        if rc == 0 {
+            let total = (s.f_blocks as u128).saturating_mul(s.f_frsize as u128) as u64;
+            let free = (s.f_bfree as u128).saturating_mul(s.f_frsize as u128) as u64;
+            Some((total, free))
+        } else { None }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "android", target_os = "freebsd")))]
+    {
+        None
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
 enum CompatArg {
     Hyperdu,
@@ -676,6 +718,19 @@ fn main() -> Result<()> {
         .with_performance(hyperdu_core::PerformanceConfig { prefer_inner_rayon: Some(cfg.prefer_inner_rayon), disable_uring: Some(args.no_uring), ..Default::default() })
         .with_windows(hyperdu_core::WindowsConfig { win_allow_handle: Some(cfg.win_allow_handle), win_handle_sample_every: Some(cfg.win_handle_sample_every) })
         .build();
+
+    // Graceful cancel: Ctrl-C updates opt.cancel; report once
+    {
+        let cancel = opt.cancel.clone();
+        let notified = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let notified2 = notified.clone();
+        let _ = ctrlc::set_handler(move || {
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            if !notified2.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("signal: cancelling… 現在までの集計を出力します");
+            }
+        });
+    }
     // Apply performance profile (maps to existing flags)
     match args.perf {
         PerfArg::Turbo => {
@@ -1206,13 +1261,26 @@ fn main() -> Result<()> {
             println!("  Uring: n/a | batch=n/a");
             println!("  Uring-metrics: n/a");
         }
-        println!(
-            "  Total: files={} | phys={} | log={} | dirs={}",
-            total_stat.files,
-            format_size(total_stat.physical, BINARY),
-            format_size(total_stat.logical, BINARY),
-            dirs_scanned
-        );
+            println!(
+                "  Total: files={} | phys={} | log={} | dirs={}",
+                total_stat.files,
+                format_size(total_stat.physical, BINARY),
+                format_size(total_stat.logical, BINARY),
+                dirs_scanned
+            );
+
+        // Disk/Volume usage (best-effort)
+        if let Some((vol_total, vol_free)) = fs_total_free(root) {
+            let used = vol_total.saturating_sub(vol_free);
+            let pct: f64 = if vol_total > 0 { (used as f64) * 100.0 / (vol_total as f64) } else { 0.0 };
+            println!(
+                "  Disk: total={} | used={} | free={} | usage={:.1}%",
+                format_size(vol_total, BINARY),
+                format_size(used, BINARY),
+                format_size(vol_free, BINARY),
+                pct
+            );
+        }
 
         // CSV / JSON exports (auto-save on --verbose)
         let auto_json = args.verbose.then(|| PathBuf::from("hyperdu-report.json"));
