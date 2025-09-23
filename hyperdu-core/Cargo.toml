@@ -42,6 +42,10 @@ infer = "0.8"
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
 io-uring = { version = "0.6", optional = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# On macOS, default features are disabled above; opt-in to the fsevent backend explicitly
+notify = { version = "6", default-features = false, features = ["serde", "macos_fsevent"] }
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
   "Win32_Foundation",
