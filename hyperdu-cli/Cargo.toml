@@ -51,6 +51,7 @@ priority = "optional"
 depends = "$auto"
 maintainer = "HyperDU Maintainers <maintainers@example.com>"
 extended-description = "Hyper-fast disk usage analyzer CLI."
+maintainer-scripts = "../packaging/deb"
 assets = [
   ["../README.md", "/usr/share/doc/hyperdu/README.md", "644"],
   ["../LICENSE", "/usr/share/doc/hyperdu/LICENSE", "644"],
@@ -59,10 +60,6 @@ assets = [
   ["../packaging/completions/hyperdu.zsh", "/usr/share/zsh/site-functions/_hyperdu", "644"],
   ["../packaging/completions/hyperdu.fish", "/usr/share/fish/vendor_completions.d/hyperdu.fish", "644"],
 ]
-
-[package.metadata.deb.maintainer-scripts]
-postinst = "../packaging/deb/hyperdu-cli.postinst"
-prerm = "../packaging/deb/hyperdu-cli.prerm"
 
 # RPM packaging (cargo-generate-rpm)
 [package.metadata.generate-rpm]
