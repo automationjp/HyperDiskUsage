@@ -1,6 +1,8 @@
-use crate::StatMap;
-use ahash::AHashMap as HashMap;
 use std::path::{Path, PathBuf};
+
+use ahash::AHashMap as HashMap;
+
+use crate::StatMap;
 
 #[inline(always)]
 fn depth_of(p: &Path) -> usize {

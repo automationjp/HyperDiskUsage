@@ -2,10 +2,13 @@
 #[test]
 #[ignore = "Known discrepancy in subtree aggregation on some filesystems; tracked for follow-up."]
 fn hardlink_dedupe_unix() {
+    use std::{
+        fs::{create_dir_all, hard_link, File},
+        io::Write,
+        path::PathBuf,
+    };
+
     use hyperdu_core::{scan_directory, Options, Stat};
-    use std::fs::{create_dir_all, hard_link, File};
-    use std::io::Write;
-    use std::path::PathBuf;
 
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("d");

@@ -164,8 +164,7 @@ impl OptionsBuilder {
     }
     pub fn with_windows(mut self, cfg: WindowsConfig) -> Self {
         self.win_allow_handle = cfg.win_allow_handle.or(self.win_allow_handle);
-        self.win_handle_sample_every =
-            cfg.win_handle_sample_every.or(self.win_handle_sample_every);
+        self.win_handle_sample_every = cfg.win_handle_sample_every.or(self.win_handle_sample_every);
         self
     }
 
@@ -181,7 +180,9 @@ impl OptionsBuilder {
         if let Some(v) = self.follow_links {
             opt.follow_links = v;
         }
-        if let Some(v) = self.threads { opt.threads = v; }
+        if let Some(v) = self.threads {
+            opt.threads = v;
+        }
         if let Some(v) = self.compute_physical {
             opt.compute_physical = v;
         }
@@ -228,7 +229,8 @@ impl OptionsBuilder {
             opt.exclude_glob = self.exclude_glob;
         }
         // Initialize runtime-tunable active_threads to full threads
-        opt.active_threads.store(opt.threads.max(1), std::sync::atomic::Ordering::Relaxed);
+        opt.active_threads
+            .store(opt.threads.max(1), std::sync::atomic::Ordering::Relaxed);
         // Compile filters similar to scan bootstrap
         super::compile_filters_in_place(&mut opt);
         opt

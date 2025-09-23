@@ -1,8 +1,13 @@
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    thread::JoinHandle,
+    time::{Duration, Instant},
+};
+
 use crate::Options;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
 
 pub struct TunerGuard {
     running: Arc<AtomicBool>,
@@ -19,7 +24,10 @@ impl Drop for TunerGuard {
 }
 
 /// Start adaptive tuner if HYPERDU_TUNE=1. Returns a guard joining when dropped.
-pub fn start_if_enabled(opt: Arc<Options>, total_files: Arc<std::sync::atomic::AtomicU64>) -> Option<TunerGuard> {
+pub fn start_if_enabled(
+    opt: Arc<Options>,
+    total_files: Arc<std::sync::atomic::AtomicU64>,
+) -> Option<TunerGuard> {
     if std::env::var("HYPERDU_TUNE").ok().as_deref() != Some("1") {
         return None;
     }
@@ -86,7 +94,8 @@ pub fn start_if_enabled(opt: Arc<Options>, total_files: Arc<std::sync::atomic::A
                     if improve > 0.05 {
                         st.best_fps = fps;
                         // move one step in same direction if possible
-                        let next = (idx as isize + dir).clamp(0, (yield_steps.len() - 1) as isize) as usize;
+                        let next = (idx as isize + dir).clamp(0, (yield_steps.len() - 1) as isize)
+                            as usize;
                         if next != idx {
                             idx = next;
                             opt.dir_yield_every
@@ -100,7 +109,8 @@ pub fn start_if_enabled(opt: Arc<Options>, total_files: Arc<std::sync::atomic::A
                     } else {
                         // reverse direction and try one step
                         dir = -dir;
-                        let next = (idx as isize + dir).clamp(0, (yield_steps.len() - 1) as isize) as usize;
+                        let next = (idx as isize + dir).clamp(0, (yield_steps.len() - 1) as isize)
+                            as usize;
                         if next != idx {
                             idx = next;
                             opt.dir_yield_every
@@ -124,7 +134,11 @@ pub fn start_if_enabled(opt: Arc<Options>, total_files: Arc<std::sync::atomic::A
                 last_fail = cur_fail;
                 last_wait = cur_wait;
                 last_cqe = cur_cqe;
-                let avg_wait_ms = if dcqe > 0 { (dwait as f64) / (dcqe as f64) / 1.0e6 } else { 0.0 };
+                let avg_wait_ms = if dcqe > 0 {
+                    (dwait as f64) / (dcqe as f64) / 1.0e6
+                } else {
+                    0.0
+                };
                 let mut batch = opt.uring_batch.load(Ordering::Relaxed);
                 // adjust batch within [64, 4096]
                 let min_b = 64usize;
@@ -150,12 +164,21 @@ pub fn start_if_enabled(opt: Arc<Options>, total_files: Arc<std::sync::atomic::A
 
                 // Dynamic threads gating: adjust active_threads in [1, threads]
                 let max_threads = opt.threads.max(1);
-                let mut active = opt.active_threads.load(Ordering::Relaxed).clamp(1, max_threads);
-                let fps_improve = if last_fps > 0.0 { (fps - last_fps) / last_fps } else { 0.0 };
+                let mut active = opt
+                    .active_threads
+                    .load(Ordering::Relaxed)
+                    .clamp(1, max_threads);
+                let fps_improve = if last_fps > 0.0 {
+                    (fps - last_fps) / last_fps
+                } else {
+                    0.0
+                };
                 last_fps = fps;
                 if dfail > 0 || avg_wait_ms > 3.0 {
                     // back off
-                    if active > 1 { active -= 1; }
+                    if active > 1 {
+                        active -= 1;
+                    }
                 } else if fps_improve > 0.05 && active < max_threads {
                     // ramp up slowly on clear improvement
                     active += 1;
@@ -172,7 +195,10 @@ pub fn start_if_enabled(opt: Arc<Options>, total_files: Arc<std::sync::atomic::A
         })
         .ok()?;
 
-    Some(TunerGuard { running, handle: Some(handle) })
+    Some(TunerGuard {
+        running,
+        handle: Some(handle),
+    })
 }
 
 #[derive(Default)]

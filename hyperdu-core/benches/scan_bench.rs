@@ -1,8 +1,11 @@
+use std::{
+    fs::{create_dir_all, File},
+    io::Write,
+    path::PathBuf,
+};
+
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use hyperdu_core as core;
-use std::fs::{create_dir_all, File};
-use std::io::Write;
-use std::path::PathBuf;
 
 fn build_tree(root: &std::path::Path, dirs: usize, files_per_dir: usize, file_size: usize) {
     for d in 0..dirs {
@@ -34,7 +37,9 @@ fn bench_scan(c: &mut Criterion) {
     let mut opt = core::Options::default();
     opt.compute_physical = false;
     opt.progress_every = 0;
-    opt.threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    opt.threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
 
     // Single-root baseline
     let roots1 = make_roots(1);

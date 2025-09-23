@@ -1,13 +1,11 @@
 // Minimal io_uring STATX pipeline. Falls back to stable implementation if unavailable.
-use crate::memory_pool::BufferGuard;
-use crate::{DirContext, ScanContext, StatMap};
+use std::{
+    cell::RefCell, collections::VecDeque, ffi::CString, os::unix::ffi::OsStrExt, time::Instant,
+};
+
 use io_uring::{opcode, IoUring};
-use std::cell::RefCell;
-use std::collections::VecDeque;
-use std::ffi::CString;
-use std::os::unix::ffi::OsStrExt;
- 
-use std::time::Instant;
+
+use crate::{memory_pool::BufferGuard, DirContext, ScanContext, StatMap};
 
 struct RingCtx {
     ring: IoUring,
@@ -56,12 +54,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
             }
             if let Some(rctx) = ctx_opt.as_mut() {
                 used = true;
-                process_with_ring(
-                    &mut rctx.ring,
-                    ctx,
-                    dctx,
-                    map,
-                );
+                process_with_ring(&mut rctx.ring, ctx, dctx, map);
             }
         })
         .is_ok();
@@ -71,12 +64,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn process_with_ring(
-    ring: &mut IoUring,
-    ctx: &ScanContext,
-    dctx: &DirContext,
-    map: &mut StatMap,
-) {
+fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let dir = dctx.dir;
     let depth = dctx.depth;
     let resume = dctx.resume;
@@ -188,7 +176,9 @@ fn process_with_ring(
                 // Submission with retry on SQ full
                 let mut sq = ring.submission();
                 while inflight < window {
-                    let Some((name, dt)) = pending.pop_front() else { break };
+                    let Some((name, dt)) = pending.pop_front() else {
+                        break;
+                    };
                     let Some(slot) = free.pop() else { break };
                     items[slot] = Some((name, dt));
                     let (ref nm, _dt) = items[slot].as_ref().unwrap();
@@ -212,7 +202,9 @@ fn process_with_ring(
                         continue;
                     }
                     fail += 1;
-                    if window > 1 { window -= 1; }
+                    if window > 1 {
+                        window -= 1;
+                    }
                     break;
                 }
                 drop(sq);
@@ -284,16 +276,28 @@ fn process_with_ring(
                                         logical,
                                         stx.stx_blocks,
                                     );
-                                    crate::common_ops::update_file_stats(stat_cur, logical, physical);
-                                    crate::common_ops::report_file_progress(opt, ctx.total_files, Some(&child));
+                                    crate::common_ops::update_file_stats(
+                                        stat_cur, logical, physical,
+                                    );
+                                    crate::common_ops::report_file_progress(
+                                        opt,
+                                        ctx.total_files,
+                                        Some(&child),
+                                    );
                                 } else if ftype == 0 {
                                     // immediate fallback when type info is missing
                                     if let Ok(md) = std::fs::symlink_metadata(&child) {
                                         if md.file_type().is_file() {
                                             let l = md.len();
                                             if l >= opt.min_file_size {
-                                                crate::common_ops::update_file_stats(stat_cur, l, l);
-                                                crate::common_ops::report_file_progress(opt, ctx.total_files, Some(&child));
+                                                crate::common_ops::update_file_stats(
+                                                    stat_cur, l, l,
+                                                );
+                                                crate::common_ops::report_file_progress(
+                                                    opt,
+                                                    ctx.total_files,
+                                                    Some(&child),
+                                                );
                                             }
                                         }
                                     }
@@ -316,7 +320,11 @@ fn process_with_ring(
                                     let l = md.len();
                                     if l >= opt.min_file_size {
                                         crate::common_ops::update_file_stats(stat_cur, l, l);
-                                        crate::common_ops::report_file_progress(opt, ctx.total_files, Some(&child));
+                                        crate::common_ops::report_file_progress(
+                                            opt,
+                                            ctx.total_files,
+                                            Some(&child),
+                                        );
                                     }
                                 }
                             }
@@ -380,7 +388,9 @@ fn process_with_ring(
             {
                 let mut sq = ring.submission();
                 while inflight < window {
-                    let Some((name, dt)) = pending.pop_front() else { break };
+                    let Some((name, dt)) = pending.pop_front() else {
+                        break;
+                    };
                     let Some(slot) = free.pop() else { break };
                     items[slot] = Some((name, dt));
                     let (ref nm, _dt) = items[slot].as_ref().unwrap();
@@ -404,7 +414,9 @@ fn process_with_ring(
                         continue;
                     }
                     fail += 1;
-                    if window > 1 { window -= 1; }
+                    if window > 1 {
+                        window -= 1;
+                    }
                     break;
                 }
                 drop(sq);
@@ -598,14 +610,22 @@ fn process_with_ring(
                                     stx.stx_blocks,
                                 );
                                 crate::common_ops::update_file_stats(stat_cur, logical, physical);
-                                crate::common_ops::report_file_progress(opt, ctx.total_files, Some(&child));
+                                crate::common_ops::report_file_progress(
+                                    opt,
+                                    ctx.total_files,
+                                    Some(&child),
+                                );
                             } else if ftype == 0 {
                                 if let Ok(md) = std::fs::symlink_metadata(&child) {
                                     if md.file_type().is_file() {
                                         let l = md.len();
                                         if l >= opt.min_file_size {
                                             crate::common_ops::update_file_stats(stat_cur, l, l);
-                                            crate::common_ops::report_file_progress(opt, ctx.total_files, Some(&child));
+                                            crate::common_ops::report_file_progress(
+                                                opt,
+                                                ctx.total_files,
+                                                Some(&child),
+                                            );
                                         }
                                     }
                                 }
@@ -627,7 +647,11 @@ fn process_with_ring(
                                 let l = md.len();
                                 if l >= opt.min_file_size {
                                     crate::common_ops::update_file_stats(stat_cur, l, l);
-                                    crate::common_ops::report_file_progress(opt, ctx.total_files, Some(&child));
+                                    crate::common_ops::report_file_progress(
+                                        opt,
+                                        ctx.total_files,
+                                        Some(&child),
+                                    );
                                 }
                             }
                         }
@@ -672,7 +696,9 @@ fn process_with_ring(
             }
         };
         let mut oflags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
-        if !opt.follow_links { oflags |= libc::O_NOFOLLOW; }
+        if !opt.follow_links {
+            oflags |= libc::O_NOFOLLOW;
+        }
         let fd2 = unsafe { libc::open(c_path.as_ptr(), oflags) };
         if fd2 >= 0 {
             // Buffer for getdents64
@@ -687,20 +713,32 @@ fn process_with_ring(
                         buf2.len(),
                     )
                 } as isize;
-                if nread2 <= 0 { break; }
+                if nread2 <= 0 {
+                    break;
+                }
                 let mut bpos2: isize = 0;
                 while bpos2 < nread2 {
                     let ptr = unsafe { buf2.as_ptr().add(bpos2 as usize) };
-                    let reclen = unsafe { crate::platform::linux_helpers::dirent_reclen(ptr as *const u8) };
-                    let dtype  = unsafe { crate::platform::linux_helpers::dirent_dtype(ptr as *const u8) };
-                    let name_slice = unsafe { crate::platform::linux_helpers::dirent_name_slice(ptr as *const u8, reclen) };
+                    let reclen =
+                        unsafe { crate::platform::linux_helpers::dirent_reclen(ptr as *const u8) };
+                    let dtype =
+                        unsafe { crate::platform::linux_helpers::dirent_dtype(ptr as *const u8) };
+                    let name_slice = unsafe {
+                        crate::platform::linux_helpers::dirent_name_slice(ptr as *const u8, reclen)
+                    };
                     bpos2 += reclen;
-                    if name_slice == b"." || name_slice == b".." { continue; }
+                    if name_slice == b"." || name_slice == b".." {
+                        continue;
+                    }
                     // Build full path for filtering and optional progress-path callback
                     use std::ffi::OsStr;
                     let child_path = dir.join(OsStr::from_bytes(name_slice));
-                    if crate::filters::path_excluded(&child_path, opt) { continue; }
-                    if dtype == libc::DT_DIR { continue; }
+                    if crate::filters::path_excluded(&child_path, opt) {
+                        continue;
+                    }
+                    if dtype == libc::DT_DIR {
+                        continue;
+                    }
 
                     // Try statx relative to dirfd first
                     let mut logical: u64 = 0;
@@ -708,22 +746,40 @@ fn process_with_ring(
                     let mut ok_file = false;
                     if let Ok(cn) = CString::new(name_slice) {
                         let mut stx: libc::statx = unsafe { std::mem::zeroed() };
-                        let mut flags = if opt.follow_links { 0 } else { libc::AT_SYMLINK_NOFOLLOW };
-                        if !matches!(opt.compat_mode, crate::CompatMode::GnuStrict | crate::CompatMode::PosixStrict) {
+                        let mut flags = if opt.follow_links {
+                            0
+                        } else {
+                            libc::AT_SYMLINK_NOFOLLOW
+                        };
+                        if !matches!(
+                            opt.compat_mode,
+                            crate::CompatMode::GnuStrict | crate::CompatMode::PosixStrict
+                        ) {
                             flags |= libc::AT_STATX_DONT_SYNC;
                             #[cfg(target_os = "linux")]
-                            { flags |= libc::AT_NO_AUTOMOUNT; }
+                            {
+                                flags |= libc::AT_NO_AUTOMOUNT;
+                            }
                         }
                         let mut mask = libc::STATX_SIZE | libc::STATX_MODE;
-                        if opt.compute_physical { mask |= libc::STATX_BLOCKS; }
+                        if opt.compute_physical {
+                            mask |= libc::STATX_BLOCKS;
+                        }
                         let rc = unsafe { libc::statx(fd2, cn.as_ptr(), flags, mask, &mut stx) };
                         if rc == 0 {
-                            let mode  = stx.stx_mode as u32;
+                            let mode = stx.stx_mode as u32;
                             let ftype = mode & libc::S_IFMT;
-                            if ftype == libc::S_IFREG || (opt.follow_links && ftype == libc::S_IFLNK) || ftype == 0 {
+                            if ftype == libc::S_IFREG
+                                || (opt.follow_links && ftype == libc::S_IFLNK)
+                                || ftype == 0
+                            {
                                 logical = stx.stx_size;
                                 if logical >= opt.min_file_size {
-                                    physical = crate::common_ops::calculate_physical_size(opt, logical, stx.stx_blocks);
+                                    physical = crate::common_ops::calculate_physical_size(
+                                        opt,
+                                        logical,
+                                        stx.stx_blocks,
+                                    );
                                     ok_file = true;
                                 }
                             }
@@ -743,7 +799,11 @@ fn process_with_ring(
                     }
                     if ok_file {
                         crate::common_ops::update_file_stats(stat_cur, logical, physical);
-                        crate::common_ops::report_file_progress(opt, ctx.total_files, Some(&child_path));
+                        crate::common_ops::report_file_progress(
+                            opt,
+                            ctx.total_files,
+                            Some(&child_path),
+                        );
                     }
                 }
             }

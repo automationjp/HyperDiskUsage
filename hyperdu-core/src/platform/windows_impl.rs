@@ -1,5 +1,6 @@
-use crate::{wname_contains_patterns_lossy, DirContext, ScanContext, StatMap};
 use std::sync::atomic::Ordering;
+
+use crate::{wname_contains_patterns_lossy, DirContext, ScanContext, StatMap};
 
 pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let dir = dctx.dir;
@@ -11,17 +12,24 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
             return;
         }
     }
-    use std::ffi::OsString;
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
-    use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows::Win32::Storage::FileSystem::{
-        CreateFileW, FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW,
-        FindNextFileW, GetCompressedFileSizeW, GetFileInformationByHandle,
-        BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, FIND_FIRST_EX_LARGE_FETCH, OPEN_EXISTING,
-        WIN32_FIND_DATAW,
+    use std::{
+        ffi::OsString,
+        os::windows::ffi::{OsStrExt, OsStringExt},
+    };
+
+    use windows::{
+        core::PCWSTR,
+        Win32::{
+            Foundation::{CloseHandle, HANDLE},
+            Storage::FileSystem::{
+                CreateFileW, FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW,
+                FindNextFileW, GetCompressedFileSizeW, GetFileInformationByHandle,
+                BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
+                FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE,
+                FILE_SHARE_READ, FILE_SHARE_WRITE, FIND_FIRST_EX_LARGE_FETCH, OPEN_EXISTING,
+                WIN32_FIND_DATAW,
+            },
+        },
     };
 
     // Fast-path: if exclude patterns contain no path separators, we can skip
@@ -201,7 +209,8 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                     // Hardlink重複排除（サンプリングしながらハンドル開く）
                     if opt.win_allow_handle
                         && opt.win_handle_sample_every > 0
-                        && ctx.total_files.load(Ordering::Relaxed) % opt.win_handle_sample_every == 0
+                        && ctx.total_files.load(Ordering::Relaxed) % opt.win_handle_sample_every
+                            == 0
                     {
                         wide_buf.truncate(base_len);
                         wide_buf.extend_from_slice(&data.cFileName[..name_len]);
@@ -267,17 +276,23 @@ fn try_fast_enum(
     ctx: &ScanContext,
 ) -> bool {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
-    use windows::core::PCWSTR;
-    use windows::Wdk::Storage::FileSystem::{
-        FileIdBothDirectoryInformation, NtQueryDirectoryFile, FILE_ID_BOTH_DIR_INFORMATION,
-        FILE_INFORMATION_CLASS,
+
+    use windows::{
+        core::PCWSTR,
+        Wdk::Storage::FileSystem::{
+            FileIdBothDirectoryInformation, NtQueryDirectoryFile, FILE_ID_BOTH_DIR_INFORMATION,
+            FILE_INFORMATION_CLASS,
+        },
+        Win32::{
+            Foundation::{CloseHandle, NTSTATUS, STATUS_NO_MORE_FILES},
+            Storage::FileSystem::{
+                CreateFileW, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_NORMAL,
+                FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+                OPEN_EXISTING,
+            },
+            System::IO::IO_STATUS_BLOCK,
+        },
     };
-    use windows::Win32::Foundation::{CloseHandle, NTSTATUS, STATUS_NO_MORE_FILES};
-    use windows::Win32::Storage::FileSystem::{
-        CreateFileW, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
-    };
-    use windows::Win32::System::IO::IO_STATUS_BLOCK;
     // Prefer fast path by default; fallback reduces risk if unsupported
     let mut path_w: Vec<u16> = dir.as_os_str().encode_wide().collect();
     if path_w.is_empty() {

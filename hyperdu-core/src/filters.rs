@@ -1,5 +1,6 @@
-use crate::Options;
 use std::path::Path;
+
+use crate::Options;
 
 #[inline(always)]
 pub fn path_excluded(p: &Path, opt: &Options) -> bool {

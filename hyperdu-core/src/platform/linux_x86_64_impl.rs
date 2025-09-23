@@ -1,19 +1,21 @@
-use crate::common_ops::{
-    calculate_physical_size, check_hardlink_duplicate, check_visited_directory,
-    report_file_progress, should_fast_exclude, update_file_stats,
-};
-use crate::error_handling::{last_os_error_systemcall, record_error};
-use crate::memory_pool::BufferGuard;
-use crate::{name_matches, DirContext, ScanContext, StatMap};
 use std::sync::atomic::Ordering;
+
+use crate::{
+    common_ops::{
+        calculate_physical_size, check_hardlink_duplicate, check_visited_directory,
+        report_file_progress, should_fast_exclude, update_file_stats,
+    },
+    error_handling::{last_os_error_systemcall, record_error},
+    memory_pool::BufferGuard,
+    name_matches, DirContext, ScanContext, StatMap,
+};
 
 pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let dir = dctx.dir;
     let depth = dctx.depth;
     let resume = dctx.resume;
     let opt = ctx.options;
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
 
     const SYS_GETDENTS64: libc::c_long = 217; // x86_64
                                               // Fast-path: if exclude patterns contain no path separators, we can
@@ -98,15 +100,17 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
             unsafe {
                 use core::arch::x86_64::_mm_prefetch;
                 const _MM_HINT_T0: i32 = 3;
-                let next = ptr.add(
-                    crate::platform::linux_helpers::dirent_reclen(ptr as *const u8) as usize,
-                );
+                let next = ptr
+                    .add(crate::platform::linux_helpers::dirent_reclen(ptr as *const u8) as usize);
                 _mm_prefetch(next as *const i8, _MM_HINT_T0);
             }
             let d_off = unsafe { crate::platform::linux_helpers::dirent_d_off(ptr as *const u8) };
-            let d_reclen = unsafe { crate::platform::linux_helpers::dirent_reclen(ptr as *const u8) };
+            let d_reclen =
+                unsafe { crate::platform::linux_helpers::dirent_reclen(ptr as *const u8) };
             let d_type = unsafe { crate::platform::linux_helpers::dirent_dtype(ptr as *const u8) };
-            let name_slice = unsafe { crate::platform::linux_helpers::dirent_name_slice(ptr as *const u8, d_reclen) };
+            let name_slice = unsafe {
+                crate::platform::linux_helpers::dirent_name_slice(ptr as *const u8, d_reclen)
+            };
             if name_slice == b"." || name_slice == b".." {
                 bpos += d_reclen;
                 continue;

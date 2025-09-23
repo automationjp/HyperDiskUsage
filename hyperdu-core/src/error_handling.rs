@@ -1,7 +1,10 @@
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+    sync::atomic::Ordering,
+};
+
 use crate::Options;
-use std::fmt;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 
 /// Recommended next step when a recoverable error occurs.
 #[derive(Debug, Clone, Copy)]
@@ -15,10 +18,21 @@ pub enum RecoveryAction {
 /// Typed scan errors; used for diagnostics and recovery hints.
 #[derive(Debug)]
 pub enum ScanError {
-    IoError { path: PathBuf, source: std::io::Error },
-    PermissionDenied { path: PathBuf },
-    InvalidPath { path: PathBuf },
-    SystemCall { path: PathBuf, call: &'static str, errno: i32 },
+    IoError {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    PermissionDenied {
+        path: PathBuf,
+    },
+    InvalidPath {
+        path: PathBuf,
+    },
+    SystemCall {
+        path: PathBuf,
+        call: &'static str,
+        errno: i32,
+    },
 }
 
 impl fmt::Display for ScanError {
@@ -45,7 +59,10 @@ pub trait ErrorRecovery {
 
 impl ErrorRecovery for ScanError {
     fn is_recoverable(&self) -> bool {
-        matches!(self.recovery_action(), RecoveryAction::SkipEntry | RecoveryAction::SkipDirectory | RecoveryAction::Retry)
+        matches!(
+            self.recovery_action(),
+            RecoveryAction::SkipEntry | RecoveryAction::SkipDirectory | RecoveryAction::Retry
+        )
     }
     fn recovery_action(&self) -> RecoveryAction {
         match self {
@@ -124,8 +141,10 @@ macro_rules! try_or_continue {
 /// Build a SystemCall error from the last OS error (errno/GetLastError)
 #[inline]
 pub fn last_os_error_systemcall(path: &Path, call: &'static str) -> ScanError {
-    let errno = std::io::Error::last_os_error()
-        .raw_os_error()
-        .unwrap_or(-1);
-    ScanError::SystemCall { path: path.to_path_buf(), call, errno }
+    let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(-1);
+    ScanError::SystemCall {
+        path: path.to_path_buf(),
+        call,
+        errno,
+    }
 }

@@ -1,7 +1,6 @@
+use std::{fs, io::Write, path::PathBuf};
+
 use hyperdu_core::{scan_directory, OptionsBuilder};
-use std::fs;
-use std::io::Write;
-use std::path::PathBuf;
 
 fn write_bytes(p: &std::path::Path, n: usize) {
     let mut f = fs::File::create(p).unwrap();

@@ -1,10 +1,13 @@
-use crate::filters::path_excluded;
-use crate::Options;
+use std::{
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sled::IVec;
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::{filters::path_excluded, Options};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathSnapshot {
@@ -30,9 +33,13 @@ fn mtime_secs(md: &std::fs::Metadata) -> u64 {
         .unwrap_or(0)
 }
 
-fn encode_key(p: &Path) -> Vec<u8> { p.to_string_lossy().as_bytes().to_vec() }
+fn encode_key(p: &Path) -> Vec<u8> {
+    p.to_string_lossy().as_bytes().to_vec()
+}
 
-pub fn open_db(path: &Path) -> Result<sled::Db> { Ok(sled::open(path)? ) }
+pub fn open_db(path: &Path) -> Result<sled::Db> {
+    Ok(sled::open(path)?)
+}
 
 #[cfg(unix)]
 fn dev_ino(md: &std::fs::Metadata) -> (u64, u64) {
@@ -41,22 +48,43 @@ fn dev_ino(md: &std::fs::Metadata) -> (u64, u64) {
 }
 
 #[cfg(windows)]
-fn dev_ino(_md: &std::fs::Metadata) -> (u64, u64) { (0, 0) }
+fn dev_ino(_md: &std::fs::Metadata) -> (u64, u64) {
+    (0, 0)
+}
 
 pub fn snapshot_walk_and_update(db: &sled::Db, root: &Path, opt: &Options) -> Result<()> {
     fn walk(db: &sled::Db, dir: &Path, depth: u32, opt: &Options) {
-        if opt.max_depth > 0 && depth > opt.max_depth { return; }
-        let rd = match std::fs::read_dir(dir) { Ok(r) => r, Err(_) => return };
+        if opt.max_depth > 0 && depth > opt.max_depth {
+            return;
+        }
+        let rd = match std::fs::read_dir(dir) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
         for ent in rd {
             let Ok(ent) = ent else { continue };
             let p = ent.path();
-            if path_excluded(&p, opt) { continue; }
+            if path_excluded(&p, opt) {
+                continue;
+            }
             let Ok(md) = ent.metadata() else { continue };
-            if md.is_dir() { walk(db, &p, depth + 1, opt); continue; }
+            if md.is_dir() {
+                walk(db, &p, depth + 1, opt);
+                continue;
+            }
             if md.is_file() {
                 let (dev, ino) = dev_ino(&md);
-                let snap = PathSnapshot { path: p.clone(), mtime: mtime_secs(&md), size: md.len(), dev, ino };
-                let _ = db.insert(encode_key(&p), IVec::from(serde_json::to_vec(&snap).unwrap()));
+                let snap = PathSnapshot {
+                    path: p.clone(),
+                    mtime: mtime_secs(&md),
+                    size: md.len(),
+                    dev,
+                    ino,
+                };
+                let _ = db.insert(
+                    encode_key(&p),
+                    IVec::from(serde_json::to_vec(&snap).unwrap()),
+                );
             }
         }
     }
@@ -69,15 +97,32 @@ pub fn compute_delta(db: &sled::Db, root: &Path, opt: &Options) -> Result<DeltaS
     let mut delta = DeltaSet::default();
     // Mark current paths as seen, and compare with DB
     let mut seen: ahash::AHashSet<Vec<u8>> = ahash::AHashSet::with_capacity(1024);
-    fn walk(db: &sled::Db, seen: &mut ahash::AHashSet<Vec<u8>>, dir: &Path, depth: u32, opt: &Options, delta: &mut DeltaSet) {
-        if opt.max_depth > 0 && depth > opt.max_depth { return; }
-        let rd = match std::fs::read_dir(dir) { Ok(r) => r, Err(_) => return };
+    fn walk(
+        db: &sled::Db,
+        seen: &mut ahash::AHashSet<Vec<u8>>,
+        dir: &Path,
+        depth: u32,
+        opt: &Options,
+        delta: &mut DeltaSet,
+    ) {
+        if opt.max_depth > 0 && depth > opt.max_depth {
+            return;
+        }
+        let rd = match std::fs::read_dir(dir) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
         for ent in rd {
             let Ok(ent) = ent else { continue };
             let p = ent.path();
-            if path_excluded(&p, opt) { continue; }
+            if path_excluded(&p, opt) {
+                continue;
+            }
             let Ok(md) = ent.metadata() else { continue };
-            if md.is_dir() { walk(db, seen, &p, depth + 1, opt, delta); continue; }
+            if md.is_dir() {
+                walk(db, seen, &p, depth + 1, opt, delta);
+                continue;
+            }
             if md.is_file() {
                 let key = encode_key(&p);
                 seen.insert(key.clone());
@@ -85,7 +130,9 @@ pub fn compute_delta(db: &sled::Db, root: &Path, opt: &Options) -> Result<DeltaS
                 let cur_s = md.len();
                 if let Some(v) = db.get(&key).ok().flatten() {
                     if let Ok(prev) = serde_json::from_slice::<PathSnapshot>(&v) {
-                        if prev.mtime != cur_m || prev.size != cur_s { delta.modified += 1; }
+                        if prev.mtime != cur_m || prev.size != cur_s {
+                            delta.modified += 1;
+                        }
                     } else {
                         delta.modified += 1;
                     }
@@ -99,7 +146,11 @@ pub fn compute_delta(db: &sled::Db, root: &Path, opt: &Options) -> Result<DeltaS
     // Removed: iterate DB prefix under root and count keys not in seen
     let prefix = root.to_string_lossy().as_bytes().to_vec();
     for kv in db.scan_prefix(prefix) {
-        if let Ok((k, _)) = kv { if !seen.contains(&k.to_vec()) { delta.removed += 1; } }
+        if let Ok((k, _)) = kv {
+            if !seen.contains(&k.to_vec()) {
+                delta.removed += 1;
+            }
+        }
     }
     Ok(delta)
 }
@@ -125,7 +176,10 @@ pub fn snapshot_prune_removed(db: &sled::Db, root: &Path) -> Result<u64> {
     Ok(removed)
 }
 
-pub fn watch(root: &Path, on_event: impl Fn(&str, &Path) + Send + 'static) -> notify::Result<notify::RecommendedWatcher> {
+pub fn watch(
+    root: &Path,
+    on_event: impl Fn(&str, &Path) + Send + 'static,
+) -> notify::Result<notify::RecommendedWatcher> {
     use notify::{Event, EventKind, RecommendedWatcher, Watcher};
     let mut w: RecommendedWatcher = RecommendedWatcher::new(
         move |res: Result<Event, notify::Error>| {

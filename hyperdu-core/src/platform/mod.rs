@@ -1,5 +1,7 @@
 use crate::{DirContext, ScanContext, StatMap};
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub mod linux_helpers;
 #[cfg(all(
     target_os = "linux",
     target_arch = "x86_64",
@@ -9,8 +11,6 @@ use crate::{DirContext, ScanContext, StatMap};
 mod linux_uring_impl;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod linux_x86_64_impl;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-pub mod linux_helpers;
 #[cfg(target_os = "macos")]
 mod macos_impl;
 #[cfg(all(
@@ -35,7 +35,10 @@ pub fn process_dir_wrapped(ctx: &ScanContext, dir_ctx: &DirContext, map: &mut St
         // Runtime guard: allow disabling uring via options or env
         let disable = ctx.options.disable_uring
             || std::env::var("HYPERDU_DISABLE_URING").ok().as_deref() == Some("1")
-            || std::env::var("HYPERDU_DISABLE_URING").ok().map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(false);
+            || std::env::var("HYPERDU_DISABLE_URING")
+                .ok()
+                .map(|v| v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
         if disable {
             linux_x86_64_impl::process_dir(ctx, dir_ctx, map);
         } else {

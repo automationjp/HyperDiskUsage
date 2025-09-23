@@ -1,18 +1,23 @@
-use crate::common_ops::{
-    calculate_physical_size, check_hardlink_duplicate, check_visited_directory,
-    report_file_progress, update_file_stats,
-};
-use crate::error_handling::{last_os_error_systemcall, record_error};
-use crate::{name_contains_patterns_bytes, DirContext, ScanContext, StatMap};
 use std::sync::atomic::Ordering;
+
+use crate::{
+    common_ops::{
+        calculate_physical_size, check_hardlink_duplicate, check_visited_directory,
+        report_file_progress, update_file_stats,
+    },
+    error_handling::{last_os_error_systemcall, record_error},
+    name_contains_patterns_bytes, DirContext, ScanContext, StatMap,
+};
 
 pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let dir = dctx.dir;
     let depth = dctx.depth;
     let resume = dctx.resume;
     let opt = ctx.options;
-    use std::ffi::{CString, OsStr};
-    use std::os::unix::ffi::OsStrExt;
+    use std::{
+        ffi::{CString, OsStr},
+        os::unix::ffi::OsStrExt,
+    };
 
     let c_path = CString::new(dir.as_os_str().as_bytes()).ok();
     let Some(c_path) = c_path else { return };

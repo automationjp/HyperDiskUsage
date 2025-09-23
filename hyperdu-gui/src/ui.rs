@@ -1,14 +1,18 @@
-use egui::{self, Align, Layout, RichText};
-use egui::{FontData, FontDefinitions, FontFamily};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        mpsc, Arc,
+    },
+    time::Instant,
+};
+
+use egui::{self, Align, FontData, FontDefinitions, FontFamily, Layout, RichText};
 use egui_extras::TableBuilder;
 use humansize::{format_size, BINARY};
 use hyperdu_core as core;
 use hyperdu_core::{Stat, StatMap};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc};
-use std::time::Instant;
 
 fn puffin_frame() {}
 

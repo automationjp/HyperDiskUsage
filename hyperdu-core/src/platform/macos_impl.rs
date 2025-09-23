@@ -1,11 +1,13 @@
-use crate::common_ops::{
-    calculate_physical_size, check_hardlink_duplicate, check_visited_directory,
-    report_file_progress, update_file_stats,
+use std::{ptr::read_unaligned, sync::atomic::Ordering};
+
+use crate::{
+    common_ops::{
+        calculate_physical_size, check_hardlink_duplicate, check_visited_directory,
+        report_file_progress, update_file_stats,
+    },
+    error_handling::{last_os_error_systemcall, record_error},
+    DirContext, ScanContext, StatMap,
 };
-use crate::error_handling::{last_os_error_systemcall, record_error};
-use crate::{DirContext, ScanContext, StatMap};
-use std::ptr::read_unaligned;
-use std::sync::atomic::Ordering;
 
 #[repr(C)]
 struct AttrList {
@@ -52,8 +54,10 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let dir = dctx.dir;
     let depth = dctx.depth;
     let opt = ctx.options;
-    use std::ffi::{CString, OsStr};
-    use std::os::unix::ffi::OsStrExt;
+    use std::{
+        ffi::{CString, OsStr},
+        os::unix::ffi::OsStrExt,
+    };
 
     let c_path = match CString::new(dir.as_os_str().as_bytes()) {
         Ok(s) => s,
@@ -179,7 +183,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
 
                 if is_dir {
                     if opt.max_depth == 0 || depth < opt.max_depth {
-                    ctx.enqueue_dir(child.clone(), depth + 1);
+                        ctx.enqueue_dir(child.clone(), depth + 1);
                     }
                 } else {
                     // Hardlink dedupe

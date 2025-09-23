@@ -1,5 +1,6 @@
-use crate::Options;
 use std::path::Path;
+
+use crate::Options;
 
 pub trait FileSystemStrategy: Send + Sync {
     fn name(&self) -> &'static str;
@@ -8,16 +9,24 @@ pub trait FileSystemStrategy: Send + Sync {
 
 struct GenericStrategy;
 impl FileSystemStrategy for GenericStrategy {
-    fn name(&self) -> &'static str { "generic" }
+    fn name(&self) -> &'static str {
+        "generic"
+    }
     fn apply(&self, _opt: &mut Options, _report: &mut Vec<String>) -> FsApplyOutcome {
         // Keep defaults
-        FsApplyOutcome { recommended_threads: None, disable_uring: false, recommend_logical_only: false }
+        FsApplyOutcome {
+            recommended_threads: None,
+            disable_uring: false,
+            recommend_logical_only: false,
+        }
     }
 }
 
 struct Ext4Strategy;
 impl FileSystemStrategy for Ext4Strategy {
-    fn name(&self) -> &'static str { "ext4" }
+    fn name(&self) -> &'static str {
+        "ext4"
+    }
     fn apply(&self, _opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
         // Favor larger dirent buffer on fast storage
         std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
@@ -25,25 +34,37 @@ impl FileSystemStrategy for Ext4Strategy {
         // Enable prefetch hints if compiled
         std::env::set_var("HYPERDU_PREFETCH", "1");
         report.push("prefetch=1".into());
-        FsApplyOutcome { recommended_threads: None, disable_uring: false, recommend_logical_only: false }
+        FsApplyOutcome {
+            recommended_threads: None,
+            disable_uring: false,
+            recommend_logical_only: false,
+        }
     }
 }
 
 struct XfsStrategy;
 impl FileSystemStrategy for XfsStrategy {
-    fn name(&self) -> &'static str { "xfs" }
+    fn name(&self) -> &'static str {
+        "xfs"
+    }
     fn apply(&self, _opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
         std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
         report.push("getdents_buf_kb=128".into());
         std::env::set_var("HYPERDU_PREFETCH", "1");
         report.push("prefetch=1".into());
-        FsApplyOutcome { recommended_threads: None, disable_uring: false, recommend_logical_only: false }
+        FsApplyOutcome {
+            recommended_threads: None,
+            disable_uring: false,
+            recommend_logical_only: false,
+        }
     }
 }
 
 struct BtrfsStrategy;
 impl FileSystemStrategy for BtrfsStrategy {
-    fn name(&self) -> &'static str { "btrfs" }
+    fn name(&self) -> &'static str {
+        "btrfs"
+    }
     fn apply(&self, opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
         // On CoW/comp-possible FS, logical size is often cheaper; keep physical but avoid aggressive blocks path
         // Switch to logical-only by default for better responsiveness
@@ -55,25 +76,37 @@ impl FileSystemStrategy for BtrfsStrategy {
         std::env::set_var("HYPERDU_PREFETCH", "0");
         report.push("prefetch=0".into());
         let _ = opt; // placeholder for future
-        FsApplyOutcome { recommended_threads: None, disable_uring: false, recommend_logical_only: true }
+        FsApplyOutcome {
+            recommended_threads: None,
+            disable_uring: false,
+            recommend_logical_only: true,
+        }
     }
 }
 
 struct ZfsStrategy;
 impl FileSystemStrategy for ZfsStrategy {
-    fn name(&self) -> &'static str { "zfs" }
+    fn name(&self) -> &'static str {
+        "zfs"
+    }
     fn apply(&self, _opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
         std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
         report.push("getdents_buf_kb=128".into());
         std::env::set_var("HYPERDU_PREFETCH", "1");
         report.push("prefetch=1".into());
-        FsApplyOutcome { recommended_threads: None, disable_uring: false, recommend_logical_only: false }
+        FsApplyOutcome {
+            recommended_threads: None,
+            disable_uring: false,
+            recommend_logical_only: false,
+        }
     }
 }
 
 struct DrvfsStrategy;
 impl FileSystemStrategy for DrvfsStrategy {
-    fn name(&self) -> &'static str { "drvfs" }
+    fn name(&self) -> &'static str {
+        "drvfs"
+    }
     fn apply(&self, opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
         // WSL DrvFS: slow statx/blocks; avoid physical size and reduce parallel pressure
         opt.compute_physical = false;
@@ -85,13 +118,19 @@ impl FileSystemStrategy for DrvfsStrategy {
         std::env::set_var("HYPERDU_PREFETCH", "0");
         report.push("prefetch=0".into());
         // Suggest fewer threads and disable uring
-        FsApplyOutcome { recommended_threads: Some(4), disable_uring: true, recommend_logical_only: false }
+        FsApplyOutcome {
+            recommended_threads: Some(4),
+            disable_uring: true,
+            recommend_logical_only: false,
+        }
     }
 }
 
 struct NetworkStrategy;
 impl FileSystemStrategy for NetworkStrategy {
-    fn name(&self) -> &'static str { "network" }
+    fn name(&self) -> &'static str {
+        "network"
+    }
     fn apply(&self, opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
         // Network FS: prefer logical sizes, limit pressure
         opt.compute_physical = false;
@@ -101,7 +140,11 @@ impl FileSystemStrategy for NetworkStrategy {
         std::env::set_var("HYPERDU_PREFETCH", "0");
         report.push("prefetch=0".into());
         // Optionally reduce threads in caller if needed (not adjusted here)
-        FsApplyOutcome { recommended_threads: Some(4), disable_uring: true, recommend_logical_only: false }
+        FsApplyOutcome {
+            recommended_threads: Some(4),
+            disable_uring: true,
+            recommend_logical_only: false,
+        }
     }
 }
 
@@ -114,7 +157,9 @@ fn fs_type_for_path_linux(p: &Path) -> Option<String> {
         if let Ok(text) = fs::read_to_string(m) {
             let mut best: Option<(usize, String)> = None; // (match_len, fstype)
             for line in text.lines() {
-                if line.is_empty() || line.starts_with('#') { continue; }
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
                 // mountinfo: many fields, mount point is 5th (post-root fields), fstype later; mounts: src mp fstype ...
                 if m.ends_with("mountinfo") {
                     // format: ID parent major:minor root mount point options - fstype src opts
@@ -151,14 +196,18 @@ fn fs_type_for_path_linux(p: &Path) -> Option<String> {
                     }
                 }
             }
-            if let Some((_, fs)) = best { return Some(fs); }
+            if let Some((_, fs)) = best {
+                return Some(fs);
+            }
         }
     }
     None
 }
 
 #[cfg(not(target_os = "linux"))]
-fn fs_type_for_path_linux(_p: &Path) -> Option<String> { None }
+fn fs_type_for_path_linux(_p: &Path) -> Option<String> {
+    None
+}
 
 pub struct FsApplyReport {
     pub strategy: String,

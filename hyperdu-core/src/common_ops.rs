@@ -1,6 +1,9 @@
+use std::{
+    path::Path,
+    sync::atomic::{AtomicU64, Ordering},
+};
+
 use crate::Options;
-use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Check if a hardlink has already been counted
 /// Returns true if this is a duplicate that should be skipped

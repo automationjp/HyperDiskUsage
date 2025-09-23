@@ -1,6 +1,6 @@
+use std::{ffi::CString, mem::MaybeUninit};
+
 use crate::Options;
-use std::ffi::CString;
-use std::mem::MaybeUninit;
 
 // On glibc targets we prefer statx to minimize syscalls and fetch fields efficiently.
 // musl targets lack some statx definitions in libc; provide a metadata/fstatat fallback.
@@ -131,7 +131,14 @@ pub fn check_one_file_system(
             Err(_) => return false,
         };
         let mut st: libc::stat = unsafe { std::mem::zeroed() };
-        let rc = unsafe { libc::fstatat(dirfd, c_name.as_ptr(), &mut st as *mut _, libc::AT_SYMLINK_NOFOLLOW) };
+        let rc = unsafe {
+            libc::fstatat(
+                dirfd,
+                c_name.as_ptr(),
+                &mut st as *mut _,
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        };
         if rc == 0 {
             let dev = st.st_dev as u64;
             return dev == parent_dev;
@@ -188,7 +195,11 @@ pub fn get_entry_stats(
 
     // Need actual stat
     let mask = build_statx_mask(opt);
-    let flags = if opt.follow_links { 0 } else { libc::AT_SYMLINK_NOFOLLOW };
+    let flags = if opt.follow_links {
+        0
+    } else {
+        libc::AT_SYMLINK_NOFOLLOW
+    };
     let stx = do_statx(dirfd, name, flags, mask)?;
 
     let logical = stx.stx_size;
@@ -222,17 +233,37 @@ pub fn get_entry_stats(
 
     // Fast paths mirror the glibc version
     if is_dir_hint && !opt.compute_physical && opt.approximate_sizes {
-        return Some(EntryStats { logical: 0, physical: 0, dev: 0, ino: 0, is_dir: true, is_reg: false });
+        return Some(EntryStats {
+            logical: 0,
+            physical: 0,
+            dev: 0,
+            ino: 0,
+            is_dir: true,
+            is_reg: false,
+        });
     }
     if is_reg_hint && !opt.compute_physical && opt.approximate_sizes && opt.min_file_size == 0 {
-        return Some(EntryStats { logical: 4096, physical: 4096, dev: 0, ino: 0, is_dir: false, is_reg: true });
+        return Some(EntryStats {
+            logical: 4096,
+            physical: 4096,
+            dev: 0,
+            ino: 0,
+            is_dir: false,
+            is_reg: true,
+        });
     }
 
     let c_name = CString::new(name).ok()?;
     let mut st: libc::stat = unsafe { std::mem::zeroed() };
-    let flags = if opt.follow_links { 0 } else { libc::AT_SYMLINK_NOFOLLOW };
+    let flags = if opt.follow_links {
+        0
+    } else {
+        libc::AT_SYMLINK_NOFOLLOW
+    };
     let rc = unsafe { libc::fstatat(dirfd, c_name.as_ptr(), &mut st as *mut _, flags) };
-    if rc != 0 { return None; }
+    if rc != 0 {
+        return None;
+    }
 
     let logical = st.st_size as u64;
     let physical = if opt.compute_physical {

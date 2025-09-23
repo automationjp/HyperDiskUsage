@@ -1,5 +1,6 @@
-use crate::{platform, DirContext, ScanContext, StatMap};
 use std::sync::Arc;
+
+use crate::{platform, DirContext, ScanContext, StatMap};
 
 /// Abstraction over filesystem enumeration to improve testability.
 /// The default implementation delegates to platform backends.
@@ -28,7 +29,10 @@ pub fn platform_scanner() -> PlatformScanner {
 /// Note: each scan may also spawn threads internally based on `Options.threads`.
 /// Consider lowering `Options.threads` to avoid oversubscription.
 #[cfg(feature = "rayon-par")]
-pub fn parallel_scan(roots: Vec<std::path::PathBuf>, opt: &crate::Options) -> anyhow::Result<crate::StatMap> {
+pub fn parallel_scan(
+    roots: Vec<std::path::PathBuf>,
+    opt: &crate::Options,
+) -> anyhow::Result<crate::StatMap> {
     use rayon::prelude::*;
 
     // Balance threads: distribute roughly evenly across rayon workers
@@ -76,7 +80,9 @@ pub fn auto_parallel_scan(
     if roots.is_empty() {
         return Ok(ahash::AHashMap::default());
     }
-    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let cpus = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
     let n_roots = roots.len();
     use crate::HeuristicsMode::*;
     if matches!(opt.heuristics_mode, OuterOnly) {
@@ -99,7 +105,11 @@ pub fn auto_parallel_scan(
     for r in roots.iter().take(sample_n) {
         total_width += estimate_root_width(r, 200);
     }
-    let avg_width = if sample_n > 0 { total_width / sample_n } else { 0 };
+    let avg_width = if sample_n > 0 {
+        total_width / sample_n
+    } else {
+        0
+    };
     // Auto: prefer outer parallelism when many roots or small per-root threads, unless width is very large
     if n_roots >= cpus / 2 || opt.threads <= 2 {
         if avg_width < 4096 {
@@ -159,11 +169,15 @@ fn estimate_root_width(root: &std::path::Path, budget_ms: u64) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        collections::HashSet,
+        path::{Path, PathBuf},
+    };
+
+    use ahash::AHashMap as HashMap;
+
     use super::*;
     use crate::{Options, Stat};
-    use ahash::AHashMap as HashMap;
-    use std::collections::HashSet;
-    use std::path::{Path, PathBuf};
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     enum MockKind {
@@ -187,7 +201,10 @@ mod tests {
 
     impl Default for MockFileSystem {
         fn default() -> Self {
-            Self { entries: HashMap::default(), visited: std::sync::Mutex::new(HashSet::new()) }
+            Self {
+                entries: HashMap::default(),
+                visited: std::sync::Mutex::new(HashSet::new()),
+            }
         }
     }
 
@@ -197,7 +214,9 @@ mod tests {
             let dir = dctx.dir;
             let depth = dctx.depth;
             let stat_cur = map.entry(dir.to_path_buf()).or_insert(Stat::default());
-            let Some(items) = self.entries.get(dir) else { return };
+            let Some(items) = self.entries.get(dir) else {
+                return;
+            };
             for (name, kind) in items {
                 // Build child path
                 let child = dir.join(name);
@@ -251,8 +270,7 @@ mod tests {
 
     #[test]
     fn mock_scanner_basic_rollup() {
-        use std::sync::atomic::AtomicUsize;
-        use std::sync::Arc;
+        use std::sync::{atomic::AtomicUsize, Arc};
 
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("r");
@@ -260,15 +278,18 @@ mod tests {
 
         // Layout: r/{a:10, d/{b:20}}
         let mock = MockFileSystem::default()
-            .with_dir(&root, vec![
-                ("a".into(), MockKind::File(10)),
-                ("d".into(), MockKind::Dir),
-            ])
+            .with_dir(
+                &root,
+                vec![
+                    ("a".into(), MockKind::File(10)),
+                    ("d".into(), MockKind::Dir),
+                ],
+            )
             .with_dir(&root.join("d"), vec![("b".into(), MockKind::File(20))]);
 
         let mut opt = Options::default();
         opt.compute_physical = false; // simplify
-        // ensure progress system present but quiet
+                                      // ensure progress system present but quiet
         opt.progress_every = 0;
         opt.dir_yield_every = Arc::new(AtomicUsize::new(0));
 
@@ -306,7 +327,13 @@ mod tests {
         let d = root.join("d");
         std::fs::create_dir_all(&d).unwrap();
         let mock = MockFileSystem::default()
-            .with_dir(&root, vec![("a".into(), MockKind::File(10)), ("d".into(), MockKind::Dir)])
+            .with_dir(
+                &root,
+                vec![
+                    ("a".into(), MockKind::File(10)),
+                    ("d".into(), MockKind::Dir),
+                ],
+            )
             .with_dir(&d, vec![("b".into(), MockKind::File(20))]);
         let mut opt = Options::default();
         opt.exclude_glob = vec!["**/d/**".into()];
@@ -323,7 +350,10 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let mock = MockFileSystem::default().with_dir(
             &root,
-            vec![("x.tmp".into(), MockKind::File(5)), ("x.log".into(), MockKind::File(7))],
+            vec![
+                ("x.tmp".into(), MockKind::File(5)),
+                ("x.log".into(), MockKind::File(7)),
+            ],
         );
         let mut opt = Options::default();
         opt.exclude_regex = vec![".*\\.tmp$".into()];
@@ -341,8 +371,14 @@ mod tests {
         let e = d.join("e");
         std::fs::create_dir_all(&e).unwrap();
         let mock = MockFileSystem::default()
-            .with_dir(&root, vec![("a".into(), MockKind::File(1)), ("d".into(), MockKind::Dir)])
-            .with_dir(&d, vec![("b".into(), MockKind::File(2)), ("e".into(), MockKind::Dir)])
+            .with_dir(
+                &root,
+                vec![("a".into(), MockKind::File(1)), ("d".into(), MockKind::Dir)],
+            )
+            .with_dir(
+                &d,
+                vec![("b".into(), MockKind::File(2)), ("e".into(), MockKind::Dir)],
+            )
             .with_dir(&e, vec![("c".into(), MockKind::File(4))]);
         let mut opt = Options::default();
         opt.max_depth = 1; // allow scanning root (0) and its children (1), not grandchildren
@@ -359,7 +395,10 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let mock = MockFileSystem::default().with_dir(
             &root,
-            vec![("small".into(), MockKind::File(10)), ("big".into(), MockKind::File(100))],
+            vec![
+                ("small".into(), MockKind::File(10)),
+                ("big".into(), MockKind::File(100)),
+            ],
         );
         let mut opt = Options::default();
         opt.min_file_size = 50;
@@ -393,12 +432,18 @@ mod tests {
         let d = root.join("d");
         std::fs::create_dir_all(&d).unwrap();
         let mock = MockFileSystem::default()
-            .with_dir(&root, vec![("d_link".into(), MockKind::SymlinkDir(d.clone()))])
-            .with_dir(&d, vec![
-                ("in_d".into(), MockKind::File(5)),
-                // cycle: symlink from d back to root
-                ("back".into(), MockKind::SymlinkDir(root.clone())),
-            ]);
+            .with_dir(
+                &root,
+                vec![("d_link".into(), MockKind::SymlinkDir(d.clone()))],
+            )
+            .with_dir(
+                &d,
+                vec![
+                    ("in_d".into(), MockKind::File(5)),
+                    // cycle: symlink from d back to root
+                    ("back".into(), MockKind::SymlinkDir(root.clone())),
+                ],
+            );
         let mut opt = Options::default();
         opt.follow_links = true;
         let map = crate::scan_directory_with(&root, &opt, std::sync::Arc::new(mock)).unwrap();

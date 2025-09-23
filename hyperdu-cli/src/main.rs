@@ -1,13 +1,18 @@
+use std::{
+    fs::File,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+    time::Duration,
+};
+
 use anyhow::Result;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use humansize::{format_size, BINARY};
-use std::fs::File;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
 
 struct KeepAlive {
     done: Arc<AtomicBool>,
@@ -15,7 +20,10 @@ struct KeepAlive {
 }
 
 impl KeepAlive {
-    fn start(enabled: bool, last: Arc<std::sync::Mutex<(u64, std::time::Instant)>>) -> Option<Self> {
+    fn start(
+        enabled: bool,
+        last: Arc<std::sync::Mutex<(u64, std::time::Instant)>>,
+    ) -> Option<Self> {
         if !enabled {
             return None;
         }
@@ -41,7 +49,10 @@ impl KeepAlive {
                 }
             }
         });
-        Some(Self { done, handle: Some(handle) })
+        Some(Self {
+            done,
+            handle: Some(handle),
+        })
     }
 }
 
@@ -59,28 +70,43 @@ fn fs_total_free(path: &Path) -> Option<(u64, u64)> {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::ffi::OsStrExt;
-        use windows::core::PCWSTR;
-        use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+        use windows::{core::PCWSTR, Win32::Storage::FileSystem::GetDiskFreeSpaceExW};
         let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
         // Ensure path ends with backslash and is NUL-terminated for root volume query
         if let Some(&ch) = wide.last() {
-            if ch != '\\' as u16 && ch != '/' as u16 { wide.push('\\' as u16); }
+            if ch != '\\' as u16 && ch != '/' as u16 {
+                wide.push('\\' as u16);
+            }
         }
-        if *wide.last().unwrap_or(&0) != 0 { wide.push(0); }
+        if *wide.last().unwrap_or(&0) != 0 {
+            wide.push(0);
+        }
         unsafe {
             let mut free_avail: u64 = 0;
             let mut total: u64 = 0;
             let mut total_free: u64 = 0;
-            if GetDiskFreeSpaceExW(PCWSTR(wide.as_ptr()), Some(&mut free_avail), Some(&mut total), Some(&mut total_free)).is_ok() {
+            if GetDiskFreeSpaceExW(
+                PCWSTR(wide.as_ptr()),
+                Some(&mut free_avail),
+                Some(&mut total),
+                Some(&mut total_free),
+            )
+            .is_ok()
+            {
                 return Some((total, total_free));
             }
         }
         None
     }
-    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "android", target_os = "freebsd"))]
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "android",
+        target_os = "freebsd"
+    ))]
     {
-        use std::ffi::CString;
-        use std::os::unix::ffi::OsStrExt;
+        use std::{ffi::CString, os::unix::ffi::OsStrExt};
         let c = CString::new(path.as_os_str().as_bytes()).ok()?;
         let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
         let rc = unsafe { libc::statvfs(c.as_ptr(), &mut s as *mut _) };
@@ -88,9 +114,17 @@ fn fs_total_free(path: &Path) -> Option<(u64, u64)> {
             let total = (s.f_blocks as u128).saturating_mul(s.f_frsize as u128) as u64;
             let free = (s.f_bfree as u128).saturating_mul(s.f_frsize as u128) as u64;
             Some((total, free))
-        } else { None }
+        } else {
+            None
+        }
     }
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "android", target_os = "freebsd")))]
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "android",
+        target_os = "freebsd"
+    )))]
     {
         None
     }
@@ -605,7 +639,9 @@ struct AppConfig {
 }
 
 fn exe_dir() -> Option<PathBuf> {
-    std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()))
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
 }
 
 fn load_or_init_config() -> AppConfig {
@@ -614,9 +650,12 @@ fn load_or_init_config() -> AppConfig {
     if path.exists() {
         if let Ok(text) = std::fs::read_to_string(&path) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                let get_bool = |k: &str, def: bool| v.get(k).and_then(|x| x.as_bool()).unwrap_or(def);
+                let get_bool =
+                    |k: &str, def: bool| v.get(k).and_then(|x| x.as_bool()).unwrap_or(def);
                 let get_u64 = |k: &str, def: u64| v.get(k).and_then(|x| x.as_u64()).unwrap_or(def);
-                let get_str = |k: &str, def: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or(def).to_string();
+                let get_str = |k: &str, def: &str| {
+                    v.get(k).and_then(|x| x.as_str()).unwrap_or(def).to_string()
+                };
                 return AppConfig {
                     auto_parallel: get_bool("auto_parallel", false),
                     heuristics_mode: get_str("heuristics_mode", "auto"),
@@ -646,7 +685,8 @@ fn load_or_init_config() -> AppConfig {
         "tune_interval_ms": cfg.tune_interval_ms,
         "win_allow_handle": cfg.win_allow_handle,
         "win_handle_sample_every": cfg.win_handle_sample_every,
-    })).unwrap();
+    }))
+    .unwrap();
     let _ = std::fs::write(&path, s);
     eprintln!("initialized config: {}", path.display());
     cfg
@@ -715,8 +755,15 @@ fn main() -> Result<()> {
             tune_enabled: Some(if args.tune { true } else { cfg.tune_enabled }),
             tune_interval_ms: Some(args.tune_interval_ms.unwrap_or(cfg.tune_interval_ms)),
         })
-        .with_performance(hyperdu_core::PerformanceConfig { prefer_inner_rayon: Some(cfg.prefer_inner_rayon), disable_uring: Some(args.no_uring), ..Default::default() })
-        .with_windows(hyperdu_core::WindowsConfig { win_allow_handle: Some(cfg.win_allow_handle), win_handle_sample_every: Some(cfg.win_handle_sample_every) })
+        .with_performance(hyperdu_core::PerformanceConfig {
+            prefer_inner_rayon: Some(cfg.prefer_inner_rayon),
+            disable_uring: Some(args.no_uring),
+            ..Default::default()
+        })
+        .with_windows(hyperdu_core::WindowsConfig {
+            win_allow_handle: Some(cfg.win_allow_handle),
+            win_handle_sample_every: Some(cfg.win_handle_sample_every),
+        })
         .build();
 
     // Graceful cancel: Ctrl-C updates opt.cancel; report once
@@ -780,9 +827,15 @@ fn main() -> Result<()> {
         if args.no_uring {
             std::env::set_var("HYPERDU_DISABLE_URING", "1");
         }
-        if let Some(kb) = args.getdents_buf_kb { std::env::set_var("HYPERDU_GETDENTS_BUF_KB", kb.to_string()); }
-        if args.prefetch { std::env::set_var("HYPERDU_PREFETCH", "1"); }
-        if args.pin_threads { std::env::set_var("HYPERDU_PIN_THREADS", "1"); }
+        if let Some(kb) = args.getdents_buf_kb {
+            std::env::set_var("HYPERDU_GETDENTS_BUF_KB", kb.to_string());
+        }
+        if args.prefetch {
+            std::env::set_var("HYPERDU_PREFETCH", "1");
+        }
+        if args.pin_threads {
+            std::env::set_var("HYPERDU_PIN_THREADS", "1");
+        }
         if args.uring_sqpoll {
             std::env::set_var("HYPERDU_URING_SQPOLL", "1");
         }
@@ -798,13 +851,19 @@ fn main() -> Result<()> {
     }
     #[cfg(target_os = "macos")]
     {
-        if let Some(kb) = args.galb_buf_kb { std::env::set_var("HYPERDU_GALB_BUF_KB", kb.to_string()); }
+        if let Some(kb) = args.galb_buf_kb {
+            std::env::set_var("HYPERDU_GALB_BUF_KB", kb.to_string());
+        }
     }
     #[cfg(target_os = "windows")]
     {
-        if args.win_ntquery { std::env::set_var("HYPERDU_WIN_USE_NTQUERY", "1"); }
+        if args.win_ntquery {
+            std::env::set_var("HYPERDU_WIN_USE_NTQUERY", "1");
+        }
     }
-    if args.no_fs_auto { std::env::set_var("HYPERDU_FS_AUTO", "0"); }
+    if args.no_fs_auto {
+        std::env::set_var("HYPERDU_FS_AUTO", "0");
+    }
     // Map compat flag
     // Preserve stricter compat selected by `--perf strict`.
     let perf_is_strict = matches!(args.perf, PerfArg::Strict);
@@ -921,7 +980,10 @@ fn main() -> Result<()> {
             format!("…{}", &s[s.len() - 60..])
         }
     }
-    if let Some(n) = args.dir_yield_every { opt.dir_yield_every.store(n.max(0), std::sync::atomic::Ordering::Relaxed); }
+    if let Some(n) = args.dir_yield_every {
+        opt.dir_yield_every
+            .store(n.max(0), std::sync::atomic::Ordering::Relaxed);
+    }
     opt.progress_every = args.progress_every.unwrap_or(8192);
     let print_progress = args.progress;
     let print_tune = args.tune_log || args.verbose;
@@ -1148,17 +1210,31 @@ fn main() -> Result<()> {
                     if args.threads.is_none() {
                         if let Some(t) = rep.recommended_threads {
                             // clamp to [1, cpu]
-                            let cpu = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+                            let cpu = std::thread::available_parallelism()
+                                .map(|n| n.get())
+                                .unwrap_or(4);
                             let t = t.clamp(1, cpu);
                             opt.threads = t;
                         }
                     }
                     // Emit detailed report
-                    let mut meta = vec![format!("fs='{}'", rep.fs_type), format!("strategy='{}'", rep.strategy), format!("reason='{}'", rep.reason)];
-                    if let Some(t) = rep.recommended_threads { meta.push(format!("threads_reco={}", t)); }
-                    if rep.disable_uring { meta.push("disable_uring=1".into()); }
-                    if rep.recommend_logical_only { meta.push("hint=logical-only".into()); }
-                    if !rep.changes.is_empty() { meta.push(format!("changes=[{}]", rep.changes.join(","))); }
+                    let mut meta = vec![
+                        format!("fs='{}'", rep.fs_type),
+                        format!("strategy='{}'", rep.strategy),
+                        format!("reason='{}'", rep.reason),
+                    ];
+                    if let Some(t) = rep.recommended_threads {
+                        meta.push(format!("threads_reco={}", t));
+                    }
+                    if rep.disable_uring {
+                        meta.push("disable_uring=1".into());
+                    }
+                    if rep.recommend_logical_only {
+                        meta.push("hint=logical-only".into());
+                    }
+                    if !rep.changes.is_empty() {
+                        meta.push(format!("changes=[{}]", rep.changes.join(",")));
+                    }
                     println!("fs-auto: {} for '{}'", meta.join(" "), root0.display());
                 }
             }
@@ -1168,7 +1244,10 @@ fn main() -> Result<()> {
     {
         if std::env::var("HYPERDU_FS_AUTO").ok().as_deref() != Some("0") {
             if let Some(root0) = roots.first() {
-                println!("fs-auto: fs='unknown' strategy='generic' reason='platform=non-linux' for '{}'", root0.display());
+                println!(
+                    "fs-auto: fs='unknown' strategy='generic' reason='platform=non-linux' for '{}'",
+                    root0.display()
+                );
             }
         }
     }
@@ -1261,18 +1340,22 @@ fn main() -> Result<()> {
             println!("  Uring: n/a | batch=n/a");
             println!("  Uring-metrics: n/a");
         }
-            println!(
-                "  Total: files={} | phys={} | log={} | dirs={}",
-                total_stat.files,
-                format_size(total_stat.physical, BINARY),
-                format_size(total_stat.logical, BINARY),
-                dirs_scanned
-            );
+        println!(
+            "  Total: files={} | phys={} | log={} | dirs={}",
+            total_stat.files,
+            format_size(total_stat.physical, BINARY),
+            format_size(total_stat.logical, BINARY),
+            dirs_scanned
+        );
 
         // Disk/Volume usage (best-effort)
         if let Some((vol_total, vol_free)) = fs_total_free(root) {
             let used = vol_total.saturating_sub(vol_free);
-            let pct: f64 = if vol_total > 0 { (used as f64) * 100.0 / (vol_total as f64) } else { 0.0 };
+            let pct: f64 = if vol_total > 0 {
+                (used as f64) * 100.0 / (vol_total as f64)
+            } else {
+                0.0
+            };
             println!(
                 "  Disk: total={} | used={} | free={} | usage={:.1}%",
                 format_size(vol_total, BINARY),
@@ -1307,9 +1390,17 @@ fn main() -> Result<()> {
         }
         // Optional classification after scan
         if let Some(mode) = &args.classify {
-            let cmode = match mode.as_str() { "deep" => hyperdu_core::classify::ClassifyMode::Deep, _ => hyperdu_core::classify::ClassifyMode::Basic };
+            let cmode = match mode.as_str() {
+                "deep" => hyperdu_core::classify::ClassifyMode::Deep,
+                _ => hyperdu_core::classify::ClassifyMode::Basic,
+            };
             let class_stats = hyperdu_core::classify::classify_directory(root, &opt, cmode);
-            println!("classify: categories={} extensions={} top_entries={}", class_stats.by_category.len(), class_stats.by_extension.len(), class_stats.top_consumers.len());
+            println!(
+                "classify: categories={} extensions={} top_entries={}",
+                class_stats.by_category.len(),
+                class_stats.by_extension.len(),
+                class_stats.top_consumers.len()
+            );
             let auto_cjson = args.verbose.then(|| PathBuf::from("class-report.json"));
             let auto_ccsv = args.verbose.then(|| PathBuf::from("class-report.csv"));
             if let Some(p) = args.class_report.as_ref().or_else(|| auto_cjson.as_ref()) {
@@ -1322,7 +1413,11 @@ fn main() -> Result<()> {
                 file.write_all(json.as_bytes())?;
                 println!("wrote class-report: {}", p.display());
             }
-            if let Some(p) = args.class_report_csv.as_ref().or_else(|| auto_ccsv.as_ref()) {
+            if let Some(p) = args
+                .class_report_csv
+                .as_ref()
+                .or_else(|| auto_ccsv.as_ref())
+            {
                 let mut wtr = csv::Writer::from_path(p)?;
                 wtr.write_record(["kind", "key", "files", "bytes"])?;
                 for (k, v) in class_stats.by_category.iter() {
@@ -1340,17 +1435,28 @@ fn main() -> Result<()> {
             let db = hyperdu_core::incremental::open_db(dbp)?;
             if args.compute_delta {
                 let d = hyperdu_core::incremental::compute_delta(&db, root, &opt)?;
-                eprintln!("delta: added={} modified={} removed={}", d.added, d.modified, d.removed);
+                eprintln!(
+                    "delta: added={} modified={} removed={}",
+                    d.added, d.modified, d.removed
+                );
             }
             if args.update_snapshot {
                 hyperdu_core::incremental::snapshot_walk_and_update(&db, root, &opt)?;
                 let pruned = hyperdu_core::incremental::snapshot_prune_removed(&db, root)?;
-                eprintln!("snapshot: updated DB at {} (pruned {} stale entries)", dbp.display(), pruned);
+                eprintln!(
+                    "snapshot: updated DB at {} (pruned {} stale entries)",
+                    dbp.display(),
+                    pruned
+                );
             }
             if args.watch {
                 eprintln!("watch: monitoring {} (Ctrl-C to stop)", root.display());
-                let _w = hyperdu_core::incremental::watch(root, |kind, p| eprintln!("fswatch: {} {}", kind, p.display()));
-                loop { std::thread::sleep(std::time::Duration::from_secs(60)); }
+                let _w = hyperdu_core::incremental::watch(root, |kind, p| {
+                    eprintln!("fswatch: {} {}", kind, p.display())
+                });
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                }
             }
         }
         // progress already emitted during scan when enabled
@@ -1399,39 +1505,43 @@ fn main() -> Result<()> {
 
         #[cfg(feature = "rayon-par")]
         {
-        if cfg.auto_parallel {
-            let t0 = std::time::Instant::now();
-            let merged = hyperdu_core::auto_parallel_scan(roots.clone(), &opt)?;
-            total_dt += t0.elapsed();
-            for root in roots {
-                let mut entries: Vec<(PathBuf, hyperdu_core::Stat)> = merged
-                    .iter()
-                    .filter(|(p, _)| p.starts_with(&root))
-                    .map(|(p, s)| (p.clone(), *s))
-                    .collect();
-                entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-                if print_progress {
-                    let total_files: u64 = entries.iter().map(|(_, s)| s.files).sum();
-                    let now = std::time::Instant::now();
-                    let (prev_n, prev_t) = *last.lock().unwrap();
-                    if total_files > prev_n {
-                        let total_dt_s = now.duration_since(t_start).as_secs_f64().max(1e-6);
-                        let total_rate = (total_files as f64) / total_dt_s;
-                        let delta_n = total_files.saturating_sub(prev_n);
-                        let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
-                        let recent_rate = (delta_n as f64) / delta_dt;
-                println!(
-                            "progress: processed {} files | rate: {:.0} f/s (recent {:.0} f/s)",
-                            total_files, total_rate, recent_rate
-                        );
-                        *last.lock().unwrap() = (total_files, now);
+            if cfg.auto_parallel {
+                let t0 = std::time::Instant::now();
+                let merged = hyperdu_core::auto_parallel_scan(roots.clone(), &opt)?;
+                total_dt += t0.elapsed();
+                for root in roots {
+                    let mut entries: Vec<(PathBuf, hyperdu_core::Stat)> = merged
+                        .iter()
+                        .filter(|(p, _)| p.starts_with(&root))
+                        .map(|(p, s)| (p.clone(), *s))
+                        .collect();
+                    entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                    if print_progress {
+                        let total_files: u64 = entries.iter().map(|(_, s)| s.files).sum();
+                        let now = std::time::Instant::now();
+                        let (prev_n, prev_t) = *last.lock().unwrap();
+                        if total_files > prev_n {
+                            let total_dt_s = now.duration_since(t_start).as_secs_f64().max(1e-6);
+                            let total_rate = (total_files as f64) / total_dt_s;
+                            let delta_n = total_files.saturating_sub(prev_n);
+                            let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
+                            let recent_rate = (delta_n as f64) / delta_dt;
+                            println!(
+                                "progress: processed {} files | rate: {:.0} f/s (recent {:.0} f/s)",
+                                total_files, total_rate, recent_rate
+                            );
+                            *last.lock().unwrap() = (total_files, now);
+                        }
                     }
-                }
-                for (p, s) in entries {
-                    if p.as_os_str().is_empty() {
-                        continue;
-                    }
-                    let bytes = if args.apparent_size { s.logical } else { s.physical };
+                    for (p, s) in entries {
+                        if p.as_os_str().is_empty() {
+                            continue;
+                        }
+                        let bytes = if args.apparent_size {
+                            s.logical
+                        } else {
+                            s.physical
+                        };
                         let blocks = div_ceil(bytes, bs as u64);
                         if print_time {
                             println!(
@@ -1447,39 +1557,45 @@ fn main() -> Result<()> {
                 }
                 return Ok(());
             }
-        if cfg.auto_parallel && matches!(opt.heuristics_mode, hyperdu_core::HeuristicsMode::OuterOnly) {
-            let t0 = std::time::Instant::now();
-            let merged = hyperdu_core::parallel_scan(roots.clone(), &opt)?;
-            total_dt += t0.elapsed();
-            for root in roots {
-                let mut entries: Vec<(PathBuf, hyperdu_core::Stat)> = merged
-                    .iter()
-                    .filter(|(p, _)| p.starts_with(&root))
-                    .map(|(p, s)| (p.clone(), *s))
-                    .collect();
-                entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-                if print_progress {
-                    let total_files: u64 = entries.iter().map(|(_, s)| s.files).sum();
-                    let now = std::time::Instant::now();
-                    let (prev_n, prev_t) = *last.lock().unwrap();
-                    if total_files > prev_n {
-                        let total_dt_s = now.duration_since(t_start).as_secs_f64().max(1e-6);
-                        let total_rate = (total_files as f64) / total_dt_s;
-                        let delta_n = total_files.saturating_sub(prev_n);
-                        let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
-                        let recent_rate = (delta_n as f64) / delta_dt;
-                println!(
-                            "progress: processed {} files | rate: {:.0} f/s (recent {:.0} f/s)",
-                            total_files, total_rate, recent_rate
-                        );
-                        *last.lock().unwrap() = (total_files, now);
+            if cfg.auto_parallel
+                && matches!(opt.heuristics_mode, hyperdu_core::HeuristicsMode::OuterOnly)
+            {
+                let t0 = std::time::Instant::now();
+                let merged = hyperdu_core::parallel_scan(roots.clone(), &opt)?;
+                total_dt += t0.elapsed();
+                for root in roots {
+                    let mut entries: Vec<(PathBuf, hyperdu_core::Stat)> = merged
+                        .iter()
+                        .filter(|(p, _)| p.starts_with(&root))
+                        .map(|(p, s)| (p.clone(), *s))
+                        .collect();
+                    entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                    if print_progress {
+                        let total_files: u64 = entries.iter().map(|(_, s)| s.files).sum();
+                        let now = std::time::Instant::now();
+                        let (prev_n, prev_t) = *last.lock().unwrap();
+                        if total_files > prev_n {
+                            let total_dt_s = now.duration_since(t_start).as_secs_f64().max(1e-6);
+                            let total_rate = (total_files as f64) / total_dt_s;
+                            let delta_n = total_files.saturating_sub(prev_n);
+                            let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
+                            let recent_rate = (delta_n as f64) / delta_dt;
+                            println!(
+                                "progress: processed {} files | rate: {:.0} f/s (recent {:.0} f/s)",
+                                total_files, total_rate, recent_rate
+                            );
+                            *last.lock().unwrap() = (total_files, now);
+                        }
                     }
-                }
-                for (p, s) in entries {
-                    if p.as_os_str().is_empty() {
-                        continue;
-                    }
-                        let bytes = if args.apparent_size { s.logical } else { s.physical };
+                    for (p, s) in entries {
+                        if p.as_os_str().is_empty() {
+                            continue;
+                        }
+                        let bytes = if args.apparent_size {
+                            s.logical
+                        } else {
+                            s.physical
+                        };
                         let blocks = div_ceil(bytes, bs as u64);
                         if print_time {
                             println!(
@@ -1499,7 +1615,9 @@ fn main() -> Result<()> {
         #[cfg(not(feature = "rayon-par"))]
         {
             if cfg.auto_parallel {
-                eprintln!("note: built without 'rayon-par' feature; falling back to sequential scan");
+                eprintln!(
+                    "note: built without 'rayon-par' feature; falling back to sequential scan"
+                );
             }
         }
 

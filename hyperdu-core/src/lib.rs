@@ -2,6 +2,14 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, AtomicUsize},
+        Arc,
+    },
+};
+
 use ahash::AHashMap as HashMap;
 use aho_corasick::AhoCorasick;
 use anyhow::{anyhow, Result};
@@ -10,31 +18,29 @@ use dashmap::DashMap;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use regex::RegexSet;
 use serde::Serialize;
-use std::path::{Path, PathBuf};
-use std::sync::{
-    atomic::{AtomicBool, AtomicU64, AtomicUsize},
-    Arc,
-};
 
+pub mod classify;
 mod common_ops;
 mod error_handling;
 mod filters; // centralize filter helpers
+pub mod fs_strategy;
+pub mod incremental;
 pub mod memory_pool;
 mod options; // for OptionsBuilder
-mod scanner; // FileSystemScanner + platform default
 mod platform;
 mod rollup;
+mod scanner; // FileSystemScanner + platform default
 mod tuning;
-pub mod fs_strategy;
-pub mod classify;
-pub mod incremental;
 
-pub use options::{CompatConfig, FilterConfig, OptionsBuilder, OutputConfig, PerformanceConfig, TuningConfig, WindowsConfig};
-pub use scanner::{platform_scanner, FileSystemScanner, PlatformScanner};
-#[cfg(feature = "rayon-par")]
-pub use scanner::parallel_scan;
+pub use options::{
+    CompatConfig, FilterConfig, OptionsBuilder, OutputConfig, PerformanceConfig, TuningConfig,
+    WindowsConfig,
+};
 #[cfg(feature = "rayon-par")]
 pub use scanner::auto_parallel_scan;
+#[cfg(feature = "rayon-par")]
+pub use scanner::parallel_scan;
+pub use scanner::{platform_scanner, FileSystemScanner, PlatformScanner};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompatMode {
@@ -88,7 +94,7 @@ pub struct Options {
     pub one_file_system: bool,
     pub visited_bloom: Option<Arc<Bloom>>, // fast pre-check
     pub visited_dirs: Option<Arc<DashMap<(u64, u64), ()>>>, // loop detection when following links
-                                           // Keep progress lightweight: we intentionally do not accumulate sizes per-file here.
+    // Keep progress lightweight: we intentionally do not accumulate sizes per-file here.
     // Adaptive tuning / scheduling preferences (configured by CLI config)
     pub tune_enabled: bool,
     pub tune_interval_ms: u64,
@@ -380,7 +386,9 @@ pub fn scan_directory_with(
                     break;
                 }
                 // Runtime thread throttling: only first `active_threads` workers fetch jobs
-                let act = options.active_threads.load(std::sync::atomic::Ordering::Relaxed);
+                let act = options
+                    .active_threads
+                    .load(std::sync::atomic::Ordering::Relaxed);
                 if i >= act {
                     std::thread::sleep(std::time::Duration::from_millis(5));
                     continue;
@@ -467,7 +475,11 @@ pub fn scan_directory_rayon(root: impl AsRef<Path>, opt: &Options) -> Result<Sta
     let threads = opt.threads.max(1);
     let high_injector: Arc<Injector<Job>> = Arc::new(Injector::new());
     let normal_injector: Arc<Injector<Job>> = Arc::new(Injector::new());
-    high_injector.push(Job { dir: root.clone(), depth: 0, resume: None });
+    high_injector.push(Job {
+        dir: root.clone(),
+        depth: 0,
+        resume: None,
+    });
     let total_files = Arc::new(AtomicU64::new(0));
     let mut compiled = opt.clone();
     compile_filters_in_place(&mut compiled);
@@ -475,7 +487,10 @@ pub fn scan_directory_rayon(root: impl AsRef<Path>, opt: &Options) -> Result<Sta
     let workers: Vec<Worker<Job>> = (0..threads).map(|_| Worker::new_fifo()).collect();
     let stealers = workers.iter().map(|w| w.stealer()).collect::<Vec<_>>();
     let merged = Arc::new(std::sync::Mutex::new(HashMap::default()));
-    let pool = ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+    let pool = ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()
+        .unwrap();
     pool.install(|| {
         rayon::scope(|s| {
             for (i, local) in workers.into_iter().enumerate() {
@@ -503,22 +518,40 @@ pub fn scan_directory_rayon(root: impl AsRef<Path>, opt: &Options) -> Result<Sta
                                     for k in 0..len {
                                         let idx = (next + k) % len;
                                         match stealers_ref[idx].steal() {
-                                            Steal::Success(j) => { found = Some(j); break; }
+                                            Steal::Success(j) => {
+                                                found = Some(j);
+                                                break;
+                                            }
                                             Steal::Retry => {}
                                             Steal::Empty => {}
                                         }
                                     }
-                                    if len > 0 { next = (next + 1) % len; }
+                                    if len > 0 {
+                                        next = (next + 1) % len;
+                                    }
                                     found
                                 }
                                 Steal::Retry => None,
                             },
                             Steal::Retry => None,
                         });
-                        let Some(Job { dir, depth, resume }) = job else { break };
-                        if path_excluded(&dir, &options) { continue; }
-                        let ctx = ScanContext { options: &options, high_injector: &high_ref, normal_injector: &normal_ref, total_files: &total_files };
-                        let dctx = DirContext { dir: &dir, depth, resume };
+                        let Some(Job { dir, depth, resume }) = job else {
+                            break;
+                        };
+                        if path_excluded(&dir, &options) {
+                            continue;
+                        }
+                        let ctx = ScanContext {
+                            options: &options,
+                            high_injector: &high_ref,
+                            normal_injector: &normal_ref,
+                            total_files: &total_files,
+                        };
+                        let dctx = DirContext {
+                            dir: &dir,
+                            depth,
+                            resume,
+                        };
                         scanner2.process_dir(&ctx, &dctx, &mut local_map);
                     }
                     let mut g = merged.lock().unwrap();
@@ -593,13 +626,15 @@ fn process_dir(
     injector: &Injector<Job>,
     total_files: &AtomicU64,
 ) {
-    use std::ffi::OsString;
-    use std::os::windows::ffi::OsStrExt;
-    use windows::core::PCWSTR;
-    use windows::Win32::Storage::FileSystem::{
-        FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
-        GetCompressedFileSizeW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-        FIND_FIRST_EX_LARGE_FETCH, WIN32_FIND_DATAW,
+    use std::{ffi::OsString, os::windows::ffi::OsStrExt};
+
+    use windows::{
+        core::PCWSTR,
+        Win32::Storage::FileSystem::{
+            FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
+            GetCompressedFileSizeW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+            FIND_FIRST_EX_LARGE_FETCH, WIN32_FIND_DATAW,
+        },
     };
 
     // Build wide pattern: <dir>\*\0
@@ -713,8 +748,10 @@ fn process_dir(
     injector: &Injector<Job>,
     total_files: &AtomicU64,
 ) {
-    use std::ffi::{CString, OsStr};
-    use std::os::unix::ffi::OsStrExt;
+    use std::{
+        ffi::{CString, OsStr},
+        os::unix::ffi::OsStrExt,
+    };
 
     // macOS: readdir + lstat
     let c_path = CString::new(dir.as_os_str().as_bytes()).ok();
@@ -824,8 +861,10 @@ fn process_dir(
     injector: &Injector<Job>,
     total_files: &AtomicU64,
 ) {
-    use std::ffi::{CString, OsStr};
-    use std::os::unix::ffi::OsStrExt;
+    use std::{
+        ffi::{CString, OsStr},
+        os::unix::ffi::OsStrExt,
+    };
 
     // Open directory via opendir
     let c_path = CString::new(dir.as_os_str().as_bytes()).ok();
@@ -959,8 +998,7 @@ fn process_dir(
     injector: &Injector<Job>,
     total_files: &AtomicU64,
 ) {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
 
     const SYS_GETDENTS64: libc::c_long = 217; // x86_64
 
