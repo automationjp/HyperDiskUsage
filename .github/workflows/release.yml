@@ -100,11 +100,14 @@ jobs:
         run: brew install gh
         continue-on-error: true
       - name: Open PR to Homebrew Tap
-        if: ${{ secrets.HOMEBREW_TAP_REPO != '' && secrets.HOMEBREW_TAP_TOKEN != '' }}
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           TAP_REPO: ${{ secrets.HOMEBREW_TAP_REPO }}
         run: |
+          if [[ -z "${TAP_REPO}" || -z "${GH_TOKEN}" ]]; then
+            echo "::warning::Homebrew Tap secrets not set; skipping PR creation."
+            exit 0
+          fi
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
           gh repo clone "$TAP_REPO" taprepo
@@ -170,12 +173,16 @@ jobs:
             (Get-Content dist\winget\manifest.yaml) -replace '__URL__', $url -replace '__SHA256__', $hash | Set-Content dist\winget\manifest.yaml -Encoding UTF8
           }
       - name: Open PR to Scoop bucket
-        if: ${{ secrets.SCOOP_BUCKET_REPO != '' && secrets.SCOOP_GH_TOKEN != '' }}
         env:
           GH_TOKEN: ${{ secrets.SCOOP_GH_TOKEN }}
           BUCKET_REPO: ${{ secrets.SCOOP_BUCKET_REPO }}
         shell: powershell
+        continue-on-error: true
         run: |
+          if (-not $env:BUCKET_REPO -or -not $env:GH_TOKEN) {
+            Write-Host "::warning::Scoop secrets not set; skipping PR creation."
+            exit 0
+          }
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
           gh repo clone "$env:BUCKET_REPO" bucketrepo
@@ -189,12 +196,16 @@ jobs:
           git push -u origin $BR
           gh pr create -R "$env:BUCKET_REPO" -t "hyperdu $env:GITHUB_REF_NAME" -b "Automated scoop manifest update" -B main
       - name: Open PR to winget-pkgs
-        if: ${{ secrets.WINGET_PKGS_REPO != '' && secrets.WINGET_GH_TOKEN != '' }}
         env:
           GH_TOKEN: ${{ secrets.WINGET_GH_TOKEN }}
           WINGET_REPO: ${{ secrets.WINGET_PKGS_REPO }}
         shell: powershell
+        continue-on-error: true
         run: |
+          if (-not $env:WINGET_REPO -or -not $env:GH_TOKEN) {
+            Write-Host "::warning::winget secrets not set; skipping PR creation."
+            exit 0
+          }
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
           gh repo clone "$env:WINGET_REPO" wingetpkgs
