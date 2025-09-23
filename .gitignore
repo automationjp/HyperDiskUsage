@@ -1,0 +1,33 @@
+# Rust & Cargo
+target/
+**/target/
+Cargo.lock.bak
+
+# Build artifacts
+dist/
+.build/
+
+# Tooling / editors
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Cargo timings / rustc artifacts
+**/cargo-timings/
+**/*.profdata
+**/*.profraw
+.flatpak-builder/

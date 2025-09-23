@@ -1,0 +1,23 @@
+name: hyperdu
+base: core22
+version: '0.4.0'
+summary: Hyper-fast disk usage analyzer
+description: |
+  HyperDU is a cross-platform, high-performance disk usage analyzer.
+
+grade: stable
+confinement: classic
+
+apps:
+  hyperdu:
+    command: bin/hyperdu
+
+parts:
+  hyperdu:
+    plugin: rust
+    source: .
+    rust-channel: stable
+    build-packages: [pkg-config]
+    stage-packages: []
+    prime:
+      - bin/hyperdu

@@ -1,0 +1,14 @@
+app-id: org.hyperdu.GUI
+runtime: org.freedesktop.Platform
+runtime-version: '23.08'
+sdk: org.freedesktop.Sdk
+command: hyperdu-gui
+modules:
+  - name: hyperdu-gui
+    buildsystem: simple
+    build-commands:
+      - cargo build --release -p hyperdu-gui
+      - install -Dm755 target/release/hyperdu-gui /app/bin/hyperdu-gui
+    sources:
+      - type: dir
+        path: ../../

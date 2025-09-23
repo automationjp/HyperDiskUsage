@@ -1,0 +1,226 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu mingw-w64 zip jq rpm
+          cargo install cargo-deb || true
+          cargo install cargo-generate-rpm || true
+      - name: Lint (fmt + clippy)
+        run: bash scripts/lint.sh
+      - name: Package ZIP/DEB/RPM (CLI+GUI)
+        run: |
+          bash scripts/package_release.sh --targets "linux-gnu,linux-musl,linux-aarch64,windows-gnu" \
+            --cpu-flavors "generic" --deb --rpm --verbose
+      - name: Generate Snap/Flatpak manifests
+        run: |
+          bash scripts/package_snap.sh --generate-only
+          bash scripts/package_flatpak.sh --generate-only
+      - name: Try AppImage (GUI)
+        run: |
+          bash scripts/package_appimage.sh || true
+      - name: Build Snap (CLI) via Snapcraft
+        uses: snapcore/action-build@v1
+        with:
+          path: snap
+        continue-on-error: true
+      - name: Move Snap artifacts to dist
+        run: |
+          mkdir -p dist
+          mv ./*.snap dist/ 2>/dev/null || true
+        continue-on-error: true
+      - name: Build Flatpak (GUI)
+        uses: bilelmoussaoui/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: packaging/flatpak/org.hyperdu.GUI.yaml
+          bundle: true
+        continue-on-error: true
+      - name: Collect Flatpak bundles
+        run: |
+          mkdir -p dist
+          find . -name "*.flatpak" -exec cp {} dist/ \; || true
+        continue-on-error: true
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            dist/*
+            snap/snapcraft.yaml
+            packaging/flatpak/org.hyperdu.GUI.yaml
+      - name: Create GitHub Release (upload assets)
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/*
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install packagers
+        run: |
+          brew update
+          brew install create-dmg || true
+          cargo install cargo-bundle || true
+      - name: Lint (fmt + clippy)
+        run: bash scripts/lint.sh
+      - name: Build DMG / zip (GUI)
+        run: |
+          bash scripts/package_macos_dmg.sh --release
+      - name: Generate Homebrew formula
+        run: bash scripts/package_brew.sh
+      - name: Insert URL/SHA into formula
+        run: |
+          URL_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          bash scripts/package_release.sh --targets homebrew --url-base "$URL_BASE" --skip-gui --cpu-flavors generic
+        shell: bash
+      - name: Install GitHub CLI
+        run: brew install gh
+        continue-on-error: true
+      - name: Open PR to Homebrew Tap
+        if: ${{ secrets.HOMEBREW_TAP_REPO != '' && secrets.HOMEBREW_TAP_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_REPO: ${{ secrets.HOMEBREW_TAP_REPO }}
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+          gh repo clone "$TAP_REPO" taprepo
+          cd taprepo
+          BR="update-hyperdu-${GITHUB_REF_NAME}"
+          git checkout -b "$BR"
+          mkdir -p Formula
+          cp ../dist/brew/hyperdu.rb Formula/hyperdu.rb
+          git add Formula/hyperdu.rb
+          git commit -m "hyperdu ${GITHUB_REF_NAME}"
+          git push -u origin "$BR"
+          gh pr create -R "$TAP_REPO" -t "hyperdu ${GITHUB_REF_NAME}" -b "Automated formula update" -B main
+        shell: bash
+        continue-on-error: true
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            dist/*
+      - name: Create GitHub Release (upload assets)
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/*
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install packagers
+        shell: powershell
+        run: |
+          cargo install cargo-wix
+          choco install gh -y
+      - name: Lint (fmt + clippy)
+        shell: bash
+        run: bash scripts/lint.sh
+      - name: Package (ZIP/EXE/MSI)
+        shell: powershell
+        run: |
+          pwsh -File scripts/package_release.ps1
+      - name: Generate Scoop & winget manifests
+        shell: powershell
+        run: |
+          $ver = (Select-String -Path 'hyperdu-cli/Cargo.toml' -Pattern '^version\s*=\s*"([^"]+)"' | ForEach-Object { $_.Matches[0].Groups[1].Value })[0]
+          pwsh -File scripts/package_scoop.ps1 -Version $ver
+          pwsh -File scripts/package_winget.ps1 -Version $ver
+          # Fill URLs & SHA256 for scoop manifest
+          $tag = "$env:GITHUB_REF_NAME"
+          $asset = Get-ChildItem dist\hyperdu-cli-windows-*.exe | Select-Object -First 1
+          if (-not $asset) { $asset = Get-ChildItem dist\hyperdu-cli-*.msi | Select-Object -First 1 }
+          if ($asset) {
+            $fname = $asset.Name
+            $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/$fname"
+            $hash = (Get-FileHash -Algorithm SHA256 $asset.FullName).Hash.ToLower()
+            (Get-Content dist\scoop\hyperdu.json) -replace '__URL__', $url -replace '__SHA256__', $hash | Set-Content dist\scoop\hyperdu.json -Encoding UTF8
+            # Update winget manifest as well
+            (Get-Content dist\winget\manifest.yaml) -replace '__URL__', $url -replace '__SHA256__', $hash | Set-Content dist\winget\manifest.yaml -Encoding UTF8
+          }
+      - name: Open PR to Scoop bucket
+        if: ${{ secrets.SCOOP_BUCKET_REPO != '' && secrets.SCOOP_GH_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.SCOOP_GH_TOKEN }}
+          BUCKET_REPO: ${{ secrets.SCOOP_BUCKET_REPO }}
+        shell: powershell
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+          gh repo clone "$env:BUCKET_REPO" bucketrepo
+          Set-Location bucketrepo
+          $BR = "update-hyperdu-$env:GITHUB_REF_NAME"
+          git checkout -b $BR
+          New-Item -ItemType Directory -Path bucket -Force | Out-Null
+          Copy-Item ..\dist\scoop\hyperdu.json bucket\hyperdu.json -Force
+          git add bucket\hyperdu.json
+          git commit -m "hyperdu $env:GITHUB_REF_NAME"
+          git push -u origin $BR
+          gh pr create -R "$env:BUCKET_REPO" -t "hyperdu $env:GITHUB_REF_NAME" -b "Automated scoop manifest update" -B main
+      - name: Open PR to winget-pkgs
+        if: ${{ secrets.WINGET_PKGS_REPO != '' && secrets.WINGET_GH_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_GH_TOKEN }}
+          WINGET_REPO: ${{ secrets.WINGET_PKGS_REPO }}
+        shell: powershell
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+          gh repo clone "$env:WINGET_REPO" wingetpkgs
+          Set-Location wingetpkgs
+          $BR = "add-hyperdu-$env:GITHUB_REF_NAME"
+          git checkout -b $BR
+          # Create folder structure manifests/Y/YourOrg/HyperDU/<version>/
+          $org = ($env:GITHUB_REPOSITORY.Split('/'))[0]
+          $ver = "$env:GITHUB_REF_NAME".TrimStart('v')
+          $base = Join-Path 'manifests' ($org.Substring(0,1).ToUpper())
+          $dir = Join-Path $base "$org\HyperDU\$ver"
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          Copy-Item ..\dist\winget\manifest.yaml (Join-Path $dir "$org.HyperDU.yaml") -Force
+          git add .
+          git commit -m "Add HyperDU $ver"
+          git push -u origin $BR
+          gh pr create -R "$env:WINGET_REPO" -t "Add HyperDU $ver" -b "Automated manifest" -B master
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            dist/*
+      - name: Create GitHub Release (upload assets)
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/*

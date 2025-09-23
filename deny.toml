@@ -1,0 +1,39 @@
+# cargo-deny configuration
+
+[advisories]
+vulnerability = "warn"
+unmaintained = "warn"
+yanked = "warn"
+unsound = "warn"
+notice = "warn"
+ignore = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+deny = []
+skip = []
+
+[licenses]
+unlicensed = "deny"
+copyleft = "warn"
+default = "allow"
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-DFS-2016",
+]
+exceptions = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = [
+  "https://github.com/rust-lang/crates.io-index",
+]
+allow-git = []
+

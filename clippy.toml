@@ -1,0 +1,10 @@
+# Clippy configuration for the workspace.
+# Note: lint levels are controlled via `cargo clippy` flags or crate attributes.
+
+# Be tolerant with complex/long functions in low-level backends.
+cognitive-complexity-threshold = 50
+too-many-lines-threshold = 500
+type-complexity-threshold = 500
+
+# Minimum supported Rust version for linting
+msrv = "1.75.0"

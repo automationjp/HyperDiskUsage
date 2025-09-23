@@ -1,0 +1,68 @@
+[package]
+name = "hyperdu-core"
+version = "0.4.0"
+edition = "2021"
+license = "MIT"
+description = "Core engine for HyperDU: ultra-fast cross-platform disk usage analyzer"
+rust-version = "1.75"
+
+[features]
+default = ["uring", "prefetch-advise"]
+mimalloc = ["dep:mimalloc"]
+prof-tracy = ["dep:profiling", "profiling/profile-with-tracy", "dep:tracy-client"]
+prof-puffin = ["dep:profiling", "profiling/profile-with-puffin", "dep:puffin"]
+# Linux io_uring batched statx (enabled by default on Linux builds)
+uring = ["dep:io-uring"]
+simd-prefetch = []        # x86_64 prefetch next dirent into cache
+prefetch-advise = []      # posix_fadvise(SEQUENTIAL) hint on directory fd (now default)
+rayon-par = ["dep:rayon"] # experimental: parallelize across roots via rayon
+rayon-inner = ["dep:rayon"] # experimental: use rayon tasks instead of manual threads inside a scan
+
+[dependencies]
+anyhow = "1.0"
+crossbeam-deque = "0.8"
+crossbeam-utils = "0.8"
+ahash = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+memchr = "2.7"
+aho-corasick = "1"
+regex = "1.11"
+globset = "0.4"
+dashmap = "5.5"
+profiling = { version = "1", optional = true }
+tracy-client = { version = "0.18", optional = true }
+puffin = { version = "0.19", optional = true }
+rayon = { version = "1.10", optional = true }
+sled = "0.34"
+notify = { version = "6", default-features = false, features = ["serde"] }
+infer = "0.8"
+
+[target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
+io-uring = { version = "0.6", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+  "Win32_Security",
+  "Win32_System_IO",
+  "Win32_System_Threading",
+  "Wdk_Foundation",
+  "Wdk_Storage_FileSystem",
+  "Wdk_System_IO"
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dependencies.mimalloc]
+version = "0.1"
+default-features = false
+features = ["secure"]
+optional = true
+
+[dev-dependencies]
+tempfile = "3.10"
+criterion = { version = "0.5", default-features = false, features = ["html_reports"] }

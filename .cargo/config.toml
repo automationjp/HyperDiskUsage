@@ -1,0 +1,5 @@
+[build]
+# Use the repo-local default `target/` directory for all builds.
+# If you want to share a target dir across repos, you can set `CARGO_TARGET_DIR`
+# in the environment or restore a `target-dir = "/absolute/path"` here.
+# target-dir = "/home/syska/.hyperdu-target"

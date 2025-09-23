@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - "**"
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Lint (fmt + clippy)
+        run: bash scripts/lint.sh
+      - name: Shellcheck scripts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck -S error -x scripts/*.sh
+      - name: Import sort (nightly strict)
+        run: |
+          rustup toolchain install nightly -c rustfmt
+          cargo +nightly fmt --all -- --check --config group_imports=StdExternalCrate --config imports_granularity=Crate
+      - name: Build
+        run: cargo build --workspace --release
+      - name: Test core
+        run: cargo test -p hyperdu-core -- --nocapture
+
+  cross-build-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cross toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu mingw-w64 zip jq
+      - name: Package cross artifacts
+        run: bash scripts/package_release.sh --skip-gui --targets linux-musl,linux-gnu,linux-aarch64,windows-gnu
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-cross
+          path: dist/*

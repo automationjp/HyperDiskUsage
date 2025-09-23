@@ -1,0 +1,5 @@
+#!/bin/sh
+set -e
+
+# No special actions required; placeholder for future use (e.g., completion cleanup)
+exit 0
