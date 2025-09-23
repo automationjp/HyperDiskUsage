@@ -1576,8 +1576,7 @@ fn main() -> Result<()> {
                             let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
                             let recent_rate = (delta_n as f64) / delta_dt;
                             println!(
-                                "progress: processed {} files | rate: {:.0} f/s (recent {:.0} f/s)",
-                                total_files, total_rate, recent_rate
+                                "progress: processed {total_files} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)"
                             );
                             *last.lock().unwrap() = (total_files, now);
                         }
