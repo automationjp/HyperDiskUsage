@@ -1,0 +1,56 @@
+[package]
+name = "hyperdu-gui"
+version = "0.4.0"
+edition = "2021"
+description = "Hyper-fast GUI disk usage analyzer (Windows/Linux)."
+license = "MIT"
+rust-version = "1.75"
+
+[features]
+default = []
+# Forward the core allocator feature when building GUI
+mimalloc = ["hyperdu-core/mimalloc"]
+debug-eyre = ["dep:color-eyre"]
+prof-tracy = ["dep:profiling", "hyperdu-core/prof-tracy"]
+ 
+
+[dependencies]
+anyhow = "1.0"
+humansize = "2.1"
+egui = "0.32"
+# Prefer the OpenGL/GLFW (glow) backend by default for broader Cross builds.
+# WGPU can be enabled later if needed via a feature, but default to glow-only
+# to reduce platform toolchain deps and build flakes.
+eframe = { version = "0.32", default-features = false, features = ["glow", "x11", "wayland", "default_fonts"] }
+egui_extras = "0.32"
+rfd = "0.15"
+log = "0.4"
+env_logger = "0.11"
+hyperdu-core = { path = "../hyperdu-core" }
+profiling = { version = "1", optional = true }
+color-eyre = { version = "0.6", optional = true }
+
+# Debian packaging (cargo-deb)
+[package.metadata.deb]
+section = "utils"
+priority = "optional"
+depends = "$auto"
+maintainer = "HyperDU Maintainers <maintainers@example.com>"
+extended-description = "Hyper-fast disk usage analyzer GUI."
+assets = [
+  ["../README.md", "/usr/share/doc/hyperdu/README.md", "644"],
+  ["../LICENSE", "/usr/share/doc/hyperdu/LICENSE", "644"],
+]
+
+# RPM packaging (cargo-generate-rpm)
+[package.metadata.generate-rpm]
+summary = "Hyper-fast disk usage analyzer GUI"
+license = "MIT"
+group = "Applications/System"
+auto-req = true
+requires = []
+assets = [
+  { source = "../target/release/hyperdu-gui", dest = "/usr/bin/hyperdu-gui", mode = "755" },
+  { source = "../README.md", dest = "/usr/share/doc/hyperdu/README.md", mode = "644" },
+  { source = "../LICENSE", dest = "/usr/share/doc/hyperdu/LICENSE", mode = "644" },
+]
