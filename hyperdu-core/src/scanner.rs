@@ -1,3 +1,4 @@
+#[cfg(feature = "rayon-par")]
 use std::sync::Arc;
 
 use crate::{platform, DirContext, ScanContext, StatMap};

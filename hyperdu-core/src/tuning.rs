@@ -102,7 +102,7 @@ pub fn start_if_enabled(
                                 .store(yield_steps[idx], Ordering::Relaxed);
                             let newy = yield_steps[idx];
                             if log_enabled && newy != last_yield {
-                                println!("[tune] dir_yield_every -> {}", newy);
+                                println!("[tune] dir_yield_every -> {newy}");
                             }
                             last_yield = newy;
                         }
@@ -117,7 +117,7 @@ pub fn start_if_enabled(
                                 .store(yield_steps[idx], Ordering::Relaxed);
                             let newy = yield_steps[idx];
                             if log_enabled && newy != last_yield {
-                                println!("[tune] dir_yield_every -> {}", newy);
+                                println!("[tune] dir_yield_every -> {newy}");
                             }
                             last_yield = newy;
                         }
@@ -157,7 +157,7 @@ pub fn start_if_enabled(
                 if log_enabled {
                     let cur_b = batch;
                     if cur_b != last_batch_logged {
-                        println!("[tune] uring_batch -> {}", cur_b);
+                        println!("[tune] uring_batch -> {cur_b}");
                         last_batch_logged = cur_b;
                     }
                 }
@@ -187,7 +187,7 @@ pub fn start_if_enabled(
                 if log_enabled {
                     let cur_a = active;
                     if cur_a != last_active_logged {
-                        println!("[tune] active_threads -> {}", cur_a);
+                        println!("[tune] active_threads -> {cur_a}");
                         last_active_logged = cur_a;
                     }
                 }

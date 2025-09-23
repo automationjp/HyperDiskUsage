@@ -8,6 +8,7 @@ use crate::Options;
 
 /// Recommended next step when a recoverable error occurs.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum RecoveryAction {
     SkipEntry,
     SkipDirectory,
@@ -17,6 +18,7 @@ pub enum RecoveryAction {
 
 /// Typed scan errors; used for diagnostics and recovery hints.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum ScanError {
     IoError {
         path: PathBuf,
@@ -50,8 +52,10 @@ impl fmt::Display for ScanError {
     }
 }
 
+#[allow(dead_code)]
 pub type ScanResult<T> = Result<T, ScanError>;
 
+#[allow(dead_code)]
 pub trait ErrorRecovery {
     fn is_recoverable(&self) -> bool;
     fn recovery_action(&self) -> RecoveryAction;
@@ -99,6 +103,7 @@ pub fn record_error(opt: &Options, err: &ScanError) {
 
 /// Compatibility shim: stringly-typed error report (legacy call sites)
 #[inline]
+#[allow(dead_code)]
 pub fn report_error(opt: &Options, path: &Path, error: &str) {
     opt.error_count.fetch_add(1, Ordering::Relaxed);
     if let Some(cb) = &opt.error_report {

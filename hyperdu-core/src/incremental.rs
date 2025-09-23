@@ -1,6 +1,6 @@
 use std::{
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    time::UNIX_EPOCH,
 };
 
 use anyhow::Result;

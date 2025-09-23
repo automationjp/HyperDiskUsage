@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use crate::{
     common_ops::{
         calculate_physical_size, check_hardlink_duplicate, check_visited_directory,
-        report_file_progress, should_fast_exclude, update_file_stats,
+        should_fast_exclude, update_file_stats,
     },
     error_handling::{last_os_error_systemcall, record_error},
     memory_pool::BufferGuard,
@@ -100,17 +100,14 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
             unsafe {
                 use core::arch::x86_64::_mm_prefetch;
                 const _MM_HINT_T0: i32 = 3;
-                let next = ptr
-                    .add(crate::platform::linux_helpers::dirent_reclen(ptr as *const u8) as usize);
+                let next = ptr.add(crate::platform::linux_helpers::dirent_reclen(ptr) as usize);
                 _mm_prefetch(next as *const i8, _MM_HINT_T0);
             }
-            let d_off = unsafe { crate::platform::linux_helpers::dirent_d_off(ptr as *const u8) };
-            let d_reclen =
-                unsafe { crate::platform::linux_helpers::dirent_reclen(ptr as *const u8) };
-            let d_type = unsafe { crate::platform::linux_helpers::dirent_dtype(ptr as *const u8) };
-            let name_slice = unsafe {
-                crate::platform::linux_helpers::dirent_name_slice(ptr as *const u8, d_reclen)
-            };
+            let d_off = unsafe { crate::platform::linux_helpers::dirent_d_off(ptr) };
+            let d_reclen = unsafe { crate::platform::linux_helpers::dirent_reclen(ptr) };
+            let d_type = unsafe { crate::platform::linux_helpers::dirent_dtype(ptr) };
+            let name_slice =
+                unsafe { crate::platform::linux_helpers::dirent_name_slice(ptr, d_reclen) };
             if name_slice == b"." || name_slice == b".." {
                 bpos += d_reclen;
                 continue;

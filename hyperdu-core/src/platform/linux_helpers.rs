@@ -8,6 +8,7 @@ use crate::Options;
 /// Build statx mask based on required fields (glibc)
 #[cfg(not(target_env = "musl"))]
 #[inline]
+#[allow(dead_code)]
 pub fn build_statx_mask(opt: &Options) -> u32 {
     let mut mask = libc::STATX_SIZE | libc::STATX_MODE;
 
@@ -25,6 +26,7 @@ pub fn build_statx_mask(opt: &Options) -> u32 {
 /// Placeholder on musl; statx is not used on these builds.
 #[cfg(target_env = "musl")]
 #[inline]
+#[allow(dead_code)]
 pub fn build_statx_mask(_opt: &Options) -> u32 {
     0
 }
@@ -70,6 +72,7 @@ pub unsafe fn dirent_name_slice<'a>(ptr: *const u8, reclen: isize) -> &'a [u8] {
 /// Perform statx syscall with proper error handling (glibc)
 #[cfg(not(target_env = "musl"))]
 #[inline]
+#[allow(dead_code)]
 pub fn do_statx(
     dirfd: libc::c_int,
     pathname: &[u8],
@@ -99,6 +102,7 @@ pub fn do_statx(
 /// Extract device ID from statx (glibc)
 #[cfg(not(target_env = "musl"))]
 #[inline]
+#[allow(dead_code)]
 pub fn statx_dev(stx: &libc::statx) -> u64 {
     ((stx.stx_dev_major as u64) << 32) | (stx.stx_dev_minor as u64)
 }
