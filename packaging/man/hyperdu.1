@@ -1,0 +1,136 @@
+.TH hyperdu 1 "HyperDU" "0.4.0" "User Commands"
+.SH NAME
+hyperdu \- ultra-fast disk usage analyzer
+.SH SYNOPSIS
+.B hyperdu
+[OPTIONS] [ROOTS...]
+.SH DESCRIPTION
+HyperDU is a cross-platform, high-performance disk usage analyzer. It can scan
+directories and report top entries by size, export CSV/JSON, and provide
+du-compatible output when requested.
+.SH OPTIONS
+.TP
+.BR --top=NUM
+Show top NUM entries by physical size (default 30).
+.TP
+.BR --exclude=LIST
+Comma-separated exclude substrings (e.g. .git,node_modules,target).
+.TP
+.BR --exclude-from=FILE
+Read exclude patterns from file (supports re:, glob:, or substring).
+.TP
+.BR --max-depth=DEPTH
+Limit traversal depth (0 = unlimited).
+.TP
+.BR --min-file-size=BYTES
+Ignore files smaller than BYTES.
+.TP
+.BR --follow-links
+Follow symlinks/junctions (use with care).
+.TP
+.BR --one-file-system
+Do not cross filesystem boundaries (mount points).
+.TP
+.BR --logical-only
+Use logical size only (skip physical size queries where possible).
+.TP
+.BR --approximate
+Approximate regular file sizes when logical-only to avoid slow system calls.
+.TP
+.BR --compat=MODE
+Compatibility mode: hyperdu (default), gnu, gnu-strict, posix-strict.
+.TP
+.BR --apparent-size
+Use logical size for du-like output.
+.TP
+.BR --perf=PROFILE
+Performance profile: turbo, balanced (default), strict.
+.TP
+.BR --progress
+Print progress lines during scan to standard output.
+.TP
+.BR --progress-every=NUM
+Emit progress every NUM files (default 8192). A final line is printed on completion.
+.TP
+.BR --no-uring
+Disable io_uring backend on Linux even if available.
+.TP
+.BR --uring-sqpoll
+Enable io_uring SQPOLL (kernel polling) on Linux.
+.TP
+.BR --uring-sqpoll-idle-ms=MS
+Set SQPOLL idle time in milliseconds.
+.TP
+.BR --uring-sqpoll-cpu=CPU
+Pin SQPOLL thread to a CPU.
+.TP
+.BR --uring-coop
+Enable io_uring cooperative taskrun.
+.TP
+.BR --getdents-buf-kb=KiB
+Linux: set getdents64 buffer size in KiB (overrides HYPERDU_GETDENTS_BUF_KB).
+.TP
+.BR --dir-yield-every=N
+Split large directories every N entries (overrides HYPERDU_DIR_YIELD_EVERY).
+.TP
+.BR --prefetch
+Linux: enable posix_fadvise/readahead hints (sets HYPERDU_PREFETCH=1).
+.TP
+.BR --pin-threads
+Linux: pin worker threads to CPUs (sets HYPERDU_PIN_THREADS=1).
+.TP
+.BR --win-ntquery
+Windows: use NT Query API based fast path (sets HYPERDU_WIN_USE_NTQUERY=1).
+.TP
+.BR --tune
+Enable live tuning (overrides HYPERDU_TUNE).
+.TP
+.BR --tune-interval-ms=MS
+Set live tune interval in milliseconds (overrides HYPERDU_TUNE_INTERVAL_MS).
+.TP
+.BR --no-fs-auto
+Disable filesystem auto strategy (sets HYPERDU_FS_AUTO=0).
+.TP
+.BR --galb-buf-kb=KiB
+macOS: set getattrlistbulk buffer size in KiB (overrides HYPERDU_GALB_BUF_KB).
+.TP
+.BR --classify=MODE
+Classify files by type: basic or deep.
+.TP
+.BR --class-report=PATH
+Write classification JSON report to PATH.
+.TP
+.BR --class-report-csv=PATH
+Write classification CSV report to PATH.
+.TP
+.BR --incremental-db=PATH
+Use sled DB at PATH for incremental snapshot/delta.
+.TP
+.BR --compute-delta
+Compute delta (added/modified/removed) against snapshot DB.
+.TP
+.BR --update-snapshot
+Update snapshot DB from current state and prune removed keys.
+.TP
+.BR --watch
+Watch filesystem changes and print events (create/modify/remove).
+.TP
+.BR --verbose\fR, \fB-v
+Verbose mode: detailed logs and auto-save reports to default filenames
+in current directory (hyperdu-report.json, hyperdu-report.csv,
+class-report.json, class-report.csv).
+.SH EXAMPLES
+.TP
+Scan current directory and show top 30 entries:
+.nf
+  hyperdu -- . --top 30
+.fi
+.TP
+GNU-compatible block reporting:
+.nf
+  hyperdu --compat gnu --apparent-size --block-size=1K /path
+.fi
+.SH HOMEPAGE
+Project repository: https://github.com/your-org/HyperDiskUsage
+.SH AUTHOR
+HyperDU Contributors
