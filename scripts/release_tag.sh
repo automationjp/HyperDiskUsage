@@ -127,7 +127,8 @@ git fetch --tags origin
 if git ls-remote --tags origin | grep -q "refs/tags/$TAG$"; then
   if [[ $FORCE_TAG -eq 1 ]]; then
     echo "(info) deleting remote tag $TAG"
-    git push origin ":refs/tags/$TAG"
+    # Avoid running hooks for tag deletion
+    git push --no-verify origin ":refs/tags/$TAG"
   else
     echo "error: remote tag $TAG already exists (use --force-tag to replace)" >&2
     exit 1
@@ -144,11 +145,11 @@ if git rev-parse -q --verify "$TAG" >/dev/null; then
 fi
 
 git tag -a "$TAG" -m "$TAG"
+# Push branch with hooks once; push tag without hooks to avoid duplicate lint
 if [[ $NO_HOOKS -eq 1 ]]; then
   git push --no-verify origin "$BRANCH"
-  git push --no-verify origin "$TAG"
 else
   git push origin "$BRANCH"
-  git push origin "$TAG"
 fi
+git push --no-verify origin "$TAG"
 echo "OK: pushed $TAG (branch=$BRANCH). GitHub Actions will build and publish assets."

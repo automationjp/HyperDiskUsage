@@ -12,10 +12,16 @@ USAGE
 }
 
 PROFILE=release
-if [[ ${1:-} == "--debug" ]]; then PROFILE=debug; fi
+case "${1:-}" in
+  --debug) PROFILE=debug ;;
+  --release|'') : ;; # default is release
+  -h|--help) usage; exit 0 ;;
+  *) echo "unknown arg: $1"; usage; exit 1 ;;
+esac
 
 cargo install cargo-bundle >/dev/null 2>&1 || true
-cargo bundle --$PROFILE -p hyperdu-gui
+# Use --profile to avoid conflicts with environments that inject --profile
+cargo bundle --profile "$PROFILE" -p hyperdu-gui
 
 app_path="target/$PROFILE/bundle/osx/hyperdu-gui.app"
 outdir="dist"

@@ -11,7 +11,7 @@ CHECK=0
 if [[ ${1:-} == "--check" ]]; then CHECK=1; fi
 
 if command -v rustup >/dev/null 2>&1; then
-  if rustup toolchain list | rg -q '^nightly'; then
+  if rustup toolchain list | (grep -q '^nightly' || true); then
     if [[ $CHECK -eq 1 ]]; then
       cargo +nightly fmt --all -- --check \
         --config group_imports=StdExternalCrate \
