@@ -14,3 +14,11 @@ if ! bash scripts/lint.sh; then
 fi
 echo "[pre-commit] Lint OK"
 
+# Run cross-target clippy as part of pre-commit to catch OS-specific issues
+echo "[pre-commit] Running scripts/lint_cross.sh (macOS + Windows clippy)"
+if ! bash scripts/lint_cross.sh --fast; then
+  echo "[pre-commit] Cross clippy failed. Commit aborted." >&2
+  echo "Hint: install targets with 'bash scripts/lint_cross.sh' (first run) or use --no-verify to skip." >&2
+  exit 1
+fi
+echo "[pre-commit] Cross clippy OK"
