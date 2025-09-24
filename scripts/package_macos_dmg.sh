@@ -3,9 +3,10 @@ set -euo pipefail
 
 # Build macOS .app for GUI via cargo-bundle and create a DMG if create-dmg is available.
 
+# shellcheck disable=SC1090
 usage() {
   cat <<USAGE
-Usage: $(basename "$0") [--release]
+Usage: $(basename "$0") [--release|--debug]
 
 Requires: cargo-bundle (cargo install cargo-bundle), create-dmg (brew install create-dmg)
 USAGE
@@ -20,23 +21,21 @@ case "${1:-}" in
 esac
 
 cargo install cargo-bundle >/dev/null 2>&1 || true
-# Prefer --profile, but fall back if caller environment already injected profile args
-set +e
-out=$(cargo bundle --profile "$PROFILE" -p hyperdu-gui 2>&1)
-rc=$?
-set -e
-if [[ $rc -ne 0 ]]; then
-  echo "$out" >&2
-  if echo "$out" | grep -qi 'cannot be used multiple times\|cannot be used with'; then
-    echo "(info) retrying cargo bundle with --release"
-    cargo bundle --release -p hyperdu-gui
-  else
-    echo "error: cargo bundle failed" >&2
-    exit $rc
-  fi
+
+declare -a bundle_args
+if [[ $PROFILE == release ]]; then
+  bundle_args=(--release)
+else
+  bundle_args=()
 fi
 
-app_path="target/$PROFILE/bundle/osx/hyperdu-gui.app"
+cargo bundle "${bundle_args[@]}" -p hyperdu-gui
+
+if [[ $PROFILE == release ]]; then
+  app_path="target/release/bundle/osx/hyperdu-gui.app"
+else
+  app_path="target/debug/bundle/osx/hyperdu-gui.app"
+fi
 outdir="dist"
 mkdir -p "$outdir"
 

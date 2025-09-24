@@ -120,14 +120,15 @@ impl std::fmt::Debug for Options {
 
 impl Default for Options {
     fn default() -> Self {
+        let threads_default = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
         Self {
             exclude_contains: vec![".git".into(), "node_modules".into(), "target".into()],
             max_depth: 0,
             min_file_size: 0,
             follow_links: false,
-            threads: std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4),
+            threads: threads_default,
             progress_every: 0,
             progress_callback: None,
             progress_path_callback: None,
@@ -143,7 +144,7 @@ impl Default for Options {
                 .ok()
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
-            active_threads: Arc::new(AtomicUsize::new(0)),
+            active_threads: Arc::new(AtomicUsize::new(threads_default.max(1))),
             uring_batch: Arc::new(AtomicUsize::new(
                 std::env::var("HYPERDU_STATX_BATCH")
                     .ok()
