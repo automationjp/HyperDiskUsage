@@ -47,22 +47,41 @@ targets=(
   x86_64-pc-windows-msvc
 )
 
-if [[ $FAST -ne 1 ]]; then
-  for t in "${targets[@]}"; do
-    rustup target add "$t" >/dev/null 2>&1 || echo "(warn) failed to add target $t; will try clippy anyway"
-  done
-fi
+ensure_target() {
+  local t="$1"
+  if rustup target list --installed | grep -q "^$t$"; then return 0; fi
+  echo "(info) missing target $t; attempting to install"
+  rustup target add "$t" >/dev/null 2>&1 && return 0
+  echo "(warn) could not install target $t; skipping its clippy"
+  return 1
+}
 
 echo "==> clippy (macOS target, core crate only)"
-if ! cargo clippy -p hyperdu-core --target x86_64-apple-darwin -- -D warnings; then
-  echo "error: clippy failed for x86_64-apple-darwin" >&2
-  exit 1
+if ensure_target x86_64-apple-darwin || [[ $FAST -ne 1 ]]; then
+  if rustup target list --installed | grep -q '^x86_64-apple-darwin$'; then
+    if ! cargo clippy -p hyperdu-core --target x86_64-apple-darwin -- -D warnings; then
+      echo "error: clippy failed for x86_64-apple-darwin" >&2
+      exit 1
+    fi
+  else
+    echo "(warn) skipping macOS target clippy (target not available)"
+  fi
+else
+  echo "(warn) skipping macOS target clippy (target not available)"
 fi
 
 echo "==> clippy (Windows msvc target, core crate only)"
-if ! cargo clippy -p hyperdu-core --target x86_64-pc-windows-msvc -- -D warnings; then
-  echo "error: clippy failed for x86_64-pc-windows-msvc" >&2
-  exit 1
+if ensure_target x86_64-pc-windows-msvc || [[ $FAST -ne 1 ]]; then
+  if rustup target list --installed | grep -q '^x86_64-pc-windows-msvc$'; then
+    if ! cargo clippy -p hyperdu-core --target x86_64-pc-windows-msvc -- -D warnings; then
+      echo "error: clippy failed for x86_64-pc-windows-msvc" >&2
+      exit 1
+    fi
+  else
+    echo "(warn) skipping Windows msvc target clippy (target not available)"
+  fi
+else
+  echo "(warn) skipping Windows msvc target clippy (target not available)"
 fi
 
 echo "OK: cross-target clippy passed"
