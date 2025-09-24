@@ -1,4 +1,4 @@
-use std::{fs, io::Write};
+use std::{fs, io::Write, path::PathBuf};
 
 use hyperdu_core::{scan_directory, OptionsBuilder};
 

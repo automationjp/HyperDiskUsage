@@ -28,6 +28,7 @@ $wd = (Get-Location).Path
 $forward = $Rest -join ' '
 
 # Use -lc to run a login shell that executes our commands, then exits
+# Allow skipping hooks via --no-hooks for reliable non-interactive release
 $cmd = "cd `"$wd`"; bash scripts/release_tag.sh $forward"
 
 Write-Host "==> Invoking Git Bash: $bashExe"
@@ -45,4 +46,3 @@ $p.WaitForExit()
 Write-Output $p.StandardOutput.ReadToEnd()
 Write-Error $p.StandardError.ReadToEnd() -ErrorAction SilentlyContinue
 if ($p.ExitCode -ne 0) { exit $p.ExitCode }
-

@@ -34,6 +34,7 @@ TAG="$1"; shift || true
 RUN_LINT=1
 FORCE_TAG=0
 ALLOW_DIRTY=0
+NO_HOOKS=0
 PUSH_BRANCH=""
 PUBLISH_LOCAL=0
 TARGETS="linux-gnu,linux-musl,linux-aarch64"
@@ -46,6 +47,7 @@ while [[ $# -gt 0 ]]; do
     --force-tag) FORCE_TAG=1; shift;;
     --allow-dirty) ALLOW_DIRTY=1; shift;;
     --push-branch) PUSH_BRANCH="$2"; shift 2;;
+    --no-hooks) NO_HOOKS=1; shift;;
     --publish-local) PUBLISH_LOCAL=1; shift;;
     --targets) TARGETS="$2"; shift 2;;
     --cpu-flavors) CPU_FLAVORS="$2"; shift 2;;
@@ -136,6 +138,11 @@ if git rev-parse -q --verify "$TAG" >/dev/null; then
 fi
 
 git tag -a "$TAG" -m "$TAG"
-git push origin "$BRANCH"
-git push origin "$TAG"
+if [[ $NO_HOOKS -eq 1 ]]; then
+  git push --no-verify origin "$BRANCH"
+  git push --no-verify origin "$TAG"
+else
+  git push origin "$BRANCH"
+  git push origin "$TAG"
+fi
 echo "OK: pushed $TAG (branch=$BRANCH). GitHub Actions will build and publish assets."
