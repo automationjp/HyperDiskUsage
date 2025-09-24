@@ -62,11 +62,11 @@ cargo clippy --workspace -- -D warnings
 
 # Optional: strict import sort if nightly rustfmt is present
 # Install nightly rustfmt on demand if missing
-if ! rustup toolchain list 2>/dev/null | rg -q '^nightly'; then
+if ! rustup toolchain list 2>/dev/null | grep -q '^nightly'; then
   echo "(info) installing nightly rustfmt for strict import order..."
   rustup toolchain install nightly -c rustfmt || echo "(warn) failed to install nightly rustfmt"
 fi
-if rustup toolchain list 2>/dev/null | rg -q '^nightly'; then
+if rustup toolchain list 2>/dev/null | grep -q '^nightly'; then
   echo "==> rustfmt (nightly strict import order, check)"
   bash scripts/fmt_strict.sh --check
 else
@@ -75,10 +75,27 @@ fi
 
 # Optional: shellcheck for POSIX scripts if available
 # Install shellcheck on demand if missing
+win=0
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW*|MSYS*|CYGWIN*) win=1;;
+esac
+if [[ "${OS:-}" == "Windows_NT" ]]; then win=1; fi
+
 if ! command -v shellcheck >/dev/null 2>&1; then
-  echo "(info) installing shellcheck..."
-  install_pkg shellcheck
+  if [[ $win -eq 1 ]]; then
+    if command -v scoop >/dev/null 2>&1; then
+      echo "(info) installing shellcheck via scoop..."
+      if ! scoop bucket list 2>/dev/null | grep -q "extras"; then scoop bucket add extras || true; fi
+      scoop install shellcheck || true
+    else
+      echo "(info) shellcheck not found on Windows; skipping auto-install (requires admin)."
+    fi
+  else
+    echo "(info) installing shellcheck..."
+    install_pkg shellcheck
+  fi
 fi
+
 if command -v shellcheck >/dev/null 2>&1; then
   echo "==> shellcheck (scripts)"
   shellcheck -S error -x scripts/*.sh
