@@ -1,0 +1,10 @@
+repos:
+  - repo: local
+    hooks:
+      - id: rust-lint
+        name: Rust Lint (fmt + clippy)
+        entry: bash scripts/lint.sh
+        language: system
+        pass_filenames: false
+        stages: [commit]
+

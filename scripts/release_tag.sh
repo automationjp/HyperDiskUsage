@@ -34,6 +34,7 @@ TAG="$1"; shift || true
 
 RUN_LINT=1
 FORCE_TAG=0
+ALLOW_DIRTY=0
 PUSH_BRANCH=""
 PUBLISH_LOCAL=0
 TARGETS="linux-gnu,linux-musl,linux-aarch64"
@@ -44,6 +45,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-lint) RUN_LINT=0; shift;;
     --force-tag) FORCE_TAG=1; shift;;
+    --allow-dirty) ALLOW_DIRTY=1; shift;;
     --push-branch) PUSH_BRANCH="$2"; shift 2;;
     --publish-local) PUBLISH_LOCAL=1; shift;;
     --targets) TARGETS="$2"; shift 2;;
@@ -54,18 +56,48 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Ensure git is clean
-git update-index -q --refresh
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  echo "error: working tree has changes. Commit or stash first." >&2
-  exit 1
+# Move to repo root robustly (handles broken CWD in WSL)
+move_to_repo_root() {
+  # Prefer Git’s notion of the repo root if available
+  if rr=$(git rev-parse --show-toplevel 2>/dev/null); then
+    cd "$rr" || {
+      echo "error: failed to cd to git toplevel $rr" >&2; exit 1; }
+    return
+  fi
+  # Fallback: derive from this script path relative to current PWD
+  local sp="${BASH_SOURCE[0]}"
+  case "$sp" in
+    /*) ;;                             # already absolute
+    *) sp="$PWD/$sp" ;;                # make absolute from current dir
+  esac
+  local rr
+  rr=$(cd "$(dirname "$sp")/.." && pwd) || {
+    echo "error: failed to resolve repository root; run from repo root and try again" >&2
+    exit 1
+  }
+  cd "$rr" || { echo "error: cannot cd to $rr" >&2; exit 1; }
+}
+
+move_to_repo_root
+
+# Ensure git is clean (unless allowed)
+git update-index -q --refresh || true
+if [[ $ALLOW_DIRTY -eq 0 ]]; then
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "error: working tree has changes. Commit or stash first, or pass --allow-dirty" >&2
+    exit 1
+  fi
 fi
 
 BRANCH="${PUSH_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 
 if [[ $RUN_LINT -eq 1 ]]; then
-  echo "==> Lint (fmt + clippy)"
-  bash scripts/lint.sh
+  if command -v cargo >/dev/null 2>&1; then
+    echo "==> Lint (fmt + clippy)"
+    bash scripts/lint.sh
+  else
+    echo "(info) cargo not found; skipping lint. Use --no-lint to silence."
+  fi
 fi
 
 if [[ $PUBLISH_LOCAL -eq 1 ]]; then
@@ -108,4 +140,3 @@ git tag -a "$TAG" -m "$TAG"
 git push origin "$BRANCH"
 git push origin "$TAG"
 echo "OK: pushed $TAG (branch=$BRANCH). GitHub Actions will build and publish assets."
-
