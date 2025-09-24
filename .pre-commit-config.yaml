@@ -6,16 +6,16 @@ repos:
         entry: bash scripts/clippy_fix.sh
         language: system
         pass_filenames: false
-        stages: [commit]
+        stages: [push]
       - id: rust-lint
         name: Rust Lint (fmt + clippy)
         entry: bash scripts/lint.sh
         language: system
         pass_filenames: false
-        stages: [commit]
+        stages: [push]
       - id: rust-clippy-cross
         name: Rust Clippy (macOS + Windows targets)
         entry: bash scripts/lint_cross.sh --fast
         language: system
         pass_filenames: false
-        stages: [commit, push]
+        stages: [push]

@@ -6,24 +6,9 @@ if repo_root=$(git rev-parse --show-toplevel 2>/dev/null); then
   cd "$repo_root"
 fi
 
-# 1) Auto-apply machine-applicable Clippy fixes first (fast, best-effort)
-echo "[pre-commit] Running scripts/clippy_fix.sh (auto-fix)"
+# Lightweight pre-commit (non-blocking)
+# Run best-effort auto-fix; do NOT block commits.
+echo "[pre-commit] (info) best-effort clippy auto-fix"
 bash scripts/clippy_fix.sh || true
-
-# 2) Standard fmt + clippy
-echo "[pre-commit] Running scripts/lint.sh (fmt + clippy)"
-if ! bash scripts/lint.sh; then
-  echo "[pre-commit] Lint failed. Commit aborted." >&2
-  echo "Hint: fix issues or run with --no-verify (not recommended)." >&2
-  exit 1
-fi
-echo "[pre-commit] Lint OK"
-
-# 3) Cross-target clippy (macOS + Windows)
-echo "[pre-commit] Running scripts/lint_cross.sh (macOS + Windows clippy)"
-if ! bash scripts/lint_cross.sh --fast; then
-  echo "[pre-commit] Cross clippy failed. Commit aborted." >&2
-  echo "Hint: install targets with 'bash scripts/lint_cross.sh' (first run) or use --no-verify to skip." >&2
-  exit 1
-fi
-echo "[pre-commit] Cross clippy OK"
+echo "[pre-commit] (info) skipping heavy lint; enforced at push"
+exit 0
