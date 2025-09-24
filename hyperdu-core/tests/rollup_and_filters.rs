@@ -96,7 +96,7 @@ fn symlink_not_followed_by_default() {
     use std::os::unix::fs::symlink;
 
     let dir = tempfile::tempdir().unwrap();
-    let root: PathBuf = dir.path().to_path_buf();
+    let root: std::path::PathBuf = dir.path().to_path_buf();
     fs::create_dir(root.join("d")).unwrap();
     write_bytes(&root.join("d/file"), 10);
     // Create a symlink to the file at the root
