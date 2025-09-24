@@ -7,10 +7,10 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let depth = dctx.depth;
     let opt = ctx.options;
     // Avoid CreateFileW by default: keep NtQuery fast path behind opt-in env
-    if std::env::var("HYPERDU_WIN_USE_NTQUERY").ok().as_deref() == Some("1") {
-        if try_fast_enum(dir, depth, opt, map, ctx) {
-            return;
-        }
+    if std::env::var("HYPERDU_WIN_USE_NTQUERY").ok().as_deref() == Some("1")
+        && try_fast_enum(dir, depth, opt, map, ctx)
+    {
+        return;
     }
     use std::{
         ffi::OsString,
@@ -74,16 +74,18 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
             if curw.last().copied() != Some(0) {
                 curw.push(0);
             }
-            match unsafe {
-                CreateFileW(
-                    PCWSTR(curw.as_ptr()),
-                    0x80,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                    None,
-                    OPEN_EXISTING,
-                    FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
-                    None,
-                )
+            match {
+                unsafe {
+                    CreateFileW(
+                        PCWSTR(curw.as_ptr()),
+                        0x80,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        None,
+                        OPEN_EXISTING,
+                        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
+                        None,
+                    )
+                }
             } {
                 Ok(h) => {
                     let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();

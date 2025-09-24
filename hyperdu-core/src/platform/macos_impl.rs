@@ -150,7 +150,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                 // name pointer
                 let name_ptr = rec_base.add(name_ref.attr_dataoffset as usize);
                 let name_len = name_ref.attr_length as usize;
-                let name_slice = unsafe { std::slice::from_raw_parts(name_ptr, name_len) };
+                let name_slice = std::slice::from_raw_parts(name_ptr, name_len);
                 // Trim trailing NUL if present
                 let name_slice = if !name_slice.is_empty() && *name_slice.last().unwrap() == 0 {
                     &name_slice[..name_slice.len() - 1]
@@ -186,8 +186,8 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                 } else {
                     // Hardlink dedupe
                     if let Ok(c_child) = CString::new(child.as_os_str().as_bytes()) {
-                        let mut st: libc::stat = unsafe { std::mem::zeroed() };
-                        let rc = unsafe { libc::lstat(c_child.as_ptr(), &mut st) };
+                        let mut st: libc::stat = std::mem::zeroed();
+                        let rc = libc::lstat(c_child.as_ptr(), &mut st);
                         if rc == 0 {
                             let dev = st.st_dev as u64;
                             let ino = st.st_ino;
@@ -223,7 +223,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                             continue;
                         }
                     };
-                    let rc = unsafe { libc::lstat(c_child.as_ptr(), &mut st) };
+                    let rc = libc::lstat(c_child.as_ptr(), &mut st);
                     if rc == 0 {
                         if (st.st_dev as u64) != cur_dev {
                             offset += reclen;

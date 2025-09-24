@@ -26,14 +26,4 @@ fn should_exclude_legacy(p: &Path, patterns: &[String]) -> bool {
     patterns.iter().any(|q| !q.is_empty() && s.contains(q))
 }
 
-// name_* helpers live in crate root for cross-module reuse
-
-#[cfg(windows)]
-#[inline(always)]
-pub fn wname_contains_patterns_lossy(name: &std::ffi::OsString, patterns: &[String]) -> bool {
-    if patterns.is_empty() {
-        return false;
-    }
-    let s = name.to_string_lossy();
-    patterns.iter().any(|q| !q.is_empty() && s.contains(q))
-}
+// name_* helpers live in crate root for cross-module reuse (see lib.rs)
