@@ -198,32 +198,6 @@ export HYPERDU_DIR_YIELD_EVERY=10000
 # CPUピニング有効化（Linux）
 export HYPERDU_PIN_THREADS=1
 
-# io_uring（Linux）
-# 実験的→安定化済み。WSL/ネットワークFSでは無効化を推奨
-export HYPERDU_DISABLE_URING=0            # 1 で完全無効化（または CLI --no-uring）
-export HYPERDU_STATX_BATCH=256           # 初期バッチ
-export HYPERDU_URING_SQ_DEPTH=512        # SQ/CQ 深さ（動的に一部調整）
-export HYPERDU_URING_SQPOLL=1            # カーネルポーリングを有効化
-export HYPERDU_URING_SQPOLL_IDLE_MS=1000 # SQPOLLアイドル時間
-export HYPERDU_URING_SQPOLL_CPU=0        # SQPOLLスレッドをCPU固定
-export HYPERDU_URING_COOP_TASKRUN=1      # cooperative taskrun 有効
-
-# FS自動最適化（Linux）
-# 自動でFSを検出して戦略を適用。無効化は HYPERDU_FS_AUTO=0
-export HYPERDU_FS_AUTO=1
-export HYPERDU_GETDENTS_BUF_KB=128       # 戦略により 64/128 の推奨を適用
-export HYPERDU_PREFETCH=1                # prefetch-advise（posix_fadvise/readahead）を有効/無効
-```
-
-CLI から直接指定する場合（環境変数の代替）
-
-- Linux: `--getdents-buf-kb <KiB>`（HYPERDU_GETDENTS_BUF_KB）、`--dir-yield-every <N>`（HYPERDU_DIR_YIELD_EVERY）、`--prefetch`（HYPERDU_PREFETCH=1）、`--pin-threads`（HYPERDU_PIN_THREADS=1）
-- io_uring: `--no-uring`（HYPERDU_DISABLE_URING=1）、`--uring-batch <N>`（HYPERDU_STATX_BATCH）、`--uring-depth <N>`（HYPERDU_URING_SQ_DEPTH）、`--uring-sqpoll`/`--uring-sqpoll-idle-ms <MS>`/`--uring-sqpoll-cpu <CPU>`、`--uring-coop`
-- Windows: `--win-ntquery`（HYPERDU_WIN_USE_NTQUERY=1）
-- チューニング: `--tune`（HYPERDU_TUNE=1）、`--tune-interval-ms <MS>`（HYPERDU_TUNE_INTERVAL_MS）、`--tune-log`
-- FS自動最適化: `--no-fs-auto`（HYPERDU_FS_AUTO=0）
-- macOS: `--galb-buf-kb <KiB>`（HYPERDU_GALB_BUF_KB）
-
 ## 🖼️ GUI版
 
 GUI版は `egui` フレームワークを使用した直感的なインターフェースを提供：
