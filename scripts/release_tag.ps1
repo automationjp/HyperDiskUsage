@@ -34,15 +34,6 @@ $cmd = "cd `"$wd`"; bash scripts/release_tag.sh $forward"
 Write-Host "==> Invoking Git Bash: $bashExe"
 Write-Host "    -> $cmd"
 
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = $bashExe
-$psi.Arguments = "-lc `"$cmd`""
-$psi.UseShellExecute = $false
-$psi.RedirectStandardOutput = $true
-$psi.RedirectStandardError = $true
-
-$p = [System.Diagnostics.Process]::Start($psi)
-$p.WaitForExit()
-Write-Output $p.StandardOutput.ReadToEnd()
-Write-Error $p.StandardError.ReadToEnd() -ErrorAction SilentlyContinue
-if ($p.ExitCode -ne 0) { exit $p.ExitCode }
+# Stream output directly to the console for real-time progress
+& $bashExe -lc $cmd
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

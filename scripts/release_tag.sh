@@ -34,6 +34,7 @@ TAG="$1"; shift || true
 RUN_LINT=1
 FORCE_TAG=0
 ALLOW_DIRTY=0
+VERBOSE=0
 NO_HOOKS=0
 PUSH_BRANCH=""
 PUBLISH_LOCAL=0
@@ -48,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     --allow-dirty) ALLOW_DIRTY=1; shift;;
     --push-branch) PUSH_BRANCH="$2"; shift 2;;
     --no-hooks) NO_HOOKS=1; shift;;
+    --verbose) VERBOSE=1; shift;;
     --publish-local) PUBLISH_LOCAL=1; shift;;
     --targets) TARGETS="$2"; shift 2;;
     --cpu-flavors) CPU_FLAVORS="$2"; shift 2;;
@@ -91,6 +93,10 @@ if [[ $ALLOW_DIRTY -eq 0 ]]; then
 fi
 
 BRANCH="${PUSH_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
+
+if [[ $VERBOSE -eq 1 ]]; then
+  set -x
+fi
 
 if [[ $RUN_LINT -eq 1 ]]; then
   if command -v cargo >/dev/null 2>&1; then
