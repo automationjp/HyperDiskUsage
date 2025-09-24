@@ -7,4 +7,9 @@ repos:
         language: system
         pass_filenames: false
         stages: [commit]
-
+      - id: rust-clippy-cross
+        name: Rust Clippy (macOS + Windows targets)
+        entry: bash scripts/lint_cross.sh --fast
+        language: system
+        pass_filenames: false
+        stages: [push]

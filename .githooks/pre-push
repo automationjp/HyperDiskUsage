@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Run cross-target clippy before push to catch OS-specific issues early.
+# If you want to skip temporarily (not recommended), use: git push --no-verify
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$repo_root"
+
+echo "[pre-push] Running scripts/lint_cross.sh (macOS + Windows clippy)"
+bash scripts/lint_cross.sh --fast
+echo "[pre-push] OK"
+

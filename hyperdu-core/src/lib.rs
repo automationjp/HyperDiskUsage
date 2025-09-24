@@ -572,6 +572,7 @@ pub fn scan_directory_rayon(root: impl AsRef<Path>, opt: &Options) -> Result<Sta
 
 use crate::filters::path_excluded;
 
+#[cfg(not(windows))]
 #[inline(always)]
 fn name_contains_patterns_bytes(name: &[u8], patterns: &[String]) -> bool {
     if patterns.is_empty() {
@@ -589,6 +590,7 @@ fn name_contains_patterns_bytes(name: &[u8], patterns: &[String]) -> bool {
     false
 }
 
+#[cfg(not(windows))]
 #[inline(always)]
 pub(crate) fn name_matches(name: &[u8], opt: &Options) -> bool {
     if let Some(ac) = &opt.exclude_ac {

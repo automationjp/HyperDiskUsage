@@ -43,6 +43,7 @@ pub fn report_file_progress(opt: &Options, total_files: &AtomicU64, path: Option
 
 /// Check if a directory has been visited (loop detection)
 /// Returns true if this directory should be skipped
+#[cfg(unix)]
 #[inline]
 pub fn check_visited_directory(opt: &Options, dev: u64, ino: u64) -> bool {
     if !opt.follow_links {

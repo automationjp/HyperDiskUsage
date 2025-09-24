@@ -74,25 +74,19 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
             if curw.last().copied() != Some(0) {
                 curw.push(0);
             }
-            match {
-                unsafe {
-                    CreateFileW(
-                        PCWSTR(curw.as_ptr()),
-                        0x80,
-                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                        None,
-                        OPEN_EXISTING,
-                        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
-                        None,
-                    )
-                }
-            } {
+            match CreateFileW(
+                PCWSTR(curw.as_ptr()),
+                0x80,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                None,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
+                None,
+            ) {
                 Ok(h) => {
                     let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
                     let serial =
-                        if unsafe { GetFileInformationByHandle(h, &mut info as *mut _ as *mut _) }
-                            .is_ok()
-                        {
+                        if GetFileInformationByHandle(h, &mut info as *mut _ as *mut _).is_ok() {
                             info.dwVolumeSerialNumber as u64
                         } else {
                             0
@@ -424,11 +418,11 @@ fn try_fast_enum(
                     });
                 }
             } else {
-                let logical = (info.EndOfFile as i64) as u64;
+                let logical = info.EndOfFile as u64;
 
                 let mut physical = logical;
                 if opt.compute_physical {
-                    let alloc = (info.AllocationSize as i64) as u64;
+                    let alloc = info.AllocationSize as u64;
                     if alloc != 0 {
                         physical = alloc;
                     }

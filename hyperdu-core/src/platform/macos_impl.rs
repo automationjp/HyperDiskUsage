@@ -215,7 +215,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
 
                 // one-file-system and loop check for directories
                 if is_dir && opt.one_file_system {
-                    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+                    let mut st: libc::stat = std::mem::zeroed();
                     let c_child = match CString::new(child.as_os_str().as_bytes()) {
                         Ok(s) => s,
                         Err(_) => {
