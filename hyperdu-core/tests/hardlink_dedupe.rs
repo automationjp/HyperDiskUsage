@@ -1,3 +1,4 @@
+#![allow(clippy::field_reassign_with_default)]
 #[cfg(unix)]
 #[test]
 #[ignore = "Known discrepancy in subtree aggregation on some filesystems; tracked for follow-up."]
@@ -46,4 +47,3 @@ fn hardlink_dedupe_unix() {
     assert_eq!(files_sum2, 2);
     assert!(logical_sum2 >= 16384);
 }
-#![allow(clippy::field_reassign_with_default)]
