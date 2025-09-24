@@ -1,5 +1,9 @@
 name: ci
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:
@@ -32,19 +36,4 @@ jobs:
       - name: Test core
         run: cargo test -p hyperdu-core -- --nocapture
 
-  cross-build-artifacts:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install cross toolchains
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu mingw-w64 zip jq
-      - name: Package cross artifacts
-        run: bash scripts/package_release.sh --skip-gui --targets linux-musl,linux-gnu,linux-aarch64,windows-gnu
-      - name: Upload dist
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-cross
-          path: dist/*
+  # Note: artifact packaging is handled in release.yml on tags. CI only builds and tests.

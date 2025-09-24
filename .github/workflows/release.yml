@@ -1,5 +1,9 @@
 name: release
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     tags:
@@ -27,7 +31,8 @@ jobs:
         run: bash scripts/lint.sh
       - name: Package ZIP/DEB/RPM (CLI+GUI)
         run: |
-          bash scripts/package_release.sh --targets "linux-gnu,linux-musl,linux-aarch64,windows-gnu" \
+          # Build Linux targets only here; Windows artifacts are built on the Windows runner to avoid duplicates
+          bash scripts/package_release.sh --targets "linux-gnu,linux-musl,linux-aarch64" \
             --cpu-flavors "generic" --deb --rpm --verbose
       - name: Generate Snap/Flatpak manifests
         run: |

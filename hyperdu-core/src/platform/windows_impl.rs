@@ -20,7 +20,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     use windows::{
         core::PCWSTR,
         Win32::{
-            Foundation::{CloseHandle, HANDLE},
+            Foundation::CloseHandle,
             Storage::FileSystem::{
                 CreateFileW, FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW,
                 FindNextFileW, GetCompressedFileSizeW, GetFileInformationByHandle,
@@ -324,10 +324,7 @@ fn try_fast_enum(
         0
     };
     let mut buf = vec![0u8; 64 * 1024];
-    let mut iosb = IO_STATUS_BLOCK {
-        Anonymous: unsafe { std::mem::zeroed() },
-        Pointer: std::ptr::null_mut(),
-    };
+    let mut iosb: IO_STATUS_BLOCK = unsafe { std::mem::zeroed() };
     let stat_cur = map.entry(dir.to_path_buf()).or_default();
     loop {
         let status: NTSTATUS = unsafe {
@@ -417,18 +414,10 @@ fn try_fast_enum(
                     });
                 }
             } else {
-                #[cfg(target_env = "msvc")]
-                let logical =
-                    ((info.EndOfFile.HighPart as u64) << 32) | (info.EndOfFile.LowPart as u64);
-                #[cfg(target_env = "gnu")]
                 let logical = (info.EndOfFile as i64) as u64;
 
                 let mut physical = logical;
                 if opt.compute_physical {
-                    #[cfg(target_env = "msvc")]
-                    let alloc = ((info.AllocationSize.HighPart as u64) << 32)
-                        | (info.AllocationSize.LowPart as u64);
-                    #[cfg(target_env = "gnu")]
                     let alloc = (info.AllocationSize as i64) as u64;
                     if alloc != 0 {
                         physical = alloc;
@@ -499,5 +488,5 @@ fn try_fast_enum(
 #[inline(always)]
 fn file_id_u64(info: &windows::Wdk::Storage::FileSystem::FILE_ID_BOTH_DIR_INFORMATION) -> u64 {
     // FILE_ID_BOTH_DIR_INFORMATION.FileId is a 64-bit value. Read unaligned safely.
-    unsafe { std::ptr::read_unaligned((&info.FileId as *const _ as *const u64)) }
+    unsafe { std::ptr::read_unaligned(&info.FileId as *const _ as *const u64) }
 }
