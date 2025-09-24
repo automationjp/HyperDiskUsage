@@ -58,11 +58,27 @@ function Build-And-Capture([string]$Package, [string]$Rustflags) {
   if ($Rustflags) { $psi.EnvironmentVariables["RUSTFLAGS"] = $Rustflags }
   $p = [System.Diagnostics.Process]::Start($psi)
   $paths = New-Object System.Collections.Generic.HashSet[string]
+  $lastHeartbeat = [DateTime]::UtcNow
   while (-not $p.StandardOutput.EndOfStream) {
     $line = $p.StandardOutput.ReadLine()
     try { $obj = $line | ConvertFrom-Json } catch { continue }
     if ($null -ne $obj -and $obj.reason -eq "compiler-artifact" -and $obj.executable) {
       [void]$paths.Add($obj.executable)
+      # Show progress for binaries to avoid CI idle timeout
+      if ($obj.target -and $obj.target.name) {
+        Write-Host ("  built " + $obj.target.name)
+      }
+    } elseif ($null -ne $obj -and $obj.reason -eq "compiler-artifact") {
+      # Heartbeat every ~10s for library artifacts to avoid idle cancellation
+      $now = [DateTime]::UtcNow
+      if (($now - $lastHeartbeat).TotalSeconds -ge 10) {
+        if ($obj.target -and $obj.target.name) {
+          Write-Host ("  ... building " + $obj.target.name)
+        } else {
+          Write-Host "  ... building (progress)"
+        }
+        $lastHeartbeat = $now
+      }
     }
   }
   $p.WaitForExit()
