@@ -72,7 +72,8 @@ pub fn update_file_stats(stat_cur: &mut crate::Stat, logical: u64, physical: u64
     stat_cur.files += 1;
 }
 
-/// Calculate physical size from blocks
+/// Calculate physical size from blocks (Linux-only path)
+#[cfg(target_os = "linux")]
 #[inline]
 pub fn calculate_physical_size(opt: &Options, logical: u64, blocks: u64) -> u64 {
     if !opt.compute_physical {
@@ -87,7 +88,8 @@ pub fn calculate_physical_size(opt: &Options, logical: u64, blocks: u64) -> u64 
     }
 }
 
-/// Check if path should be excluded based on fast exclude optimization
+/// Check if path should be excluded based on fast exclude optimization (Linux-only path)
+#[cfg(target_os = "linux")]
 #[inline]
 pub fn should_fast_exclude(opt: &Options) -> bool {
     !opt.exclude_contains

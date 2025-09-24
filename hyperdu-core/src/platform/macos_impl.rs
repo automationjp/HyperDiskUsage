@@ -1,9 +1,8 @@
-use std::{ptr::read_unaligned, sync::atomic::Ordering};
+use std::ptr::read_unaligned;
 
 use crate::{
     common_ops::{
-        calculate_physical_size, check_hardlink_duplicate, check_visited_directory,
-        report_file_progress, update_file_stats,
+        check_hardlink_duplicate, check_visited_directory, report_file_progress, update_file_stats,
     },
     error_handling::{last_os_error_systemcall, record_error},
     DirContext, ScanContext, StatMap,
@@ -36,7 +35,6 @@ const ATTR_FILE_TOTALSIZE: u32 = 0x0000_0008;
 const ATTR_FILE_ALLOCSIZE: u32 = 0x0000_0010;
 
 // vnode types
-const VREG: u32 = 1;
 const VDIR: u32 = 2;
 const VLNK: u32 = 5;
 
@@ -131,26 +129,26 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                 if offset + 4 > buf.len() {
                     break;
                 }
-                let rec_base = unsafe { buf.as_ptr().add(offset) };
+                let rec_base = buf.as_ptr().add(offset);
                 let reclen = read_unaligned(rec_base as *const u32) as usize;
                 if reclen == 0 || offset + reclen > buf.len() {
                     break;
                 }
-                let mut cursor = unsafe { rec_base.add(4) };
+                let mut cursor = rec_base.add(4);
 
                 // common: name (attrreference)
                 let name_ref = read_unaligned(cursor as *const AttrReference);
-                cursor = unsafe { cursor.add(std::mem::size_of::<AttrReference>()) };
+                cursor = cursor.add(std::mem::size_of::<AttrReference>());
                 // common: objtype (u32)
                 let objtype = read_unaligned(cursor as *const u32);
-                cursor = unsafe { cursor.add(std::mem::size_of::<u32>()) };
+                cursor = cursor.add(std::mem::size_of::<u32>());
                 // file: totalsize (u64), allocsize (u64)
                 let totalsize = read_unaligned(cursor as *const u64);
-                cursor = unsafe { cursor.add(std::mem::size_of::<u64>()) };
+                cursor = cursor.add(std::mem::size_of::<u64>());
                 let allocsize = read_unaligned(cursor as *const u64);
 
                 // name pointer
-                let name_ptr = unsafe { rec_base.add(name_ref.attr_dataoffset as usize) };
+                let name_ptr = rec_base.add(name_ref.attr_dataoffset as usize);
                 let name_len = name_ref.attr_length as usize;
                 let name_slice = unsafe { std::slice::from_raw_parts(name_ptr, name_len) };
                 // Trim trailing NUL if present
@@ -192,7 +190,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                         let rc = unsafe { libc::lstat(c_child.as_ptr(), &mut st) };
                         if rc == 0 {
                             let dev = st.st_dev as u64;
-                            let ino = st.st_ino as u64;
+                            let ino = st.st_ino;
                             if check_hardlink_duplicate(opt, dev, ino) {
                                 offset += reclen;
                                 continue;
@@ -232,7 +230,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                             continue;
                         }
                         let dev = st.st_dev as u64;
-                        let ino = st.st_ino as u64;
+                        let ino = st.st_ino;
                         if check_visited_directory(opt, dev, ino) {
                             offset += reclen;
                             continue;

@@ -74,19 +74,23 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
             if curw.last().copied() != Some(0) {
                 curw.push(0);
             }
-            match CreateFileW(
-                PCWSTR(curw.as_ptr()),
-                0x80,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                None,
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
-                None,
-            ) {
+            match unsafe {
+                CreateFileW(
+                    PCWSTR(curw.as_ptr()),
+                    0x80,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    None,
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
+                    None,
+                )
+            } {
                 Ok(h) => {
                     let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
                     let serial =
-                        if GetFileInformationByHandle(h, &mut info as *mut _ as *mut _).is_ok() {
+                        if unsafe { GetFileInformationByHandle(h, &mut info as *mut _ as *mut _) }
+                            .is_ok()
+                        {
                             info.dwVolumeSerialNumber as u64
                         } else {
                             0
@@ -299,24 +303,28 @@ fn try_fast_enum(
         return false;
     }
     path_w.push(0);
-    let h = match CreateFileW(
-        PCWSTR(path_w.as_ptr()),
-        0x0001_0000, // FILE_LIST_DIRECTORY (use literal to avoid feature mismatch)
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        None,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
-        None,
-    ) {
+    let h = match unsafe {
+        CreateFileW(
+            PCWSTR(path_w.as_ptr()),
+            0x0001_0000, // FILE_LIST_DIRECTORY (use literal to avoid feature mismatch)
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
+            None,
+        )
+    } {
         Ok(h) => h,
         Err(_) => return false,
     };
     // Volume Serial for dedupe/FS-boundary decisions
     let mut dir_info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
-    let vol_serial: u64 = if windows::Win32::Storage::FileSystem::GetFileInformationByHandle(
-        h,
-        &mut dir_info as *mut _ as *mut _,
-    )
+    let vol_serial: u64 = if unsafe {
+        windows::Win32::Storage::FileSystem::GetFileInformationByHandle(
+            h,
+            &mut dir_info as *mut _ as *mut _,
+        )
+    }
     .is_ok()
     {
         dir_info.dwVolumeSerialNumber as u64
