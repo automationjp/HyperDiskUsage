@@ -20,8 +20,21 @@ case "${1:-}" in
 esac
 
 cargo install cargo-bundle >/dev/null 2>&1 || true
-# Use --profile to avoid conflicts with environments that inject --profile
-cargo bundle --profile "$PROFILE" -p hyperdu-gui
+# Prefer --profile, but fall back if caller environment already injected profile args
+set +e
+out=$(cargo bundle --profile "$PROFILE" -p hyperdu-gui 2>&1)
+rc=$?
+set -e
+if [[ $rc -ne 0 ]]; then
+  echo "$out" >&2
+  if echo "$out" | grep -qi 'cannot be used multiple times\|cannot be used with'; then
+    echo "(info) retrying cargo bundle with --release"
+    cargo bundle --release -p hyperdu-gui
+  else
+    echo "error: cargo bundle failed" >&2
+    exit $rc
+  fi
+fi
 
 app_path="target/$PROFILE/bundle/osx/hyperdu-gui.app"
 outdir="dist"
