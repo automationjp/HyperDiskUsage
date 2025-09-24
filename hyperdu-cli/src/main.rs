@@ -463,11 +463,11 @@ struct Args {
     )]
     dir_yield_every: Option<usize>,
 
-    /// Linux: enable prefetch advise (posix_fadvise/readahead) (sets HYPERDU_PREFETCH=1)
+    /// Linux: enable prefetch advise (posix_fadvise/readahead)
     #[arg(
         long = "prefetch",
         action = ArgAction::SetTrue,
-        long_help = "Linuxでposix_fadvise/readaheadヒントを有効化します（HYPERDU_PREFETCH=1 相当）。"
+        long_help = "Linuxでposix_fadvise/readaheadヒントを有効化します。"
     )]
     prefetch: bool,
 
@@ -487,19 +487,19 @@ struct Args {
     )]
     win_ntquery: bool,
 
-    /// Enable live tuning (overrides env HYPERDU_TUNE)
+    /// Enable live tuning
     #[arg(
         long = "tune",
         action = ArgAction::SetTrue,
-        long_help = "ライブチューニングを有効化します。環境変数HYPERDU_TUNEを上書き。"
+        long_help = "ライブチューニングを有効化します。"
     )]
     tune: bool,
 
-    /// Live-tune interval in milliseconds (overrides env HYPERDU_TUNE_INTERVAL_MS)
+    /// Live-tune interval in milliseconds
     #[arg(
         long = "tune-interval-ms",
         value_name = "MS",
-        long_help = "ライブチューニングの実行間隔(ms)。環境変数HYPERDU_TUNE_INTERVAL_MSを上書きします。"
+        long_help = "ライブチューニングの実行間隔(ms)。"
     )]
     tune_interval_ms: Option<u64>,
 
@@ -620,9 +620,10 @@ struct Args {
         value_enum,
         default_value_t = PerfArg::Balanced,
         long_help = "性能プロファイルを選択。\n\
-    turbo: もっとも高速（物理サイズ計算オフ/概算サイズ/ハードリンク非重複化=カウント）\n\
-    balanced: 既定（バランス重視）\n\
-    strict: 互換性最優先（互換モード厳格/ハードリンク重複排除/エラー出力など）"
+    turbo: 最速。論理サイズのみ（物理計算オフ）/概算サイズ/ハードリンク重複排除なし。\n\
+            Linuxでは io_uring の SQPOLL/COOP を想定し、初期バッチ/深さを強めに設定（ライブチューナで追従）。\n\
+    balanced: 既定（バランス重視）。\n\
+    strict: 互換性最優先（du互換を厳格化/ハードリンク重複排除/エラー出力など）。"
     )]
     perf: PerfArg,
 }
@@ -963,6 +964,60 @@ fn main() -> Result<()> {
         }
         println!("recommended.dir_yield_every={best_yield}");
         println!("hint.nvme=65536-131072, hint.hdd=8192-16384");
+
+        fn shell_quote(token: &str) -> String {
+            if token.is_empty() {
+                return "\"\"".to_string();
+            }
+            if token.chars().any(|c| c.is_whitespace() || c == '"') {
+                let escaped = token.replace('"', "\\\"");
+                format!("\"{escaped}\"")
+            } else {
+                token.to_string()
+            }
+        }
+
+        let mut filtered_args: Vec<String> = Vec::new();
+        let mut skip_next = false;
+        for arg in std::env::args().skip(1) {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if arg == "--tune-only" || arg.starts_with("--tune-only=") {
+                continue;
+            }
+            if arg == "--tune-secs" || arg.starts_with("--tune-secs=") {
+                if arg == "--tune-secs" {
+                    skip_next = true;
+                }
+                continue;
+            }
+            if arg == "--dir-yield-every" || arg.starts_with("--dir-yield-every=") {
+                if arg == "--dir-yield-every" {
+                    skip_next = true;
+                }
+                continue;
+            }
+            filtered_args.push(arg);
+        }
+
+        filtered_args.push("--dir-yield-every".to_string());
+        filtered_args.push(best_yield.to_string());
+
+        let exe_display = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_name().map(|name| name.to_string_lossy().to_string()))
+            .map(|name| format!("./{name}"))
+            .unwrap_or_else(|| "./hyperdu-cli".to_string());
+
+        let mut pieces = Vec::with_capacity(filtered_args.len() + 1);
+        pieces.push(shell_quote(&exe_display));
+        for arg in &filtered_args {
+            pieces.push(shell_quote(arg));
+        }
+        let recommended_cmd = pieces.join(" ");
+        println!("recommended.command={recommended_cmd}");
         return Ok(());
     }
 

@@ -46,6 +46,17 @@ Use logical size for du-like output.
 .BR --perf=PROFILE
 Performance profile: turbo, balanced (default), strict.
 .TP
+.B turbo
+Fastest profile. Uses logical sizes only (no physical size calc), enables approximate sizes,
+and does not deduplicate hardlinks. On Linux, expects io_uring SQPOLL/COOP and applies
+stronger initial batch/depth (auto-tuned at runtime).
+.TP
+.B balanced
+Default balanced behavior.
+.TP
+.B strict
+Compatibility-first (du-compatible output stricter, deduplicate hardlinks, stricter error handling).
+.TP
 .BR --progress
 Print progress lines during scan to standard output.
 .TP
@@ -68,31 +79,31 @@ Pin SQPOLL thread to a CPU.
 Enable io_uring cooperative taskrun.
 .TP
 .BR --getdents-buf-kb=KiB
-Linux: set getdents64 buffer size in KiB (overrides HYPERDU_GETDENTS_BUF_KB).
+Linux: set getdents64 buffer size in KiB.
 .TP
 .BR --dir-yield-every=N
-Split large directories every N entries (overrides HYPERDU_DIR_YIELD_EVERY).
+Split large directories every N entries.
 .TP
 .BR --prefetch
-Linux: enable posix_fadvise/readahead hints (sets HYPERDU_PREFETCH=1).
+Linux: enable posix_fadvise/readahead hints.
 .TP
 .BR --pin-threads
-Linux: pin worker threads to CPUs (sets HYPERDU_PIN_THREADS=1).
+Linux: pin worker threads to CPUs.
 .TP
 .BR --win-ntquery
-Windows: use NT Query API based fast path (sets HYPERDU_WIN_USE_NTQUERY=1).
+Windows: use NT Query API based fast path.
 .TP
 .BR --tune
-Enable live tuning (overrides HYPERDU_TUNE).
+Enable live tuning.
 .TP
 .BR --tune-interval-ms=MS
-Set live tune interval in milliseconds (overrides HYPERDU_TUNE_INTERVAL_MS).
+Set live tune interval in milliseconds.
 .TP
 .BR --no-fs-auto
-Disable filesystem auto strategy (sets HYPERDU_FS_AUTO=0).
+Disable filesystem auto strategy.
 .TP
 .BR --galb-buf-kb=KiB
-macOS: set getattrlistbulk buffer size in KiB (overrides HYPERDU_GALB_BUF_KB).
+macOS: set getattrlistbulk buffer size in KiB.
 .TP
 .BR --classify=MODE
 Classify files by type: basic or deep.
