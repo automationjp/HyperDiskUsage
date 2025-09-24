@@ -1,6 +1,12 @@
 repos:
   - repo: local
     hooks:
+      - id: rust-clippy-autofix
+        name: Rust Clippy Autofix (nightly)
+        entry: bash scripts/clippy_fix.sh
+        language: system
+        pass_filenames: false
+        stages: [commit]
       - id: rust-lint
         name: Rust Lint (fmt + clippy)
         entry: bash scripts/lint.sh

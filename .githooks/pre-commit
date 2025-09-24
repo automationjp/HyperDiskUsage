@@ -6,6 +6,11 @@ if repo_root=$(git rev-parse --show-toplevel 2>/dev/null); then
   cd "$repo_root"
 fi
 
+# 1) Auto-apply machine-applicable Clippy fixes first (fast, best-effort)
+echo "[pre-commit] Running scripts/clippy_fix.sh (auto-fix)"
+bash scripts/clippy_fix.sh || true
+
+# 2) Standard fmt + clippy
 echo "[pre-commit] Running scripts/lint.sh (fmt + clippy)"
 if ! bash scripts/lint.sh; then
   echo "[pre-commit] Lint failed. Commit aborted." >&2
@@ -14,7 +19,7 @@ if ! bash scripts/lint.sh; then
 fi
 echo "[pre-commit] Lint OK"
 
-# Run cross-target clippy as part of pre-commit to catch OS-specific issues
+# 3) Cross-target clippy (macOS + Windows)
 echo "[pre-commit] Running scripts/lint_cross.sh (macOS + Windows clippy)"
 if ! bash scripts/lint_cross.sh --fast; then
   echo "[pre-commit] Cross clippy failed. Commit aborted." >&2
