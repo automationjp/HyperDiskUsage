@@ -57,6 +57,15 @@ function Build-And-Capture([string]$Package, [string]$Rustflags) {
   $psi.UseShellExecute = $false
   if ($Rustflags) { $psi.EnvironmentVariables["RUSTFLAGS"] = $Rustflags }
   $p = [System.Diagnostics.Process]::Start($psi)
+  $monitor = [System.Threading.Tasks.Task]::Run([System.Action]{
+    while (-not $using:p.HasExited) {
+      Start-Sleep -Seconds 5
+      if (-not $using:p.HasExited) {
+        $stamp = (Get-Date).ToString('HH:mm:ss')
+        Write-Host "  ... cargo build still running ($stamp)"
+      }
+    }
+  })
   $paths = New-Object System.Collections.Generic.HashSet[string]
   $lastHeartbeat = [DateTime]::UtcNow
   while (-not $p.StandardOutput.EndOfStream) {
@@ -82,6 +91,9 @@ function Build-And-Capture([string]$Package, [string]$Rustflags) {
     }
   }
   $p.WaitForExit()
+  if ($monitor -and -not $monitor.IsCompleted) {
+    $monitor.Wait()
+  }
   if ($p.ExitCode -ne 0) {
     $err = $p.StandardError.ReadToEnd()
     throw "cargo build failed: $err"

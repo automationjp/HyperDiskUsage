@@ -29,12 +29,29 @@ else
   bundle_args=()
 fi
 
-cargo bundle "${bundle_args[@]}" -p hyperdu-gui
+set +e
+out=$(cargo bundle "${bundle_args[@]}" -p hyperdu-gui 2>&1)
+rc=$?
+set -e
+if [[ $rc -ne 0 ]]; then
+  echo "$out" >&2
+  if [[ ${#bundle_args[@]} -gt 0 ]] && \
+     echo "$out" | grep -qi "cannot be used .*--profile"; then
+    echo "(info) retrying cargo bundle without explicit profile args"
+    cargo bundle -p hyperdu-gui
+  else
+    echo "error: cargo bundle failed" >&2
+    exit $rc
+  fi
+fi
 
-if [[ $PROFILE == release ]]; then
+if [[ -d target/release/bundle/osx/hyperdu-gui.app ]]; then
   app_path="target/release/bundle/osx/hyperdu-gui.app"
-else
+elif [[ -d target/debug/bundle/osx/hyperdu-gui.app ]]; then
   app_path="target/debug/bundle/osx/hyperdu-gui.app"
+else
+  echo "error: bundled app not found" >&2
+  exit 1
 fi
 outdir="dist"
 mkdir -p "$outdir"
