@@ -977,33 +977,138 @@ fn main() -> Result<()> {
             }
         }
 
-        let mut filtered_args: Vec<String> = Vec::new();
-        let mut skip_next = false;
-        for arg in std::env::args().skip(1) {
-            if skip_next {
-                skip_next = false;
-                continue;
-            }
+        let wants_logical_only = !opt.compute_physical;
+        let wants_approximate = opt.approximate_sizes;
+        let wants_count_links = opt.count_hardlinks;
+        let threads_recommended = opt.threads;
+
+        let raw_args: Vec<String> = std::env::args().skip(1).collect();
+        let mut filtered_args: Vec<String> = Vec::with_capacity(raw_args.len());
+        let mut had_threads = false;
+        let mut had_logical_only = false;
+        let mut had_approximate = false;
+        let mut had_count_links = false;
+        #[cfg(target_os = "windows")]
+        let mut had_win_ntquery = false;
+
+        let mut i = 0;
+        while i < raw_args.len() {
+            let arg = &raw_args[i];
             if arg == "--tune-only" || arg.starts_with("--tune-only=") {
+                i += 1;
                 continue;
             }
-            if arg == "--tune-secs" || arg.starts_with("--tune-secs=") {
-                if arg == "--tune-secs" {
-                    skip_next = true;
+            if arg == "--tune-secs" {
+                i += 2;
+                continue;
+            }
+            if arg.starts_with("--tune-secs=") {
+                i += 1;
+                continue;
+            }
+            if arg == "--dir-yield-every" {
+                i += 2;
+                continue;
+            }
+            if arg.starts_with("--dir-yield-every=") {
+                i += 1;
+                continue;
+            }
+            if arg == "--perf" {
+                if let Some(next) = raw_args.get(i + 1) {
+                    if next.eq_ignore_ascii_case("turbo") {
+                        i += 2;
+                        continue;
+                    }
+                    filtered_args.push(arg.clone());
+                    filtered_args.push(next.clone());
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+                continue;
+            }
+            if let Some(value) = arg.strip_prefix("--perf=") {
+                if value.eq_ignore_ascii_case("turbo") {
+                    i += 1;
+                    continue;
+                }
+                filtered_args.push(arg.clone());
+                i += 1;
+                continue;
+            }
+            if arg == "--threads" {
+                had_threads = true;
+                filtered_args.push(arg.clone());
+                if let Some(next) = raw_args.get(i + 1) {
+                    filtered_args.push(next.clone());
+                    i += 2;
+                } else {
+                    i += 1;
                 }
                 continue;
             }
-            if arg == "--dir-yield-every" || arg.starts_with("--dir-yield-every=") {
-                if arg == "--dir-yield-every" {
-                    skip_next = true;
-                }
+            if arg.starts_with("--threads=") {
+                had_threads = true;
+                filtered_args.push(arg.clone());
+                i += 1;
                 continue;
             }
-            filtered_args.push(arg);
+            if arg == "--logical-only" {
+                had_logical_only = true;
+                filtered_args.push(arg.clone());
+                i += 1;
+                continue;
+            }
+            if arg == "--approximate" {
+                had_approximate = true;
+                filtered_args.push(arg.clone());
+                i += 1;
+                continue;
+            }
+            if arg == "--count-links" {
+                had_count_links = true;
+                filtered_args.push(arg.clone());
+                i += 1;
+                continue;
+            }
+            if arg == "--no-count-links" {
+                had_count_links = true;
+                filtered_args.push(arg.clone());
+                i += 1;
+                continue;
+            }
+            #[cfg(target_os = "windows")]
+            if arg == "--win-ntquery" {
+                had_win_ntquery = true;
+                filtered_args.push(arg.clone());
+                i += 1;
+                continue;
+            }
+            filtered_args.push(arg.clone());
+            i += 1;
         }
 
-        filtered_args.push("--dir-yield-every".to_string());
-        filtered_args.push(best_yield.to_string());
+        let mut recommended_args: Vec<String> = Vec::new();
+        if !had_threads && threads_recommended > 0 {
+            recommended_args.push("--threads".to_string());
+            recommended_args.push(threads_recommended.to_string());
+        }
+        if wants_logical_only && !had_logical_only {
+            recommended_args.push("--logical-only".to_string());
+        }
+        if wants_approximate && !had_approximate {
+            recommended_args.push("--approximate".to_string());
+        }
+        if wants_count_links && !had_count_links {
+            recommended_args.push("--count-links".to_string());
+        }
+        #[cfg(target_os = "windows")]
+        if !had_win_ntquery {
+            recommended_args.push("--win-ntquery".to_string());
+        }
+        recommended_args.push("--dir-yield-every".to_string());
+        recommended_args.push(best_yield.to_string());
 
         let exe_display = std::env::current_exe()
             .ok()
@@ -1011,8 +1116,11 @@ fn main() -> Result<()> {
             .map(|name| format!("./{name}"))
             .unwrap_or_else(|| "./hyperdu-cli".to_string());
 
-        let mut pieces = Vec::with_capacity(filtered_args.len() + 1);
+        let mut pieces = Vec::with_capacity(1 + recommended_args.len() + filtered_args.len());
         pieces.push(shell_quote(&exe_display));
+        for arg in &recommended_args {
+            pieces.push(shell_quote(arg));
+        }
         for arg in &filtered_args {
             pieces.push(shell_quote(arg));
         }
