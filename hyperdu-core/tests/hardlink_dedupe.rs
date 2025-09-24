@@ -5,10 +5,9 @@ fn hardlink_dedupe_unix() {
     use std::{
         fs::{create_dir_all, hard_link, File},
         io::Write,
-        path::PathBuf,
     };
 
-    use hyperdu_core::{scan_directory, Options, Stat};
+    use hyperdu_core::{scan_directory, Options};
 
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("d");
@@ -32,7 +31,7 @@ fn hardlink_dedupe_unix() {
         .fold((0, 0), |acc, x| (acc.0 + x.0, acc.1 + x.1));
     // dedupe: one logical file counted across the subtree
     assert_eq!(files_sum, 1, "dedupe should count one logical file");
-    assert!(logical_sum >= 8192 && logical_sum < 16384);
+    assert!((8192..16384).contains(&logical_sum));
 
     // non-dedupe（ハードリンクを別物としてカウント）
     let mut opt2 = opt.clone();
@@ -47,3 +46,4 @@ fn hardlink_dedupe_unix() {
     assert_eq!(files_sum2, 2);
     assert!(logical_sum2 >= 16384);
 }
+#![allow(clippy::field_reassign_with_default)]

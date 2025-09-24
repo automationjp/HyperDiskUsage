@@ -103,3 +103,4 @@ fn bench_scan(c: &mut Criterion) {
 
 criterion_group!(benches, bench_scan);
 criterion_main!(benches);
+#![allow(clippy::field_reassign_with_default)]

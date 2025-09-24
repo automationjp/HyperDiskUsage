@@ -170,6 +170,7 @@ fn estimate_root_width(root: &std::path::Path, budget_ms: u64) -> usize {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::field_reassign_with_default)]
     use std::{
         collections::HashSet,
         path::{Path, PathBuf},
@@ -178,9 +179,10 @@ mod tests {
     use ahash::AHashMap as HashMap;
 
     use super::*;
-    use crate::{Options, Stat};
+    use crate::Options;
 
     #[derive(Clone, Debug, PartialEq, Eq)]
+    #[allow(dead_code)]
     enum MockKind {
         Dir,
         File(u64),
@@ -214,7 +216,7 @@ mod tests {
             let opt = ctx.options;
             let dir = dctx.dir;
             let depth = dctx.depth;
-            let stat_cur = map.entry(dir.to_path_buf()).or_insert(Stat::default());
+            let stat_cur = map.entry(dir.to_path_buf()).or_default();
             let Some(items) = self.entries.get(dir) else {
                 return;
             };
@@ -237,7 +239,7 @@ mod tests {
                     MockKind::File(sz) => {
                         if *sz >= opt.min_file_size {
                             stat_cur.logical += *sz;
-                            stat_cur.physical += if opt.compute_physical { *sz } else { *sz };
+                            stat_cur.physical += *sz;
                             stat_cur.files += 1;
                             ctx.report_progress(opt, Some(&child));
                         }
@@ -259,7 +261,7 @@ mod tests {
                         }
                         if *sz >= opt.min_file_size {
                             stat_cur.logical += *sz;
-                            stat_cur.physical += if opt.compute_physical { *sz } else { *sz };
+                            stat_cur.physical += *sz;
                             stat_cur.files += 1;
                             ctx.report_progress(opt, Some(&child));
                         }

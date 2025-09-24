@@ -130,7 +130,9 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
 
             let name_len = (0..).take_while(|&i| data.cFileName[i] != 0).count();
             let name = OsString::from_wide(&data.cFileName[..name_len]);
-            if name == OsString::from(".") || name == OsString::from("..") {
+            if name.as_os_str() == std::ffi::OsStr::new(".")
+                || name.as_os_str() == std::ffi::OsStr::new("..")
+            {
                 continue;
             }
 
@@ -370,7 +372,9 @@ fn try_fast_enum(
             } as *const u16;
             let name_slice = unsafe { std::slice::from_raw_parts(name_ptr, name_len) };
             let os = std::ffi::OsString::from_wide(name_slice);
-            if os == std::ffi::OsString::from(".") || os == std::ffi::OsString::from("..") {
+            if os.as_os_str() == std::ffi::OsStr::new(".")
+                || os.as_os_str() == std::ffi::OsStr::new("..")
+            {
                 if next == 0 {
                     break;
                 } else {

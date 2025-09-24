@@ -9,6 +9,22 @@ set -euo pipefail
 #     --cross  Also attempt fixes for macOS/Windows targets
 
 CROSS=0
+cd_repo_root() {
+  # Prefer Git toplevel
+  if rr=$(git rev-parse --show-toplevel 2>/dev/null); then
+    cd "$rr" || { echo "error: failed to cd to repo root $rr" >&2; exit 1; }
+    return
+  fi
+  # Fallback: derive from this script path
+  local sp="${BASH_SOURCE[0]}"
+  case "$sp" in /*) ;; *) sp="$PWD/$sp" ;; esac
+  local rr
+  rr=$(cd "$(dirname "$sp")/.." && pwd) || {
+    echo "error: could not resolve repository root" >&2; exit 1; }
+  cd "$rr" || { echo "error: cannot cd to $rr" >&2; exit 1; }
+}
+
+cd_repo_root
 for a in "$@"; do case "$a" in --cross) CROSS=1;; -h|--help) sed -n '1,80p' "$0"; exit 0;; *) echo "unknown arg: $a"; exit 1;; esac; done
 
 command -v rustup >/dev/null 2>&1 || { echo "error: rustup not found" >&2; exit 1; }
@@ -38,4 +54,3 @@ echo "==> rustfmt"
 cargo fmt --all || true
 
 echo "OK: clippy fixes applied (if any)"
-
