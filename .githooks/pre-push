@@ -7,8 +7,6 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$repo_root"
 
-echo "[pre-push] Running scripts/lint.sh (fmt + clippy)"
-bash scripts/lint.sh
-echo "[pre-push] Running scripts/lint_cross.sh (macOS + Windows clippy)"
-bash scripts/lint_cross.sh --fast
+echo "[pre-push] Running scripts/lint_all.sh"
+bash scripts/lint_all.sh
 echo "[pre-push] OK"
