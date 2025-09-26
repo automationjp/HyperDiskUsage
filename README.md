@@ -186,18 +186,6 @@ hyperdu-cli /large/directory --progress --tune-log
 hyperdu-cli /large/directory --tune-only --tune-secs 2
 ```
 
-### 環境変数による詳細設定
-
-```bash
-# getdents バッファサイズ調整（Linux）
-export HYPERDU_GETDENTS_BUF_KB=256
-
-# 大規模ディレクトリの分割処理（ライブ調整で上書きされる）
-export HYPERDU_DIR_YIELD_EVERY=10000
-
-# CPUピニング有効化（Linux）
-export HYPERDU_PIN_THREADS=1
-
 ## 🖼️ GUI版
 
 GUI版は `egui` フレームワークを使用した直感的なインターフェースを提供：
@@ -368,7 +356,7 @@ scripts/bench.sh --root /path/to/dir   # classify-basic / classify-deep / incr-u
 
 ### ランタイムチューニング（任意・上級者）
 
-- 環境変数 `HYPERDU_TUNE=1` でアダプティブチューナを有効化（内部のdir_yield/uringバッチ/有効スレッド数を動的調整）
+- `hyperdu-cli … --tune` でアダプティブチューナを有効化（dir_yield/uringバッチ/実行スレッド数を動的調整）
 - スレッドは `active_threads` を動的に制御（[1, threads] 範囲）
   - I/O待ちやSQE失敗が多い→縮退
   - throughput改善が続く→段階的に増加

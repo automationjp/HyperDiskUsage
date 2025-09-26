@@ -9,7 +9,7 @@ fn bin_path() -> String {
         return p;
     }
     let target = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
-    format!("{}/debug/hyperdu-cli", target)
+    format!("{target}/debug/hyperdu-cli")
 }
 
 #[test]
@@ -22,7 +22,7 @@ fn du_tab_sorted_blocks() {
 
     let exe = bin_path();
     if std::fs::metadata(&exe).is_err() {
-        eprintln!("skip: test binary not found at {}", exe);
+        eprintln!("skip: test binary not found at {exe}");
         return;
     }
     // GNU互換、バイト単位（-b）、タブ区切り、パス順（アルファベット）
