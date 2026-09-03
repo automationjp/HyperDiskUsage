@@ -15,6 +15,22 @@ thread_local! {
     static TL_RING: RefCell<Option<RingCtx>> = const { RefCell::new(None) };
 }
 
+/// Whether the named child sits on a different filesystem than `cur_dev`.
+/// `statx` always fills the device fields, so a minimal mask is enough.
+fn leaves_filesystem(dirfd: i32, name: &[u8], cur_dev: u64) -> bool {
+    let Ok(cn) = CString::new(name) else {
+        return false;
+    };
+    let mut stx: libc::statx = unsafe { std::mem::zeroed() };
+    let flags = libc::AT_SYMLINK_NOFOLLOW | libc::AT_STATX_DONT_SYNC | libc::AT_NO_AUTOMOUNT;
+    let rc = unsafe { libc::statx(dirfd, cn.as_ptr(), flags, libc::STATX_TYPE, &mut stx) };
+    if rc != 0 {
+        return false;
+    }
+    let child_dev = ((stx.stx_dev_major as u64) << 32) | (stx.stx_dev_minor as u64);
+    child_dev != cur_dev
+}
+
 pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let opt = ctx.options;
     // Try io_uring ring (once per thread)
@@ -374,13 +390,20 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
             }
             if opt.needs_path_filter {
                 let child = dir.join(std::ffi::OsStr::from_bytes(name_slice));
-                if opt.needs_path_filter && crate::filters::path_excluded(&child, opt) {
+                if crate::filters::path_excluded(&child, opt) {
                     bpos += reclen;
                     continue;
                 }
             }
             if dtype == libc::DT_DIR {
                 if opt.max_depth == 0 || depth < opt.max_depth {
+                    // Directories never enter the STATX pipeline below, so the
+                    // filesystem-boundary check has to happen here. The extra
+                    // statx only runs for `-x` scans.
+                    if opt.one_file_system && leaves_filesystem(fd, name_slice, cur_dev) {
+                        bpos += reclen;
+                        continue;
+                    }
                     let child = dir.join(std::ffi::OsStr::from_bytes(name_slice));
                     ctx.enqueue_dir(child, depth + 1);
                 }
