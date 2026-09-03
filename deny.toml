@@ -1,12 +1,28 @@
 # cargo-deny configuration
+#
+# Schema: cargo-deny 0.16 or newer. The keys this file used before
+# (`vulnerability`, `unsound`, `notice`, `unlicensed`, `copyleft`) were removed
+# upstream, which made the whole file fail to deserialize, so `cargo deny check`
+# could not run at all. Security advisories and unlicensed crates are now always
+# denied, so only the still-configurable knobs remain here.
 
 [advisories]
-vulnerability = "warn"
-unmaintained = "warn"
+# Report unmaintained crates anywhere in the graph, not just direct dependencies.
+unmaintained = "all"
 yanked = "warn"
-unsound = "warn"
-notice = "warn"
-ignore = []
+# Advisories were previously configured as "warn", which the current schema no
+# longer offers: every advisory now fails the check. The entries below are the
+# ones outstanding when this file was migrated. They all come from the GUI's
+# dependency tree and need an upstream release (egui / eframe / zbus), so they
+# are listed explicitly rather than left to block every push. Anything new still
+# fails, which is the point of the check. Re-check this list when egui updates.
+ignore = [
+  "RUSTSEC-2025-0057", # fxhash unmaintained (egui)
+  "RUSTSEC-2024-0384", # instant unmaintained (egui, parking_lot 0.11)
+  "RUSTSEC-2026-0192", # ttf-parser unmaintained (egui)
+  "RUSTSEC-2026-0194", # quick-xml quadratic attribute check (ashpd/zbus, Linux GUI)
+  "RUSTSEC-2026-0195", # quick-xml namespace allocation DoS (ashpd/zbus, Linux GUI)
+]
 
 [bans]
 multiple-versions = "warn"
@@ -15,17 +31,28 @@ deny = []
 skip = []
 
 [licenses]
-unlicensed = "deny"
-copyleft = "warn"
-default = "allow"
+# Anything not listed here fails the check. The old `default = "allow"` has no
+# equivalent in the current schema, so this enumerates the licences actually
+# present in the dependency graph; a newly introduced licence now shows up as a
+# failure to review rather than passing silently.
 allow = [
-  "MIT",
+  "0BSD",
   "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
   "BSD-2-Clause",
   "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
   "ISC",
-  "Zlib",
+  "MIT",
+  "OFL-1.1",         # epaint default fonts (GUI only)
+  "Ubuntu-font-1.0", # epaint default fonts (GUI only)
+  "Unicode-3.0",
   "Unicode-DFS-2016",
+  "Unlicense",
+  "Zlib",
+  # Weak copyleft, build-time only: r-efi, pulled in through wasi.
+  "LGPL-2.1-or-later",
 ]
 exceptions = []
 
@@ -36,4 +63,3 @@ allow-registry = [
   "https://github.com/rust-lang/crates.io-index",
 ]
 allow-git = []
-
