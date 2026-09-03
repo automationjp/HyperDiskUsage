@@ -356,7 +356,9 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                     #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
                     profiling::scope!("statx_unknown");
                     let need_blocks = opt.compute_physical;
-                    let need_ino = !opt.count_hardlinks;
+                    // The inode is also what cycle detection keys on, so it is
+                    // required whenever links are followed.
+                    let need_ino = !opt.count_hardlinks || opt.follow_links;
                     let mut mask = libc::STATX_SIZE | libc::STATX_MODE; // MODE needed to detect type in unknown branch
                     if need_blocks {
                         mask |= libc::STATX_BLOCKS;
@@ -371,6 +373,19 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                         if ftype == libc::S_IFDIR {
                             if opt.max_depth == 0 || depth < opt.max_depth {
                                 use std::ffi::OsStr;
+                                // Reached through a followed link this can be
+                                // another device, or an ancestor: the same two
+                                // checks the DT_DIR branch applies.
+                                let dev =
+                                    ((stx.stx_dev_major as u64) << 32) | (stx.stx_dev_minor as u64);
+                                if opt.one_file_system && dev != cur_dev {
+                                    bpos += d_reclen;
+                                    continue;
+                                }
+                                if check_visited_directory(opt, dev, stx.stx_ino) {
+                                    bpos += d_reclen;
+                                    continue;
+                                }
                                 let child_path = dir.join(OsStr::from_bytes(name_slice));
                                 ctx.enqueue_dir(child_path, depth + 1);
                             }

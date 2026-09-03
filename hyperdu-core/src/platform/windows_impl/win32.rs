@@ -10,9 +10,12 @@ use std::sync::atomic::Ordering;
 
 use windows::{
     core::PCWSTR,
-    Win32::Storage::FileSystem::{
-        FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
-        FIND_FIRST_EX_LARGE_FETCH, WIN32_FIND_DATAW,
+    Win32::{
+        Foundation::ERROR_NO_MORE_FILES,
+        Storage::FileSystem::{
+            FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
+            FIND_FIRST_EX_LARGE_FETCH, WIN32_FIND_DATAW,
+        },
     },
 };
 
@@ -27,6 +30,7 @@ use crate::{
 
 const STAR: u16 = b'*' as u16;
 const SEP: u16 = b'\\' as u16;
+const COLON: u16 = b':' as u16;
 
 pub(super) fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let opt = ctx.options;
@@ -34,7 +38,10 @@ pub(super) fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMa
     // <open form>\*\0
     let mut pattern = to_wide_for_open(dir);
     pattern.pop();
-    if pattern.last() != Some(&SEP) {
+    // `C:` names the drive's current directory. Appending a separator here would
+    // enumerate the drive root instead, while `ChildPathBuilder` keeps building
+    // `C:name`, so the names and the paths would come from different directories.
+    if !matches!(pattern.last(), Some(&SEP) | Some(&COLON)) {
         pattern.push(SEP);
     }
     pattern.push(STAR);
@@ -92,6 +99,13 @@ pub(super) fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMa
         };
         handle_entry(ctx, dctx.depth, &mut st, stat_cur, &e);
         if unsafe { FindNextFileW(handle, &mut data) }.is_err() {
+            // Running out of entries is the normal exit; anything else truncated
+            // this directory's totals and has to be reported, as the NT backend
+            // reports its own mid-enumeration failures.
+            if std::io::Error::last_os_error().raw_os_error() != Some(ERROR_NO_MORE_FILES.0 as i32)
+            {
+                record_error(opt, &last_os_error_systemcall(dir, "FindNextFileW"));
+            }
             break;
         }
     }

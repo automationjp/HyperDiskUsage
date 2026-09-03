@@ -453,8 +453,20 @@ fn run_worker(
         // The counter must come back down even if process_dir unwinds, or the
         // remaining workers would wait for a job that will never finish.
         let done = FinishOnDrop(sched);
-        scanner.process_dir(&ctx, &dctx, &mut local_map);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scanner.process_dir(&ctx, &dctx, &mut local_map);
+        }));
         drop(done);
+        if outcome.is_err() {
+            // This worker is leaving and its deque goes with it. Release the
+            // jobs still queued there, or the in-flight count would never reach
+            // zero and the remaining workers would spin forever.
+            crate::error_handling::report_error(options, &dir, "scan worker panicked");
+            while local.pop().is_some() {
+                sched.finish_job();
+            }
+            break;
+        }
     }
     local_map
 }

@@ -16,6 +16,12 @@ fn write_bytes(p: &Path, n: usize) {
 }
 
 fn quiet_opts() -> Options {
+    // The backend choice is cached in a process-wide OnceLock on the first scan.
+    // Pin it here so an inherited HYPERDU_WIN_USE_NTQUERY=0 cannot silently move
+    // these tests onto the Win32 fallback, which windows_fallback.rs covers.
+    static PIN_NT_BACKEND: std::sync::Once = std::sync::Once::new();
+    PIN_NT_BACKEND.call_once(|| std::env::set_var("HYPERDU_WIN_USE_NTQUERY", "1"));
+
     let mut opt = Options::default();
     opt.progress_every = 0;
     opt.threads = 4;
