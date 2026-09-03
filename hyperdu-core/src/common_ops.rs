@@ -41,6 +41,33 @@ pub fn report_file_progress(opt: &Options, total_files: &AtomicU64, path: Option
     }
 }
 
+/// Batched progress: account for `n` files at once. The callbacks fire when the
+/// running total crosses a multiple of `progress_every`; `path` is evaluated
+/// only in that case.
+#[inline]
+pub fn report_files_batch(
+    opt: &Options,
+    total_files: &AtomicU64,
+    n: u64,
+    path: impl FnOnce() -> std::path::PathBuf,
+) {
+    if n == 0 || opt.progress_every == 0 {
+        return;
+    }
+    let every = opt.progress_every;
+    let prev = total_files.fetch_add(n, Ordering::Relaxed);
+    let now = prev + n;
+    if now / every == prev / every {
+        return;
+    }
+    if let Some(cb) = &opt.progress_callback {
+        cb(now);
+    }
+    if let Some(pcb) = &opt.progress_path_callback {
+        pcb(&path());
+    }
+}
+
 /// Check if a directory has been visited (loop detection)
 /// Returns true if this directory should be skipped
 #[cfg(unix)]
@@ -51,10 +78,13 @@ pub fn check_visited_directory(opt: &Options, dev: u64, ino: u64) -> bool {
     }
 
     if let Some(vset) = &opt.visited_dirs {
-        // Bloom filter for fast pre-check
+        // The bloom filter only gives a fast "definitely new" answer. Either way
+        // the exact set must record the entry, or the second visit would also be
+        // reported as new and a cycle would be entered twice before it is cut.
         if let Some(bf) = &opt.visited_bloom {
             if !bf.test_and_set(dev, ino) {
-                return false; // Definitely not visited
+                vset.insert((dev, ino), ());
+                return false;
             }
         }
 
@@ -89,11 +119,10 @@ pub fn calculate_physical_size(opt: &Options, logical: u64, blocks: u64) -> u64 
     }
 }
 
-/// Check if path should be excluded based on fast exclude optimization (Linux-only path)
+/// True when backends may skip building the full child path for filtering
+/// (no glob/regex filters and no contains-pattern with a path separator).
 #[cfg(target_os = "linux")]
 #[inline]
 pub fn should_fast_exclude(opt: &Options) -> bool {
-    !opt.exclude_contains
-        .iter()
-        .any(|s| s.as_bytes().iter().any(|&c| c == b'/' || c == b'\\'))
+    !opt.needs_path_filter
 }

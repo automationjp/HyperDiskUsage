@@ -145,6 +145,7 @@ macro_rules! try_or_continue {
 
 /// Build a SystemCall error from the last OS error (errno/GetLastError)
 #[inline]
+#[cfg_attr(windows, allow(dead_code))]
 pub fn last_os_error_systemcall(path: &Path, call: &'static str) -> ScanError {
     let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(-1);
     ScanError::SystemCall {

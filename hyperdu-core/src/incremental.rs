@@ -7,7 +7,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sled::IVec;
 
-use crate::{filters::path_excluded, Options};
+use crate::{filters::entry_excluded, Options};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathSnapshot {
@@ -64,7 +64,7 @@ pub fn snapshot_walk_and_update(db: &sled::Db, root: &Path, opt: &Options) -> Re
         for ent in rd {
             let Ok(ent) = ent else { continue };
             let p = ent.path();
-            if path_excluded(&p, opt) {
+            if entry_excluded(&p, opt) {
                 continue;
             }
             let Ok(md) = ent.metadata() else { continue };
@@ -115,7 +115,7 @@ pub fn compute_delta(db: &sled::Db, root: &Path, opt: &Options) -> Result<DeltaS
         for ent in rd {
             let Ok(ent) = ent else { continue };
             let p = ent.path();
-            if path_excluded(&p, opt) {
+            if entry_excluded(&p, opt) {
                 continue;
             }
             let Ok(md) = ent.metadata() else { continue };

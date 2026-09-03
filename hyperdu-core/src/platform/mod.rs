@@ -32,8 +32,12 @@ pub fn process_dir_wrapped(ctx: &ScanContext, dir_ctx: &DirContext, map: &mut St
     // Prefer io_uring by default when compiled and supported; otherwise fallback to getdents64
     #[cfg(all(feature = "uring", not(target_env = "musl")))]
     {
-        // Runtime guard: allow disabling uring via options or env
+        // Runtime guard: allow disabling uring via options or env.
+        // The io_uring backend discovers subdirectories from d_type alone, so it
+        // has no inode to test for symlink cycles; the getdents64 backend does.
+        // Following links therefore has to use the latter.
         let disable = ctx.options.disable_uring
+            || ctx.options.follow_links
             || std::env::var("HYPERDU_DISABLE_URING").ok().as_deref() == Some("1")
             || std::env::var("HYPERDU_DISABLE_URING")
                 .ok()

@@ -5,7 +5,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use std::{
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -13,7 +13,8 @@ use std::{
 use ahash::AHashMap as HashMap;
 use aho_corasick::AhoCorasick;
 use anyhow::{anyhow, Result};
-use crossbeam_deque::{Injector, Steal, Worker};
+use crossbeam_deque::Worker;
+use crossbeam_utils::Backoff;
 use dashmap::DashMap;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use regex::RegexSet;
@@ -30,6 +31,7 @@ mod options; // for OptionsBuilder
 mod platform;
 mod rollup;
 mod scanner; // FileSystemScanner + platform default
+mod scheduler;
 mod tuning;
 
 pub use options::{
@@ -41,6 +43,9 @@ pub use scanner::auto_parallel_scan;
 #[cfg(feature = "rayon-par")]
 pub use scanner::parallel_scan;
 pub use scanner::{platform_scanner, FileSystemScanner, PlatformScanner};
+pub(crate) use scheduler::{Job, Scheduler};
+
+pub(crate) use crate::filters::path_excluded;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompatMode {
@@ -50,11 +55,27 @@ pub enum CompatMode {
     PosixStrict,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeuristicsMode {
+    Auto,
+    OuterOnly,
+    InnerOnly,
+}
+
 #[derive(Default, Clone, Copy, Serialize, Debug)]
 pub struct Stat {
     pub logical: u64,
     pub physical: u64,
     pub files: u64,
+}
+
+impl Stat {
+    #[inline]
+    pub(crate) fn add(&mut self, other: &Stat) {
+        self.logical += other.logical;
+        self.physical += other.physical;
+        self.files += other.files;
+    }
 }
 
 #[derive(Clone)]
@@ -85,6 +106,15 @@ pub struct Options {
     pub exclude_glob: Vec<String>,
     pub exclude_regex_set: Option<RegexSet>,
     pub exclude_glob_set: Option<GlobSet>,
+    /// Compiled by the scan bootstrap: `exclude_contains` as UTF-16 for name-level
+    /// matching on Windows without per-entry string conversion.
+    #[doc(hidden)]
+    pub exclude_contains_w: Vec<Vec<u16>>,
+    /// Compiled by the scan bootstrap: true when any filter needs the full path
+    /// (glob/regex present, or a contains-pattern includes a path separator).
+    /// When false, backends may skip building child paths for files entirely.
+    #[doc(hidden)]
+    pub needs_path_filter: bool,
     // Compatibility and correctness knobs
     pub compat_mode: CompatMode,
     pub count_hardlinks: bool, // if true, count hardlinks as separate (non-GNU). Default false = dedupe hardlinks like GNU du
@@ -100,8 +130,11 @@ pub struct Options {
     pub tune_interval_ms: u64,
     pub heuristics_mode: HeuristicsMode,
     pub prefer_inner_rayon: bool,
-    // Windows-specific tuning knobs
+    /// Legacy Windows knob, kept for configuration compatibility. The Windows
+    /// backend now obtains file ids and allocation sizes from directory
+    /// enumeration and never opens per-file handles, so this has no effect.
     pub win_allow_handle: bool,
+    /// Legacy Windows knob (see `win_allow_handle`). No effect.
     pub win_handle_sample_every: u64,
 }
 
@@ -167,6 +200,8 @@ impl Default for Options {
             exclude_glob: Vec::new(),
             exclude_regex_set: None,
             exclude_glob_set: None,
+            exclude_contains_w: Vec::new(),
+            needs_path_filter: false,
             compat_mode: CompatMode::HyperDU,
             count_hardlinks: false,
             inode_cache: None,
@@ -189,14 +224,14 @@ impl Default for Options {
 // Lightweight Bloom filter for (dev,ino) pairs to reduce HashMap lookups
 pub struct Bloom {
     mask: usize,
-    bits: Box<[std::sync::atomic::AtomicU64]>,
+    bits: Box<[AtomicU64]>,
 }
 impl Bloom {
     pub fn with_bits(n_bits: usize) -> Self {
         let n = n_bits.next_power_of_two().max(1 << 20); // at least ~1M bits
         let words = n.div_ceil(64);
-        let mut v: Vec<std::sync::atomic::AtomicU64> = Vec::with_capacity(words);
-        v.resize_with(words, || std::sync::atomic::AtomicU64::new(0));
+        let mut v: Vec<AtomicU64> = Vec::with_capacity(words);
+        v.resize_with(words, || AtomicU64::new(0));
         Self {
             mask: n - 1,
             bits: v.into_boxed_slice(),
@@ -220,22 +255,22 @@ impl Bloom {
         let i2 = i2 & self.mask;
         let w1 = &self.bits[i1 / 64];
         let w2 = &self.bits[i2 / 64];
-        let old1 = w1.fetch_or(b1, std::sync::atomic::Ordering::Relaxed);
-        let old2 = w2.fetch_or(b2, std::sync::atomic::Ordering::Relaxed);
+        let old1 = w1.fetch_or(b1, Ordering::Relaxed);
+        let old2 = w2.fetch_or(b2, Ordering::Relaxed);
         (old1 & b1 != 0) & (old2 & b2 != 0)
     }
 }
 
 pub type StatMap = HashMap<PathBuf, Stat>;
 
-// Lightweight, zero-cost wrappers to reduce parameter explosion in hot calls.
-// These are constructed at call-sites and are expected to be fully inlined.
+/// Per-worker view of the scan. Constructed on the worker thread and handed to
+/// backends by reference; expected to be fully inlined.
 #[derive(Clone, Copy)]
 pub struct ScanContext<'a> {
     pub(crate) options: &'a Options,
-    pub(crate) high_injector: &'a Injector<Job>,
-    pub(crate) normal_injector: &'a Injector<Job>,
-    pub(crate) total_files: &'a std::sync::atomic::AtomicU64,
+    pub(crate) sched: &'a Scheduler,
+    pub(crate) local: &'a Worker<Job>,
+    pub(crate) total_files: &'a AtomicU64,
 }
 
 #[derive(Clone, Copy)]
@@ -246,18 +281,24 @@ pub struct DirContext<'a> {
 }
 
 impl<'a> ScanContext<'a> {
+    /// Schedule a discovered subdirectory. Goes to the calling worker's own
+    /// deque; idle workers steal from it.
     #[inline]
     pub fn enqueue_dir(&self, path: PathBuf, depth: u32) {
-        self.normal_injector.push(Job {
-            dir: path,
-            depth,
-            resume: None,
-        });
+        self.sched.push_local(
+            self.local,
+            Job {
+                dir: path,
+                depth,
+                resume: None,
+            },
+        );
     }
 
+    /// Schedule the continuation of a large directory (high priority).
     #[inline]
     pub fn enqueue_resume(&self, path: PathBuf, depth: u32, resume: u64) {
-        self.high_injector.push(Job {
+        self.sched.push_high(Job {
             dir: path,
             depth,
             resume: Some(resume),
@@ -268,16 +309,30 @@ impl<'a> ScanContext<'a> {
     pub fn report_progress(&self, opt: &Options, path: Option<&Path>) {
         crate::common_ops::report_file_progress(opt, self.total_files, path);
     }
+
+    /// Batched progress: account for `n` files at once. `path` is only
+    /// evaluated when a callback actually fires.
+    #[inline]
+    pub fn report_progress_batch(&self, opt: &Options, n: u64, path: impl FnOnce() -> PathBuf) {
+        crate::common_ops::report_files_batch(opt, self.total_files, n, path);
+    }
 }
 
 #[inline]
 fn compile_filters_in_place(opt: &mut Options) {
-    if !opt.exclude_contains.is_empty() {
-        let pats: Vec<&str> = opt.exclude_contains.iter().map(|s| s.as_str()).collect();
-        opt.exclude_ac = AhoCorasick::new(&pats).ok();
+    // Empty patterns must be dropped: an empty needle matches at every position,
+    // which would exclude the whole tree.
+    let pats: Vec<&str> = opt
+        .exclude_contains
+        .iter()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.as_str())
+        .collect();
+    opt.exclude_ac = if pats.is_empty() {
+        None
     } else {
-        opt.exclude_ac = None;
-    }
+        AhoCorasick::new(&pats).ok()
+    };
     if !opt.exclude_regex.is_empty() {
         if let Ok(rs) = RegexSet::new(&opt.exclude_regex) {
             opt.exclude_regex_set = Some(rs);
@@ -298,18 +353,144 @@ fn compile_filters_in_place(opt: &mut Options) {
     } else {
         opt.exclude_glob_set = None;
     }
-}
-
-#[derive(Clone, Debug)]
-struct Job {
-    dir: PathBuf,
-    depth: u32,
-    resume: Option<u64>,
+    opt.exclude_contains_w = opt
+        .exclude_contains
+        .iter()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.encode_utf16().collect())
+        .collect();
+    let contains_has_separator = opt
+        .exclude_contains
+        .iter()
+        .any(|s| s.bytes().any(|c| c == b'/' || c == b'\\'));
+    opt.needs_path_filter =
+        contains_has_separator || opt.exclude_glob_set.is_some() || opt.exclude_regex_set.is_some();
 }
 
 pub fn scan_directory(root: impl AsRef<Path>, opt: &Options) -> Result<StatMap> {
     let scanner = Arc::new(crate::scanner::platform_scanner());
     scan_directory_with(root, opt, scanner)
+}
+
+/// Prepare shared state for a scan: compiled options and a scheduler seeded with the root.
+fn prepare_scan(
+    root: &Path,
+    opt: &Options,
+    threads: usize,
+) -> (Arc<Options>, Vec<Worker<Job>>, Arc<Scheduler>) {
+    let mut compiled = opt.clone();
+    compile_filters_in_place(&mut compiled);
+    // Following links can revisit a directory forever (symlink or junction
+    // pointing at an ancestor). Cycle detection is mandatory, not opt-in.
+    if compiled.follow_links && compiled.visited_dirs.is_none() {
+        compiled.visited_dirs = Some(Arc::new(DashMap::with_capacity(1024)));
+        if compiled.visited_bloom.is_none() {
+            compiled.visited_bloom = Some(Arc::new(Bloom::with_bits(1 << 20)));
+        }
+    }
+    let workers = Scheduler::make_workers(threads);
+    let sched = Arc::new(Scheduler::new(&workers));
+    sched.push_high(Job {
+        dir: root.to_path_buf(),
+        depth: 0,
+        resume: None,
+    });
+    (Arc::new(compiled), workers, sched)
+}
+
+/// Releases one job from the scheduler's in-flight count, including on unwind.
+struct FinishOnDrop<'a>(&'a Scheduler);
+
+impl Drop for FinishOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.finish_job();
+    }
+}
+
+/// Worker loop shared by the thread-based and rayon-based schedulers.
+fn run_worker(
+    index: usize,
+    local: Worker<Job>,
+    sched: &Scheduler,
+    options: &Options,
+    total_files: &AtomicU64,
+    scanner: &dyn FileSystemScanner,
+) -> StatMap {
+    #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
+    profiling::register_thread!();
+    let mut local_map: StatMap = HashMap::default();
+    let mut next = index;
+    let backoff = Backoff::new();
+    loop {
+        if options.cancel.load(Ordering::Relaxed) || sched.is_finished() {
+            break;
+        }
+        // Runtime thread throttling: only the first `active_threads` workers take jobs.
+        if index >= options.active_threads.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            continue;
+        }
+        let Some(Job { dir, depth, resume }) = sched.find_job(&local, &mut next) else {
+            if !sched.wait_for_work(&backoff) {
+                break;
+            }
+            continue;
+        };
+        backoff.reset();
+        #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
+        profiling::scope!("process_dir_loop");
+        let ctx = ScanContext {
+            options,
+            sched,
+            local: &local,
+            total_files,
+        };
+        let dctx = DirContext {
+            dir: &dir,
+            depth,
+            resume,
+        };
+        // The counter must come back down even if process_dir unwinds, or the
+        // remaining workers would wait for a job that will never finish.
+        let done = FinishOnDrop(sched);
+        scanner.process_dir(&ctx, &dctx, &mut local_map);
+        drop(done);
+    }
+    local_map
+}
+
+fn merge_into(acc: &mut StatMap, part: StatMap) {
+    if acc.is_empty() {
+        *acc = part;
+        return;
+    }
+    for (k, v) in part {
+        acc.entry(k).or_default().add(&v);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn pin_thread_if_requested(i: usize) {
+    if std::env::var("HYPERDU_PIN_THREADS").ok().as_deref() != Some("1") {
+        return;
+    }
+    // Pin this worker to a CPU id based on index
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        let ncpu = libc::sysconf(libc::_SC_NPROCESSORS_ONLN);
+        let cpu = if ncpu > 0 {
+            (i as i64 % ncpu) as usize
+        } else {
+            i
+        };
+        libc::CPU_ZERO(&mut set);
+        libc::CPU_SET(cpu, &mut set);
+        let _ = libc::sched_setaffinity(
+            0,
+            std::mem::size_of::<libc::cpu_set_t>(),
+            &set as *const libc::cpu_set_t,
+        );
+    }
 }
 
 /// Variant of scan_directory that accepts a custom scanner implementation.
@@ -327,140 +508,36 @@ pub fn scan_directory_with(
     }
 
     let threads = opt.threads.max(1);
-    let high_injector: Arc<Injector<Job>> = Arc::new(Injector::new());
-    let normal_injector: Arc<Injector<Job>> = Arc::new(Injector::new());
-    high_injector.push(Job {
-        dir: root.clone(),
-        depth: 0,
-        resume: None,
-    });
-
     let total_files = Arc::new(AtomicU64::new(0));
-
-    let workers: Vec<Worker<Job>> = (0..threads).map(|_| Worker::new_fifo()).collect();
-    let stealers = workers.iter().map(|w| w.stealer()).collect::<Vec<_>>();
-
-    let mut compiled = opt.clone();
-    compile_filters_in_place(&mut compiled);
-    let options = Arc::new(compiled);
+    let (options, workers, sched) = prepare_scan(&root, opt, threads);
 
     // Start adaptive tuner if enabled
     let _tuner = tuning::start_if_enabled(options.clone(), total_files.clone());
 
     let mut handles = Vec::with_capacity(threads);
     for (i, local) in workers.into_iter().enumerate() {
-        let high_ref = high_injector.clone();
-        let normal_ref = normal_injector.clone();
-        let stealers_ref = stealers.clone();
+        let sched = sched.clone();
         let options = options.clone();
         let total_files = total_files.clone();
         let scanner = scanner.clone();
-        let handle = std::thread::spawn(move || {
-            #[cfg(target_os = "linux")]
-            {
-                if std::env::var("HYPERDU_PIN_THREADS").ok().as_deref() == Some("1") {
-                    // Pin this worker to a CPU id based on index
-                    unsafe {
-                        let mut set: libc::cpu_set_t = std::mem::zeroed();
-                        let ncpu = libc::sysconf(libc::_SC_NPROCESSORS_ONLN);
-                        let cpu = if ncpu > 0 {
-                            (i as i64 % ncpu) as usize
-                        } else {
-                            i
-                        };
-                        libc::CPU_ZERO(&mut set);
-                        libc::CPU_SET(cpu, &mut set);
-                        let _ = libc::sched_setaffinity(
-                            0,
-                            std::mem::size_of::<libc::cpu_set_t>(),
-                            &set as *const libc::cpu_set_t,
-                        );
-                    }
-                }
-            }
-            #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
-            profiling::register_thread!();
-            let mut local_map: StatMap = HashMap::default();
-            let mut next = i % stealers_ref.len().max(1);
-            loop {
-                if options.cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                    break;
-                }
-                // Runtime thread throttling: only first `active_threads` workers fetch jobs
-                let act = options
-                    .active_threads
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                if i >= act {
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                    continue;
-                }
-                let job = local.pop().or_else(|| match high_ref.steal() {
-                    Steal::Success(j) => Some(j),
-                    Steal::Empty => match normal_ref.steal() {
-                        Steal::Success(j) => Some(j),
-                        Steal::Empty => {
-                            let mut found = None;
-                            let len = stealers_ref.len();
-                            for k in 0..len {
-                                let idx = (next + k) % len;
-                                match stealers_ref[idx].steal() {
-                                    Steal::Success(j) => {
-                                        found = Some(j);
-                                        break;
-                                    }
-                                    Steal::Retry => {}
-                                    Steal::Empty => {}
-                                }
-                            }
-                            if len > 0 {
-                                next = (next + 1) % len;
-                            }
-                            found
-                        }
-                        Steal::Retry => None,
-                    },
-                    Steal::Retry => None,
-                });
-
-                let Some(Job { dir, depth, resume }) = job else {
-                    break;
-                };
-                if path_excluded(&dir, &options) {
-                    continue;
-                }
-                #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
-                profiling::scope!("process_dir_loop");
-                let ctx = ScanContext {
-                    options: &options,
-                    high_injector: &high_ref,
-                    normal_injector: &normal_ref,
-                    total_files: &total_files,
-                };
-                let dctx = DirContext {
-                    dir: &dir,
-                    depth,
-                    resume,
-                };
-                scanner.process_dir(&ctx, &dctx, &mut local_map);
-            }
-            local_map
-        });
+        let handle = std::thread::Builder::new()
+            .name(format!("hyperdu-w{i}"))
+            .spawn(move || {
+                #[cfg(target_os = "linux")]
+                pin_thread_if_requested(i);
+                run_worker(i, local, &sched, &options, &total_files, scanner.as_ref())
+            })
+            .map_err(|e| anyhow!("failed to spawn worker thread: {e}"))?;
         handles.push(handle);
     }
 
     // Merge thread maps
     let mut merged: StatMap = HashMap::default();
     for h in handles {
-        for (k, v) in h.join().unwrap_or_default() {
-            let e = merged.entry(k).or_default();
-            e.logical += v.logical;
-            e.physical += v.physical;
-            e.files += v.files;
-        }
+        merge_into(&mut merged, h.join().unwrap_or_default());
     }
 
-    let merged = rollup::rollup_child_to_parent(merged);
-    Ok(merged)
+    Ok(rollup::rollup_child_to_parent(merged))
 }
 
 /// Experimental rayon-based internal scheduler. Uses a rayon thread-pool with `opt.threads`
@@ -474,104 +551,33 @@ pub fn scan_directory_rayon(root: impl AsRef<Path>, opt: &Options) -> Result<Sta
         return Err(anyhow!("root does not exist: {}", root.display()));
     }
     let threads = opt.threads.max(1);
-    let high_injector: Arc<Injector<Job>> = Arc::new(Injector::new());
-    let normal_injector: Arc<Injector<Job>> = Arc::new(Injector::new());
-    high_injector.push(Job {
-        dir: root.clone(),
-        depth: 0,
-        resume: None,
-    });
     let total_files = Arc::new(AtomicU64::new(0));
-    let mut compiled = opt.clone();
-    compile_filters_in_place(&mut compiled);
-    let options = Arc::new(compiled);
-    let workers: Vec<Worker<Job>> = (0..threads).map(|_| Worker::new_fifo()).collect();
-    let stealers = workers.iter().map(|w| w.stealer()).collect::<Vec<_>>();
+    let (options, workers, sched) = prepare_scan(&root, opt, threads);
     let merged = Arc::new(std::sync::Mutex::new(HashMap::default()));
     let pool = ThreadPoolBuilder::new()
         .num_threads(threads)
         .build()
-        .unwrap();
+        .map_err(|e| anyhow!("failed to build rayon pool: {e}"))?;
     pool.install(|| {
         rayon::scope(|s| {
             for (i, local) in workers.into_iter().enumerate() {
-                let high_ref = high_injector.clone();
-                let normal_ref = normal_injector.clone();
-                let stealers_ref = stealers.clone();
+                let sched = sched.clone();
                 let options = options.clone();
                 let total_files = total_files.clone();
                 let merged = merged.clone();
-                let scanner2 = scanner.clone();
+                let scanner = scanner.clone();
                 s.spawn(move |_| {
-                    let mut local_map: StatMap = HashMap::default();
-                    let mut next = i % stealers_ref.len().max(1);
-                    loop {
-                        if options.cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                            break;
-                        }
-                        let job = local.pop().or_else(|| match high_ref.steal() {
-                            Steal::Success(j) => Some(j),
-                            Steal::Empty => match normal_ref.steal() {
-                                Steal::Success(j) => Some(j),
-                                Steal::Empty => {
-                                    let mut found = None;
-                                    let len = stealers_ref.len();
-                                    for k in 0..len {
-                                        let idx = (next + k) % len;
-                                        match stealers_ref[idx].steal() {
-                                            Steal::Success(j) => {
-                                                found = Some(j);
-                                                break;
-                                            }
-                                            Steal::Retry => {}
-                                            Steal::Empty => {}
-                                        }
-                                    }
-                                    if len > 0 {
-                                        next = (next + 1) % len;
-                                    }
-                                    found
-                                }
-                                Steal::Retry => None,
-                            },
-                            Steal::Retry => None,
-                        });
-                        let Some(Job { dir, depth, resume }) = job else {
-                            break;
-                        };
-                        if path_excluded(&dir, &options) {
-                            continue;
-                        }
-                        let ctx = ScanContext {
-                            options: &options,
-                            high_injector: &high_ref,
-                            normal_injector: &normal_ref,
-                            total_files: &total_files,
-                        };
-                        let dctx = DirContext {
-                            dir: &dir,
-                            depth,
-                            resume,
-                        };
-                        scanner2.process_dir(&ctx, &dctx, &mut local_map);
-                    }
-                    let mut g = merged.lock().unwrap();
-                    for (k, v) in local_map {
-                        let e: &mut Stat = g.entry(k).or_default();
-                        e.logical += v.logical;
-                        e.physical += v.physical;
-                        e.files += v.files;
-                    }
+                    let part =
+                        run_worker(i, local, &sched, &options, &total_files, scanner.as_ref());
+                    let mut g = merged.lock().unwrap_or_else(|e| e.into_inner());
+                    merge_into(&mut g, part);
                 });
             }
         });
     });
-    let merged = std::mem::take(&mut *merged.lock().unwrap());
-    let merged = rollup::rollup_child_to_parent(merged);
-    Ok(merged)
+    let merged = std::mem::take(&mut *merged.lock().unwrap_or_else(|e| e.into_inner()));
+    Ok(rollup::rollup_child_to_parent(merged))
 }
-
-use crate::filters::path_excluded;
 
 #[cfg(not(windows))]
 #[inline(always)]
@@ -609,580 +615,54 @@ pub(crate) fn name_matches(name: &[u8], opt: &Options) -> bool {
     name_contains_patterns_bytes(name, &opt.exclude_contains)
 }
 
+/// Name-level exclusion on UTF-16 names (Windows backends). No allocation.
 #[cfg(windows)]
 #[inline(always)]
-fn wname_contains_patterns_lossy(name: &std::ffi::OsString, patterns: &[String]) -> bool {
-    if patterns.is_empty() {
-        return false;
-    }
-    let s = name.to_string_lossy();
-    patterns.iter().any(|q| !q.is_empty() && s.contains(q))
+pub(crate) fn wname_matches(name: &[u16], opt: &Options) -> bool {
+    opt.exclude_contains_w.iter().any(|pat| {
+        !pat.is_empty() && pat.len() <= name.len() && name.windows(pat.len()).any(|w| w == &pat[..])
+    })
 }
 
-#[cfg(windows)]
-#[cfg(any())]
-fn process_dir(
-    dir: &Path,
-    depth: u32,
-    opt: &Options,
-    map: &mut StatMap,
-    injector: &Injector<Job>,
-    total_files: &AtomicU64,
-) {
-    use std::{ffi::OsString, os::windows::ffi::OsStrExt};
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    use windows::{
-        core::PCWSTR,
-        Win32::Storage::FileSystem::{
-            FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
-            GetCompressedFileSizeW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-            FIND_FIRST_EX_LARGE_FETCH, WIN32_FIND_DATAW,
-        },
-    };
-
-    // Build wide pattern: <dir>\*\0
-    #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
-    profiling::scope!("win32_find_first");
-    let mut pattern: Vec<u16> = dir.as_os_str().encode_wide().collect();
-    let last = pattern.last().copied();
-    if last != Some(92) && last != Some(47) {
-        pattern.push(92);
-    }
-    pattern.push('*' as u16);
-    pattern.push(0);
-
-    unsafe {
-        let mut data: WIN32_FIND_DATAW = std::mem::zeroed();
-        let handle = FindFirstFileExW(
-            PCWSTR(pattern.as_ptr()),
-            FindExInfoBasic,
-            &mut data as *mut _ as *mut _,
-            FindExSearchNameMatch,
-            None,
-            FIND_FIRST_EX_LARGE_FETCH,
-        );
-        if handle.is_invalid() {
-            return;
-        }
-
-        let mut first = true;
-        loop {
-            if !first {
-                let ok = FindNextFileW(handle, &mut data).as_bool();
-                if !ok {
-                    break;
-                }
-            }
-            first = false;
-
-            // Name
-            let name_len = (0..).take_while(|&i| data.cFileName[i] != 0).count();
-            let name = OsString::from_wide(&data.cFileName[..name_len]);
-            if name == OsString::from(".") || name == OsString::from("..") {
-                continue;
-            }
-
-            let is_dir = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY).0 != 0;
-            let is_reparse = (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT).0 != 0;
-            if is_reparse && !opt.follow_links {
-                continue;
-            }
-
-            // Fast name-only exclude to avoid full join on common patterns
-            if wname_contains_patterns_lossy(&name, &opt.exclude_contains) {
-                continue;
-            }
-            let child = dir.join(&name);
-            if should_exclude(&child, &opt.exclude_contains) {
-                continue;
-            }
-
-            if is_dir {
-                if opt.max_depth == 0 || depth < opt.max_depth {
-                    injector.push(Job {
-                        dir: child,
-                        depth: depth + 1,
-                    });
-                }
-            } else {
-                let logical = ((data.nFileSizeHigh as u64) << 32) | (data.nFileSizeLow as u64);
-                if logical >= opt.min_file_size {
-                    #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
-                    profiling::scope!("GetCompressedFileSizeW");
-                    let mut physical = logical;
-                    // GetCompressedFileSizeW requires path
-                    let wide: Vec<u16> = child
-                        .as_os_str()
-                        .encode_wide()
-                        .chain(std::iter::once(0))
-                        .collect();
-                    let mut high: u32 = 0;
-                    let low = GetCompressedFileSizeW(PCWSTR(wide.as_ptr()), Some(&mut high));
-                    let combined = ((high as u64) << 32) | (low as u64);
-                    if low != u32::MAX {
-                        physical = combined;
-                    }
-                    let e = map.entry(dir.to_path_buf()).or_default();
-                    e.logical += logical;
-                    e.physical += physical;
-                    e.files += 1;
-                    if opt.progress_every > 0 {
-                        let n = total_files.fetch_add(1, Ordering::Relaxed) + 1;
-                        if n % opt.progress_every == 0 {
-                            if let Some(cb) = &opt.progress_callback {
-                                cb(n);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        let _ = FindClose(handle);
-    }
-}
-
-#[cfg(target_os = "macos")]
-#[cfg(any())]
-fn process_dir(
-    dir: &Path,
-    depth: u32,
-    opt: &Options,
-    map: &mut StatMap,
-    injector: &Injector<Job>,
-    total_files: &AtomicU64,
-) {
-    use std::{
-        ffi::{CString, OsStr},
-        os::unix::ffi::OsStrExt,
-    };
-
-    // macOS: readdir + lstat
-    let c_path = CString::new(dir.as_os_str().as_bytes()).ok();
-    let Some(c_path) = c_path else { return };
-    let fd = unsafe {
-        libc::open(
-            c_path.as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
-        )
-    };
-    if fd < 0 {
-        return;
-    }
-    let d = unsafe { libc::fdopendir(fd) };
-    if d.is_null() {
-        unsafe { libc::close(fd) };
-        return;
-    }
-
-    loop {
-        unsafe {
-            libc::errno = 0;
-        }
-        let ent = unsafe { libc::readdir(d) };
-        if ent.is_null() {
-            break;
-        }
-        let entry = unsafe { &*ent };
-        if entry.d_name[0] == 0 {
-            continue;
-        }
-        let name_c = unsafe { std::ffi::CStr::from_ptr(entry.d_name.as_ptr()) };
-        let name_b = name_c.to_bytes();
-        if name_b == b"." || name_b == b".." {
-            continue;
-        }
-        if name_contains_patterns_bytes(name_b, &opt.exclude_contains) {
-            continue;
-        }
-        let child = dir.join(OsStr::from_bytes(name_b));
-        if should_exclude(&child, &opt.exclude_contains) {
-            continue;
-        }
-
-        // macOS dirent doesn't reliably set d_type; use lstat to detect type/size
-        let mut st: libc::stat = unsafe { std::mem::zeroed() };
-        let c_child = match CString::new(child.as_os_str().as_bytes()) {
-            Ok(s) => s,
-            Err(_) => continue,
+    #[test]
+    fn compile_filters_sets_needs_path_filter() {
+        let mut opt = Options {
+            exclude_contains: vec!["a".into()],
+            ..Options::default()
         };
-        let rc = unsafe { libc::lstat(c_child.as_ptr(), &mut st) };
-        if rc != 0 {
-            continue;
-        }
-        let mode = st.st_mode as u32;
-        let is_dir = (mode & libc::S_IFMT) == libc::S_IFDIR;
-        let is_lnk = (mode & libc::S_IFMT) == libc::S_IFLNK;
-        if is_lnk && !opt.follow_links {
-            continue;
-        }
-        if is_dir {
-            if opt.max_depth == 0 || depth < opt.max_depth {
-                injector.push(Job {
-                    dir: child,
-                    depth: depth + 1,
-                    resume: None,
-                });
-            }
-        } else {
-            let logical = st.st_size as u64;
-            if logical >= opt.min_file_size {
-                let physical_raw = (st.st_blocks as u64) * 512u64;
-                let physical = if physical_raw == 0 {
-                    logical
-                } else {
-                    physical_raw
-                };
-                let e = map.entry(dir.to_path_buf()).or_default();
-                e.logical += logical;
-                e.physical += physical;
-                e.files += 1;
-                if opt.progress_every > 0 {
-                    let n = total_files.fetch_add(1, Ordering::Relaxed) + 1;
-                    if n % opt.progress_every == 0 {
-                        if let Some(cb) = &opt.progress_callback {
-                            cb(n);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    unsafe { libc::closedir(d) };
-}
+        compile_filters_in_place(&mut opt);
+        assert!(!opt.needs_path_filter);
 
-#[cfg(all(
-    unix,
-    not(target_os = "macos"),
-    not(all(target_os = "linux", target_arch = "x86_64"))
-))]
-#[cfg(any())]
-fn process_dir(
-    dir: &Path,
-    depth: u32,
-    opt: &Options,
-    map: &mut StatMap,
-    injector: &Injector<Job>,
-    total_files: &AtomicU64,
-) {
-    use std::{
-        ffi::{CString, OsStr},
-        os::unix::ffi::OsStrExt,
-    };
+        opt.exclude_contains = vec!["a/b".into()];
+        compile_filters_in_place(&mut opt);
+        assert!(opt.needs_path_filter);
 
-    // Open directory via opendir
-    let c_path = CString::new(dir.as_os_str().as_bytes()).ok();
-    let Some(c_path) = c_path else { return };
-    let fd = unsafe {
-        libc::open(
-            c_path.as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
-        )
-    };
-    if fd < 0 {
-        return;
-    }
-    let d = unsafe { libc::fdopendir(fd) };
-    if d.is_null() {
-        unsafe { libc::close(fd) };
-        return;
+        opt.exclude_contains = vec![];
+        opt.exclude_glob = vec!["**/x/**".into()];
+        compile_filters_in_place(&mut opt);
+        assert!(opt.needs_path_filter);
+
+        opt.exclude_glob = vec![];
+        opt.exclude_regex = vec![".*tmp$".into()];
+        compile_filters_in_place(&mut opt);
+        assert!(opt.needs_path_filter);
     }
 
-    loop {
-        #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
-        profiling::scope!("readdir_loop");
-        unsafe {
-            libc::errno = 0;
-        }
-        let ent = unsafe { libc::readdir(d) };
-        if ent.is_null() {
-            break;
-        }
-        let entry = unsafe { &*ent };
-        if entry.d_name[0] == 0 {
-            continue;
-        }
-        let name_c = unsafe { std::ffi::CStr::from_ptr(entry.d_name.as_ptr()) };
-        let name_b = name_c.to_bytes();
-        if name_b == b"." || name_b == b".." {
-            continue;
-        }
-        if name_contains_patterns_bytes(name_b, &opt.exclude_contains) {
-            continue;
-        }
-        let child = dir.join(OsStr::from_bytes(name_b));
-        if should_exclude(&child, &opt.exclude_contains) {
-            continue;
-        }
-
-        let dtype = entry.d_type as i32;
-        let is_dir = dtype == libc::DT_DIR;
-        let is_lnk = dtype == libc::DT_LNK;
-
-        if is_lnk && !opt.follow_links {
-            continue;
-        }
-
-        if is_dir {
-            if opt.max_depth == 0 || depth < opt.max_depth {
-                injector.push(Job {
-                    dir: child,
-                    depth: depth + 1,
-                });
-            }
-        } else {
-            let mut stx: libc::statx = unsafe { std::mem::zeroed() };
-            let c_child = CString::new(child.as_os_str().as_bytes()).ok();
-            if let Some(c_child) = c_child {
-                let flags = if opt.follow_links {
-                    0
-                } else {
-                    libc::AT_SYMLINK_NOFOLLOW
-                };
-                #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
-                profiling::scope!("statx_fallback");
-                let rc = unsafe {
-                    libc::statx(
-                        libc::AT_FDCWD,
-                        c_child.as_ptr(),
-                        flags,
-                        libc::STATX_SIZE | libc::STATX_BLOCKS,
-                        &mut stx,
-                    )
-                };
-                if rc == 0 {
-                    let logical = stx.stx_size as u64;
-                    if logical >= opt.min_file_size {
-                        let physical = (stx.stx_blocks as u64) * 512u64;
-                        let e = map.entry(dir.to_path_buf()).or_default();
-                        e.logical += logical;
-                        e.physical += if physical == 0 { logical } else { physical };
-                        e.files += 1;
-                        if opt.progress_every > 0 {
-                            let n = total_files.fetch_add(1, Ordering::Relaxed) + 1;
-                            if n % opt.progress_every == 0 {
-                                if let Some(cb) = &opt.progress_callback {
-                                    cb(n);
-                                }
-                            }
-                        }
-                    }
-                } else if let Ok(md) = std::fs::symlink_metadata(&child) {
-                    if md.file_type().is_file() {
-                        let logical = md.len();
-                        if logical >= opt.min_file_size {
-                            let e = map.entry(dir.to_path_buf()).or_default();
-                            e.logical += logical;
-                            e.physical += logical;
-                            e.files += 1;
-                            if opt.progress_every > 0 {
-                                let n = total_files.fetch_add(1, Ordering::Relaxed) + 1;
-                                if n % opt.progress_every == 0 {
-                                    if let Some(cb) = &opt.progress_callback {
-                                        cb(n);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    #[cfg(windows)]
+    #[test]
+    fn wname_matches_utf16_patterns() {
+        let mut opt = Options {
+            exclude_contains: vec!["node_modules".into(), "".into()],
+            ..Options::default()
+        };
+        compile_filters_in_place(&mut opt);
+        let hit: Vec<u16> = "my_node_modules_x".encode_utf16().collect();
+        let miss: Vec<u16> = "node".encode_utf16().collect();
+        assert!(wname_matches(&hit, &opt));
+        assert!(!wname_matches(&miss, &opt));
     }
-    unsafe { libc::closedir(d) };
-}
-
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-#[cfg(any())]
-fn process_dir(
-    dir: &Path,
-    depth: u32,
-    opt: &Options,
-    map: &mut StatMap,
-    injector: &Injector<Job>,
-    total_files: &AtomicU64,
-) {
-    use std::{ffi::CString, os::unix::ffi::OsStrExt};
-
-    const SYS_GETDENTS64: libc::c_long = 217; // x86_64
-
-    // Open directory
-    let c_path = match CString::new(dir.as_os_str().as_bytes()) {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-    let fd = unsafe {
-        libc::open(
-            c_path.as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-        )
-    };
-    if fd < 0 {
-        return;
-    }
-
-    const GETDENTS_BUF: usize = 64 * 1024; // tuneable: 64-256KB
-    let mut buf = vec![0u8; GETDENTS_BUF];
-    loop {
-        #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
-        profiling::scope!("getdents64_loop");
-        let nread = unsafe {
-            libc::syscall(
-                SYS_GETDENTS64,
-                fd,
-                buf.as_mut_ptr() as *mut libc::c_void,
-                buf.len(),
-            )
-        } as isize;
-        if nread == -1 {
-            break;
-        }
-        if nread == 0 {
-            break;
-        }
-        let mut bpos: isize = 0;
-        while bpos < nread {
-            let ptr = unsafe { buf.as_ptr().offset(bpos) };
-            // Layout: ino(8) off(8) reclen(2) type(1) name(\0-terminated)
-            let d_reclen = unsafe { *(ptr.add(16) as *const u16) } as isize;
-            let d_type = unsafe { *(ptr.add(18) as *const u8) };
-            let name_ptr = unsafe { ptr.add(19) };
-            // Find null terminator within record
-            let mut name_len = 0usize;
-            while (19 + name_len as isize) < d_reclen {
-                let c = unsafe { *ptr.add((19 + name_len as isize) as usize) };
-                if c == 0 {
-                    break;
-                }
-                name_len += 1;
-            }
-            let name_slice = unsafe { std::slice::from_raw_parts(name_ptr, name_len) };
-            if name_slice == b"." || name_slice == b".." {
-                bpos += d_reclen;
-                continue;
-            }
-            if name_contains_patterns_bytes(name_slice, &opt.exclude_contains) {
-                bpos += d_reclen;
-                continue;
-            }
-
-            let dtype = d_type;
-            let is_dir_hint = dtype == libc::DT_DIR;
-            let is_lnk = dtype == libc::DT_LNK;
-
-            use std::ffi::OsStr;
-            let child_path = dir.join(OsStr::from_bytes(name_slice));
-            if should_exclude(&child_path, &opt.exclude_contains) {
-                bpos += d_reclen;
-                continue;
-            }
-            if is_lnk && !opt.follow_links {
-                bpos += d_reclen;
-                continue;
-            }
-
-            if is_dir_hint {
-                if opt.max_depth == 0 || depth < opt.max_depth {
-                    injector.push(Job {
-                        dir: child_path,
-                        depth: depth + 1,
-                    });
-                }
-            } else {
-                // statx relative to dir fd
-                let mut stx: libc::statx = unsafe { std::mem::zeroed() };
-                let c_name = match CString::new(name_slice) {
-                    Ok(s) => s,
-                    Err(_) => {
-                        bpos += d_reclen;
-                        continue;
-                    }
-                };
-                let flags = if opt.follow_links {
-                    0
-                } else {
-                    libc::AT_SYMLINK_NOFOLLOW
-                };
-                #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
-                profiling::scope!("statx");
-                let rc = unsafe {
-                    libc::statx(
-                        fd,
-                        c_name.as_ptr(),
-                        flags,
-                        libc::STATX_SIZE | libc::STATX_BLOCKS | libc::STATX_MODE,
-                        &mut stx,
-                    )
-                };
-                if rc == 0 {
-                    let mode = stx.stx_mode as u32;
-                    let ftype = mode & libc::S_IFMT;
-                    if ftype == libc::S_IFDIR {
-                        if opt.max_depth == 0 || depth < opt.max_depth {
-                            injector.push(Job {
-                                dir: child_path,
-                                depth: depth + 1,
-                            });
-                        }
-                    } else if ftype == libc::S_IFREG || (opt.follow_links && ftype == libc::S_IFLNK)
-                    {
-                        let logical = stx.stx_size;
-                        if logical >= opt.min_file_size {
-                            let physical_raw = stx.stx_blocks * 512u64;
-                            let physical = if physical_raw == 0 {
-                                logical
-                            } else {
-                                physical_raw
-                            };
-                            let e = map.entry(dir.to_path_buf()).or_default();
-                            e.logical += logical;
-                            e.physical += physical;
-                            e.files += 1;
-                            if opt.progress_every > 0 {
-                                let n = total_files.fetch_add(1, Ordering::Relaxed) + 1;
-                                if n % opt.progress_every == 0 {
-                                    if let Some(cb) = &opt.progress_callback {
-                                        cb(n);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else if let Ok(md) = std::fs::symlink_metadata(&child_path) {
-                    if md.file_type().is_dir() {
-                        if opt.max_depth == 0 || depth < opt.max_depth {
-                            injector.push(Job {
-                                dir: child_path,
-                                depth: depth + 1,
-                            });
-                        }
-                    } else if md.file_type().is_file() {
-                        let logical = md.len();
-                        if logical >= opt.min_file_size {
-                            let e = map.entry(dir.to_path_buf()).or_default();
-                            e.logical += logical;
-                            e.physical += logical;
-                            e.files += 1;
-                            if opt.progress_every > 0 {
-                                let n = total_files.fetch_add(1, Ordering::Relaxed) + 1;
-                                if n % opt.progress_every == 0 {
-                                    if let Some(cb) = &opt.progress_callback {
-                                        cb(n);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            bpos += d_reclen;
-        }
-    }
-    unsafe { libc::close(fd) };
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HeuristicsMode {
-    Auto,
-    OuterOnly,
-    InnerOnly,
 }

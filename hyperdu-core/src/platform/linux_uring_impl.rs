@@ -232,17 +232,15 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                 if opt.max_depth == 0 || depth < opt.max_depth {
                                     use std::ffi::OsStr;
                                     let child = dir.join(OsStr::from_bytes(nm.as_bytes()));
-                                    if crate::filters::path_excluded(&child, opt) {
+                                    if opt.needs_path_filter
+                                        && crate::filters::path_excluded(&child, opt)
+                                    {
                                         // skip
                                     } else if opt.one_file_system {
                                         let child_dev = ((stx.stx_dev_major as u64) << 32)
                                             | (stx.stx_dev_minor as u64);
                                         if child_dev == cur_dev {
-                                            ctx.normal_injector.push(crate::Job {
-                                                dir: child,
-                                                depth: depth + 1,
-                                                resume: None,
-                                            });
+                                            ctx.enqueue_dir(child, depth + 1);
                                         }
                                     } else {
                                         ctx.enqueue_dir(child, depth + 1);
@@ -308,7 +306,8 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                             let child = dir.join(OsStr::from_bytes(nm.as_bytes()));
                             if dt == libc::DT_DIR {
                                 if (opt.max_depth == 0 || depth < opt.max_depth)
-                                    && !crate::filters::path_excluded(&child, opt)
+                                    && !(opt.needs_path_filter
+                                        && crate::filters::path_excluded(&child, opt))
                                 {
                                     ctx.enqueue_dir(child, depth + 1);
                                 }
@@ -368,6 +367,17 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
             if name_slice == b"." || name_slice == b".." {
                 bpos += reclen;
                 continue;
+            }
+            if crate::name_matches(name_slice, opt) {
+                bpos += reclen;
+                continue;
+            }
+            if opt.needs_path_filter {
+                let child = dir.join(std::ffi::OsStr::from_bytes(name_slice));
+                if opt.needs_path_filter && crate::filters::path_excluded(&child, opt) {
+                    bpos += reclen;
+                    continue;
+                }
             }
             if dtype == libc::DT_DIR {
                 if opt.max_depth == 0 || depth < opt.max_depth {
@@ -444,11 +454,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                         let child_dev = ((stx.stx_dev_major as u64) << 32)
                                             | (stx.stx_dev_minor as u64);
                                         if child_dev == cur_dev {
-                                            ctx.normal_injector.push(crate::Job {
-                                                dir: child,
-                                                depth: depth + 1,
-                                                resume: None,
-                                            });
+                                            ctx.enqueue_dir(child, depth + 1);
                                         }
                                     } else {
                                         ctx.enqueue_dir(child, depth + 1);
@@ -564,17 +570,15 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                             if opt.max_depth == 0 || depth < opt.max_depth {
                                 use std::ffi::OsStr;
                                 let child = dir.join(OsStr::from_bytes(nm.as_bytes()));
-                                if crate::filters::path_excluded(&child, opt) {
+                                if opt.needs_path_filter
+                                    && crate::filters::path_excluded(&child, opt)
+                                {
                                     // skip
                                 } else if opt.one_file_system {
                                     let child_dev = ((stx.stx_dev_major as u64) << 32)
                                         | (stx.stx_dev_minor as u64);
                                     if child_dev == cur_dev {
-                                        ctx.normal_injector.push(crate::Job {
-                                            dir: child,
-                                            depth: depth + 1,
-                                            resume: None,
-                                        });
+                                        ctx.enqueue_dir(child, depth + 1);
                                     }
                                 } else {
                                     ctx.enqueue_dir(child, depth + 1);
@@ -634,7 +638,8 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                         let child = dir.join(OsStr::from_bytes(nm.as_bytes()));
                         if dt == libc::DT_DIR {
                             if (opt.max_depth == 0 || depth < opt.max_depth)
-                                && !crate::filters::path_excluded(&child, opt)
+                                && !(opt.needs_path_filter
+                                    && crate::filters::path_excluded(&child, opt))
                             {
                                 ctx.enqueue_dir(child, depth + 1);
                             }
@@ -723,10 +728,13 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                     if name_slice == b"." || name_slice == b".." {
                         continue;
                     }
+                    if crate::name_matches(name_slice, opt) {
+                        continue;
+                    }
                     // Build full path for filtering and optional progress-path callback
                     use std::ffi::OsStr;
                     let child_path = dir.join(OsStr::from_bytes(name_slice));
-                    if crate::filters::path_excluded(&child_path, opt) {
+                    if opt.needs_path_filter && crate::filters::path_excluded(&child_path, opt) {
                         continue;
                     }
                     if dtype == libc::DT_DIR {

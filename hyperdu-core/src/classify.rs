@@ -7,7 +7,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::{filters::path_excluded, Options};
+use crate::{filters::entry_excluded, Options};
 
 #[derive(Clone, Copy, Debug)]
 pub enum ClassifyMode {
@@ -127,7 +127,7 @@ pub fn classify_directory(root: &Path, opt: &Options, mode: ClassifyMode) -> Typ
         for ent in rd {
             let Ok(ent) = ent else { continue };
             let path = ent.path();
-            if path_excluded(&path, opt) {
+            if entry_excluded(&path, opt) {
                 continue;
             }
             let Ok(md) = ent.metadata() else { continue };

@@ -372,11 +372,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                             if opt.max_depth == 0 || depth < opt.max_depth {
                                 use std::ffi::OsStr;
                                 let child_path = dir.join(OsStr::from_bytes(name_slice));
-                                ctx.normal_injector.push(crate::Job {
-                                    dir: child_path,
-                                    depth: depth + 1,
-                                    resume: None,
-                                });
+                                ctx.enqueue_dir(child_path, depth + 1);
                             }
                         } else if ftype == libc::S_IFREG
                             || (opt.follow_links && ftype == libc::S_IFLNK)

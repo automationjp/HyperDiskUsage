@@ -479,11 +479,13 @@ struct Args {
     )]
     pin_threads: bool,
 
-    /// Windows: use NT Query API fast path (sets HYPERDU_WIN_USE_NTQUERY=1)
+    /// Windows: force the NtQueryDirectoryFile path (default on MSVC builds; HYPERDU_WIN_USE_NTQUERY=0 selects FindFirstFileExW)
     #[arg(
         long = "win-ntquery",
         action = ArgAction::SetTrue,
-        long_help = "WindowsでNT Query APIベースの高速経路を使用します。HYPERDU_WIN_USE_NTQUERY=1 相当。"
+        long_help = "WindowsでNtQueryDirectoryFileベースの列挙経路を明示的に有効化します（MSVCビルドでは既定で有効）。\n\
+    物理サイズとファイルIDを列挙結果から直接取得するため、ファイル毎の追加システムコールが不要です。\n\
+    無効化して FindFirstFileExW 経路に切り替えるには環境変数 HYPERDU_WIN_USE_NTQUERY=0 を設定します。"
     )]
     win_ntquery: bool,
 
@@ -564,11 +566,11 @@ struct Args {
         long_help = "-k/-m/-g と --block-size の接尾辞K/M/Gを10進（1000の累乗）として扱います。既定は2進（1024の累乗）。"
     )]
     si: bool,
-    /// Set block-size=1 (bytes)
+    /// Equivalent to --apparent-size --block-size=1 (GNU du -b)
     #[arg(
         short = 'b',
         action = ArgAction::SetTrue,
-        long_help = "--block-size=1 と同義（バイト単位）。"
+        long_help = "--apparent-size --block-size=1 と同義（GNU du の -b と同じく見かけのサイズをバイト単位で出力）。"
     )]
     bytes: bool,
     /// Set block-size=1K (1024 or 1000 with --si)
@@ -707,7 +709,11 @@ fn main() -> Result<()> {
         println!();
         return Ok(());
     }
-    let args = Args::parse();
+    let mut args = Args::parse();
+    // GNU du: -b is equivalent to --apparent-size --block-size=1
+    if args.bytes {
+        args.apparent_size = true;
+    }
     let cfg = load_or_init_config();
 
     let mut exclude_contains: Vec<String> = args
@@ -1170,7 +1176,7 @@ fn main() -> Result<()> {
     }
     if let Some(n) = args.dir_yield_every {
         opt.dir_yield_every
-            .store(n.max(0), std::sync::atomic::Ordering::Relaxed);
+            .store(n, std::sync::atomic::Ordering::Relaxed);
     }
     opt.progress_every = args.progress_every.unwrap_or(8192);
     let print_progress = args.progress;
@@ -1423,7 +1429,8 @@ fn main() -> Result<()> {
                     if !rep.changes.is_empty() {
                         meta.push(format!("changes=[{}]", rep.changes.join(",")));
                     }
-                    println!("fs-auto: {} for '{}'", meta.join(" "), root0.display());
+                    // Diagnostics go to stderr so du-compatible stdout stays parsable.
+                    eprintln!("fs-auto: {} for '{}'", meta.join(" "), root0.display());
                 }
             }
         }
@@ -1432,7 +1439,8 @@ fn main() -> Result<()> {
     {
         if std::env::var("HYPERDU_FS_AUTO").ok().as_deref() != Some("0") {
             if let Some(root0) = roots.first() {
-                println!(
+                // Diagnostics go to stderr so du-compatible stdout stays parsable.
+                eprintln!(
                     "fs-auto: fs='unknown' strategy='generic' reason='platform=non-linux' for '{}'",
                     root0.display()
                 );

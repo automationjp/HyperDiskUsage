@@ -16,7 +16,7 @@
 - **並列処理**: ワークスティーリングアルゴリズムによる効率的な並列化
 - **プラットフォーム最適化**:
   - Linux: `getdents64` システムコール、io_uring（実験的）
-  - Windows: `FindFirstFileExW` + NT Query API
+  - Windows: `NtQueryDirectoryFile` による一括列挙（物理サイズ・ファイルIDを列挙結果から直接取得。`FindFirstFileExW` はフォールバック）
   - macOS: `getattrlistbulk` による一括取得
 - **リアルタイムチューニング**: 実行中にパフォーマンスパラメータを自動調整
 - **多様な出力形式**: du互換出力、CSV、JSON、独自の詳細表示
@@ -30,13 +30,13 @@
 
 1. **プラットフォーム最適化**
    - Linux: `getdents64` システムコール + `statx`（io_uring は現状実験的で未統合）
-   - Windows: `FindFirstFileExW` with `FIND_FIRST_EX_LARGE_FETCH`
+   - Windows: `NtQueryDirectoryFile`（`FileIdFullDirectoryInformation`）で 64KiB 単位に一括取得。割り当てサイズとファイル ID も同時に得られるため、物理サイズ計算やハードリンク重複排除でファイル毎のシステムコールが発生しません（MSVC ビルド既定。`HYPERDU_WIN_USE_NTQUERY=0` で `FindFirstFileExW` 経路に切替、`HYPERDU_WIN_DIR_BUF_KB` で列挙バッファサイズを変更）
    - macOS: `getattrlistbulk` による名称・型・サイズのバルク取得
 
 2. **並列処理**
-   - ワークスティーリングによる動的負荷分散
-   - マルチスレッドでディレクトリを並行スキャン
-   - 二段キュー（High/Normal）による優先度制御
+   - ワーカー毎の LIFO デック＋ワークスティーリング（浅い＝大きなサブツリーから盗む）による動的負荷分散
+   - 処理中ジョブを数えて終了判定するため、キューが一瞬空いてもワーカーが早期終了しない
+   - 巨大ディレクトリの継続ジョブは高優先度キューで先に処理
 
 3. **メモリ最適化**
    - `mimalloc` アロケータ（オプション機能）
@@ -255,7 +255,7 @@ hyperdu-cli --compat gnu -sh /path/to/directory
 ```
 fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128,prefetch=1] for '/data'
 ```
-- Windows: `FindFirstFileExW`（`FIND_FIRST_EX_LARGE_FETCH`）による列挙
+- Windows: `NtQueryDirectoryFile` による列挙（既定）。物理サイズはディレクトリ列挙が返す割り当てサイズ（クラスタ単位）で、GNU du のブロック集計に相当します。`--logical-only` で論理サイズのみを集計できます。`HYPERDU_WIN_USE_NTQUERY=0` を設定すると `FindFirstFileExW` 経路（物理サイズはファイル毎に `GetCompressedFileSizeW`）に切り替わります。`\?\` プレフィックスにより 260 文字を超えるパスも走査します。
 - macOS: `getattrlistbulk` による名称・型・サイズの一括取得
 
 ## 🛠️ 開発者向け

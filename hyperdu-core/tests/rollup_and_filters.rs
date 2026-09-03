@@ -8,7 +8,6 @@ fn write_bytes(p: &std::path::Path, n: usize) {
 }
 
 #[test]
-#[ignore = "Enable after stabilizing platform backends in CI"]
 fn rollup_propagates_sizes() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().to_path_buf();
@@ -27,7 +26,6 @@ fn rollup_propagates_sizes() {
 }
 
 #[test]
-#[ignore = "Enable after stabilizing platform backends in CI"]
 fn exclude_contains_excludes_dirs() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().to_path_buf();
@@ -47,7 +45,6 @@ fn exclude_contains_excludes_dirs() {
 }
 
 #[test]
-#[ignore = "Enable after stabilizing platform backends in CI"]
 fn min_file_size_filters_small_files() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().to_path_buf();
@@ -66,7 +63,6 @@ fn min_file_size_filters_small_files() {
 }
 
 #[test]
-#[ignore = "Enable after stabilizing platform backends in CI"]
 fn max_depth_limits_grandchildren() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().to_path_buf();
@@ -91,7 +87,6 @@ fn max_depth_limits_grandchildren() {
 
 #[cfg(unix)]
 #[test]
-#[ignore = "Enable after stabilizing platform backends in CI"]
 fn symlink_not_followed_by_default() {
     use std::os::unix::fs::symlink;
 

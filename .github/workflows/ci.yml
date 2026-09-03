@@ -36,4 +36,18 @@ jobs:
       - name: Test core
         run: cargo test -p hyperdu-core -- --nocapture
 
+  # The Windows enumeration backend and its tests are cfg(windows), so the Linux
+  # job compiles neither. Run them where they apply.
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test core and CLI
+        run: cargo test -p hyperdu-core -p hyperdu-cli -- --nocapture
+
   # Note: artifact packaging is handled in release.yml on tags. CI only builds and tests.
