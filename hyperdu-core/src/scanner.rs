@@ -241,7 +241,7 @@ mod tests {
                             stat_cur.logical += *sz;
                             stat_cur.physical += *sz;
                             stat_cur.files += 1;
-                            ctx.report_progress(opt, Some(&child));
+                            ctx.report_progress(opt, Some((&child, *sz, *sz)));
                         }
                     }
                     MockKind::SymlinkDir(target) => {
@@ -263,7 +263,7 @@ mod tests {
                             stat_cur.logical += *sz;
                             stat_cur.physical += *sz;
                             stat_cur.files += 1;
-                            ctx.report_progress(opt, Some(&child));
+                            ctx.report_progress(opt, Some((&child, *sz, *sz)));
                         }
                     }
                 }

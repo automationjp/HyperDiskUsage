@@ -152,6 +152,24 @@ enum PerfArg {
     Strict,
 }
 
+/// CLI spelling of `hyperdu_core::IoProfile`.
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum IoProfileArg {
+    Throughput,
+    Balanced,
+    Gentle,
+}
+
+impl From<IoProfileArg> for hyperdu_core::IoProfile {
+    fn from(v: IoProfileArg) -> Self {
+        match v {
+            IoProfileArg::Throughput => hyperdu_core::IoProfile::Throughput,
+            IoProfileArg::Balanced => hyperdu_core::IoProfile::Balanced,
+            IoProfileArg::Gentle => hyperdu_core::IoProfile::Gentle,
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "hyperdu",
@@ -200,6 +218,8 @@ struct Args {
     #[arg(
         long,
         long_help = "カンマ区切りの部分一致フィルタ。名前に指定文字列を含むファイル/ディレクトリを除外します。\n\
+    既定では何も除外しません（du と同じ集計になります）。\n\
+    部分一致である点に注意してください。--exclude .git は .github にも一致します。\n\
     例: --exclude .git,node_modules,target"
     )]
     exclude: Option<String>,
@@ -407,6 +427,17 @@ struct Args {
     )]
     uring_depth: Option<usize>,
 
+    /// How hard the scan is allowed to hit the storage device
+    #[arg(
+        long = "io-profile",
+        value_enum,
+        long_help = "ストレージへの負荷レベルを選びます。
+        throughput: 先読みを有効にし最大スループットを狙います（他のI/Oを圧迫します）。
+        balanced (既定): 先読みなしで並列度は通常どおり。
+        gentle: スレッド数を2に抑え、先読みとio_uringを無効化します。正確さは変わりません。"
+    )]
+    io_profile: Option<IoProfileArg>,
+
     /// Disable io_uring backend (Linux) even if available
     #[arg(
         long = "no-uring",
@@ -463,13 +494,14 @@ struct Args {
     )]
     dir_yield_every: Option<usize>,
 
-    /// Linux: enable prefetch advise (posix_fadvise/readahead)
+    /// Linux: force prefetch advise (posix_fadvise/readahead) on or off
     #[arg(
         long = "prefetch",
-        action = ArgAction::SetTrue,
-        long_help = "Linuxでposix_fadvise/readaheadヒントを有効化します。"
+        num_args = 0..=1,
+        default_missing_value = "true",
+        long_help = "Linuxでposix_fadvise/readaheadヒントを強制的に有効/無効にします。--io-profile の既定を上書きします（--prefetch=false で先読みを止められます）。"
     )]
-    prefetch: bool,
+    prefetch: Option<bool>,
 
     /// Linux: pin worker threads to CPUs (sets HYPERDU_PIN_THREADS=1)
     #[arg(
@@ -479,11 +511,13 @@ struct Args {
     )]
     pin_threads: bool,
 
-    /// Windows: use NT Query API fast path (sets HYPERDU_WIN_USE_NTQUERY=1)
+    /// Windows: force the NtQueryDirectoryFile path (default on MSVC builds; HYPERDU_WIN_USE_NTQUERY=0 selects FindFirstFileExW)
     #[arg(
         long = "win-ntquery",
         action = ArgAction::SetTrue,
-        long_help = "WindowsでNT Query APIベースの高速経路を使用します。HYPERDU_WIN_USE_NTQUERY=1 相当。"
+        long_help = "WindowsでNtQueryDirectoryFileベースの列挙経路を明示的に有効化します（MSVCビルドでは既定で有効）。\n\
+    物理サイズとファイルIDを列挙結果から直接取得するため、ファイル毎の追加システムコールが不要です。\n\
+    無効化して FindFirstFileExW 経路に切り替えるには環境変数 HYPERDU_WIN_USE_NTQUERY=0 を設定します。"
     )]
     win_ntquery: bool,
 
@@ -564,11 +598,11 @@ struct Args {
         long_help = "-k/-m/-g と --block-size の接尾辞K/M/Gを10進（1000の累乗）として扱います。既定は2進（1024の累乗）。"
     )]
     si: bool,
-    /// Set block-size=1 (bytes)
+    /// Equivalent to --apparent-size --block-size=1 (GNU du -b)
     #[arg(
         short = 'b',
         action = ArgAction::SetTrue,
-        long_help = "--block-size=1 と同義（バイト単位）。"
+        long_help = "--apparent-size --block-size=1 と同義（GNU du の -b と同じく見かけのサイズをバイト単位で出力）。"
     )]
     bytes: bool,
     /// Set block-size=1K (1024 or 1000 with --si)
@@ -707,13 +741,17 @@ fn main() -> Result<()> {
         println!();
         return Ok(());
     }
-    let args = Args::parse();
+    let mut args = Args::parse();
+    // GNU du: -b is equivalent to --apparent-size --block-size=1
+    if args.bytes {
+        args.apparent_size = true;
+    }
     let cfg = load_or_init_config();
 
     let mut exclude_contains: Vec<String> = args
         .exclude
         .as_deref()
-        .unwrap_or(".git,node_modules,target")
+        .unwrap_or("")
         .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -738,11 +776,8 @@ fn main() -> Result<()> {
         }
     }
 
-    let threads = args.threads.unwrap_or_else(|| {
-        std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4)
-    });
+    // Deliberately more workers than cores: see hyperdu_core::default_threads.
+    let threads = args.threads.unwrap_or_else(hyperdu_core::default_threads);
 
     let mut opt = hyperdu_core::OptionsBuilder::new()
         .with_exclude_contains(exclude_contains)
@@ -759,6 +794,8 @@ fn main() -> Result<()> {
         .with_performance(hyperdu_core::PerformanceConfig {
             prefer_inner_rayon: Some(cfg.prefer_inner_rayon),
             disable_uring: Some(args.no_uring),
+            io_profile: args.io_profile.map(Into::into),
+            prefetch: args.prefetch,
             ..Default::default()
         })
         .with_windows(hyperdu_core::WindowsConfig {
@@ -787,18 +824,13 @@ fn main() -> Result<()> {
             opt.approximate_sizes = true;
             opt.count_hardlinks = true; // do not dedupe
                                         // keep compat in HyperDU unless明示
-                                        // io_uring の強化を環境変数でオプトイン（安全・可搬性優先）
-            if std::env::var("HYPERDU_URING_SQPOLL").is_err() {
-                std::env::set_var("HYPERDU_URING_SQPOLL", "1");
-            }
-            if std::env::var("HYPERDU_URING_COOP_TASKRUN").is_err() {
-                std::env::set_var("HYPERDU_URING_COOP_TASKRUN", "1");
-            }
-            if std::env::var("HYPERDU_USE_URING").is_err() {
-                std::env::set_var("HYPERDU_USE_URING", "1");
-            }
-            // 初期バッチ/深さを強めに（ライブチューナが追従）
-            // 簡易ヒューリスティクス（環境変数で上書き可）
+                                        // io_uring のチューニングはオプトインのままにする。
+                                        // SQPOLL はワーカーごとに ring を持つ設計と噛み合わず、
+                                        // カーネル側の polling スレッドが CPU を奪うため、
+                                        // 小さなツリーや CPU 数の少ない環境では逆効果になる。
+                                        // 必要なら --uring-sqpoll で明示的に有効化する。
+                                        // 初期バッチ/深さを強めに（ライブチューナが追従）
+                                        // 簡易ヒューリスティクス（環境変数で上書き可）
             let (b_default, d_default) =
                 match std::env::var("HYPERDU_DEVICE_ROTATIONAL").ok().as_deref() {
                     Some("1") => (128usize, 512usize), // HDD
@@ -830,9 +862,6 @@ fn main() -> Result<()> {
         }
         if let Some(kb) = args.getdents_buf_kb {
             std::env::set_var("HYPERDU_GETDENTS_BUF_KB", kb.to_string());
-        }
-        if args.prefetch {
-            std::env::set_var("HYPERDU_PREFETCH", "1");
         }
         if args.pin_threads {
             std::env::set_var("HYPERDU_PIN_THREADS", "1");
@@ -1170,7 +1199,7 @@ fn main() -> Result<()> {
     }
     if let Some(n) = args.dir_yield_every {
         opt.dir_yield_every
-            .store(n.max(0), std::sync::atomic::Ordering::Relaxed);
+            .store(n, std::sync::atomic::Ordering::Relaxed);
     }
     opt.progress_every = args.progress_every.unwrap_or(8192);
     let print_progress = args.progress;
@@ -1367,14 +1396,15 @@ fn main() -> Result<()> {
     // Keep-alive: emit periodic status if no progress callback fired recently
     let _keepalive = KeepAlive::start(print_progress, last.clone());
     if args.progress {
-        opt.progress_path_callback = Some(std::sync::Arc::new(move |p: &std::path::Path| {
-            let size = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
-            println!(
-                "  sample: {} (size: {})",
-                short_path(p),
-                format_size(size, BINARY)
-            );
-        }));
+        opt.progress_sample_callback = Some(std::sync::Arc::new(
+            move |s: &hyperdu_core::ProgressSample<'_>| {
+                println!(
+                    "  sample: {} (size: {})",
+                    short_path(s.path),
+                    format_size(s.logical, BINARY)
+                );
+            },
+        ));
     }
 
     // Roots: if none provided, use current directory
@@ -1423,7 +1453,8 @@ fn main() -> Result<()> {
                     if !rep.changes.is_empty() {
                         meta.push(format!("changes=[{}]", rep.changes.join(",")));
                     }
-                    println!("fs-auto: {} for '{}'", meta.join(" "), root0.display());
+                    // Diagnostics go to stderr so du-compatible stdout stays parsable.
+                    eprintln!("fs-auto: {} for '{}'", meta.join(" "), root0.display());
                 }
             }
         }
@@ -1432,7 +1463,8 @@ fn main() -> Result<()> {
     {
         if std::env::var("HYPERDU_FS_AUTO").ok().as_deref() != Some("0") {
             if let Some(root0) = roots.first() {
-                println!(
+                // Diagnostics go to stderr so du-compatible stdout stays parsable.
+                eprintln!(
                     "fs-auto: fs='unknown' strategy='generic' reason='platform=non-linux' for '{}'",
                     root0.display()
                 );
@@ -1495,7 +1527,28 @@ fn main() -> Result<()> {
         println!("Summary:");
         println!("  Root: {}", root.display());
         println!("  Elapsed: {:.3}s", dt.as_secs_f64());
-        println!("  Threads: {threads}");
+        // The profile may cap the worker count; report what actually runs.
+        println!("  Threads: {}", hyperdu_core::effective_threads(&opt));
+        // Print the active exclusions. They change the totals, so a comparison
+        // against du that does not account for them is not a fair one.
+        if opt.exclude_contains.is_empty()
+            && opt.exclude_regex.is_empty()
+            && opt.exclude_glob.is_empty()
+        {
+            println!("  Excludes: (none)");
+        } else {
+            let mut parts: Vec<String> = Vec::new();
+            if !opt.exclude_contains.is_empty() {
+                parts.push(format!("contains[{}]", opt.exclude_contains.join(",")));
+            }
+            if !opt.exclude_regex.is_empty() {
+                parts.push(format!("regex[{}]", opt.exclude_regex.join(",")));
+            }
+            if !opt.exclude_glob.is_empty() {
+                parts.push(format!("glob[{}]", opt.exclude_glob.join(",")));
+            }
+            println!("  Excludes: {}", parts.join(" "));
+        }
         println!("  Follow links: {}", args.follow_links);
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {

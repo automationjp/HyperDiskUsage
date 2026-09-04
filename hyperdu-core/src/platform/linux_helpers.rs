@@ -290,3 +290,115 @@ pub fn get_entry_stats(
         is_reg: (mode & libc::S_IFMT) == libc::S_IFREG,
     })
 }
+
+/// Open a directory for reading without updating its access time.
+///
+/// Walking a tree touches every directory, and on a `relatime` mount that is
+/// enough to dirty each inode and turn a read-only scan into a stream of
+/// metadata writes. `O_NOATIME` needs ownership or `CAP_FOWNER`, and some
+/// filesystems reject it outright, so a refusal falls back to a plain open.
+///
+/// Returns the raw descriptor, or a negative value with `errno` set, matching
+/// `libc::open`.
+pub fn open_dir_readonly(path: &std::ffi::CStr, follow_links: bool) -> libc::c_int {
+    let mut flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
+    if !follow_links {
+        flags |= libc::O_NOFOLLOW;
+    }
+    let fd = unsafe { libc::open(path.as_ptr(), flags | libc::O_NOATIME) };
+    if fd >= 0 {
+        return fd;
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(libc::EPERM) | Some(libc::EINVAL) => unsafe { libc::open(path.as_ptr(), flags) },
+        _ => fd,
+    }
+}
+
+/// Accumulates a directory's file tally so progress is reported once per
+/// directory instead of once per file, and remembers the last accounted file so
+/// a sample can be built only when a callback actually fires.
+///
+/// Shared by the getdents64 and io_uring backends.
+pub struct FileCounter {
+    files: u64,
+    sample: Option<SampleSlot>,
+}
+
+struct SampleSlot {
+    name: Vec<u8>,
+    logical: u64,
+    physical: u64,
+}
+
+impl FileCounter {
+    pub fn new(opt: &crate::Options) -> Self {
+        Self {
+            files: 0,
+            sample: opt.progress_sample_callback.as_ref().map(|_| SampleSlot {
+                name: Vec::with_capacity(64),
+                logical: 0,
+                physical: 0,
+            }),
+        }
+    }
+
+    #[inline]
+    pub fn record(&mut self, name: &[u8], logical: u64, physical: u64) {
+        self.files += 1;
+        if let Some(slot) = self.sample.as_mut() {
+            slot.name.clear();
+            slot.name.extend_from_slice(name);
+            slot.logical = logical;
+            slot.physical = physical;
+        }
+    }
+
+    /// Hand the tally to the shared counter and reset. Called once per
+    /// directory, and again whenever a large directory is split.
+    pub fn flush(&mut self, ctx: &crate::ScanContext, opt: &crate::Options, dir: &std::path::Path) {
+        if self.files == 0 {
+            return;
+        }
+        let files = std::mem::take(&mut self.files);
+        ctx.report_progress_batch(opt, files, || match self.sample.as_ref() {
+            Some(slot) if !slot.name.is_empty() => {
+                use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+                (
+                    dir.join(OsStr::from_bytes(&slot.name)),
+                    slot.logical,
+                    slot.physical,
+                )
+            }
+            _ => (dir.to_path_buf(), 0, 0),
+        });
+    }
+}
+
+/// Pack a `dev_t` the way `statx` reports devices, as `(major << 32) | minor`.
+///
+/// `fstat` hands back a packed `dev_t` while `statx` splits the device into
+/// major and minor fields. Comparing the two encodings directly never matches,
+/// so the current directory's device is converted once, here.
+#[inline]
+pub fn packed_dev(dev: libc::dev_t) -> u64 {
+    ((libc::major(dev) as u64) << 32) | (libc::minor(dev) as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packed_dev_matches_the_statx_encoding() {
+        assert_eq!(packed_dev(libc::makedev(8, 17)), (8u64 << 32) | 17);
+    }
+
+    #[test]
+    fn packed_dev_separates_devices_sharing_a_minor() {
+        assert_ne!(
+            packed_dev(libc::makedev(8, 1)),
+            packed_dev(libc::makedev(9, 1))
+        );
+    }
+}

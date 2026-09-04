@@ -112,7 +112,7 @@ impl App {
                     .unwrap_or(4),
                 progress_every: 8192,
                 progress_callback: None,
-                progress_path_callback: None,
+                progress_sample_callback: None,
                 compute_physical: true,
                 approximate_sizes: false,
                 dir_yield_every: dir_yield.clone(),
@@ -465,13 +465,17 @@ fn configure_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-fn platform_font_candidates() -> (
+/// Directories to search, then file-name candidates for each script group:
+/// CJK, emoji, symbols, and a Latin fallback.
+type FontCandidates = (
     Vec<std::path::PathBuf>,
     Vec<&'static str>,
     Vec<&'static str>,
     Vec<&'static str>,
     Vec<&'static str>,
-) {
+);
+
+fn platform_font_candidates() -> FontCandidates {
     #[cfg(target_os = "windows")]
     {
         let dirs = vec![std::path::PathBuf::from(r"C:\\Windows\\Fonts")];

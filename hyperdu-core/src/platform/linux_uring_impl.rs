@@ -15,6 +15,32 @@ thread_local! {
     static TL_RING: RefCell<Option<RingCtx>> = const { RefCell::new(None) };
 }
 
+/// Device of the named child, in the packed form the comparisons use.
+/// `statx` always fills the device fields, so a minimal mask is enough.
+/// `None` means the lookup failed and the caller cannot know where the child
+/// lives, which under `-x` has to be treated as "do not cross".
+fn child_device(dirfd: i32, name: &[u8]) -> Option<u64> {
+    let cn = CString::new(name).ok()?;
+    let mut stx: libc::statx = unsafe { std::mem::zeroed() };
+    let flags = libc::AT_SYMLINK_NOFOLLOW | libc::AT_STATX_DONT_SYNC | libc::AT_NO_AUTOMOUNT;
+    let rc = unsafe { libc::statx(dirfd, cn.as_ptr(), flags, libc::STATX_TYPE, &mut stx) };
+    if rc != 0 {
+        return None;
+    }
+    Some(((stx.stx_dev_major as u64) << 32) | (stx.stx_dev_minor as u64))
+}
+
+/// Physical size for the `symlink_metadata` fallback path.
+///
+/// The ring's statx can fail for every entry on some kernels, which sends all
+/// accounting through here. Billing the logical size as physical then reports a
+/// sparse file at its declared size, so the block count has to be used, exactly
+/// as the statx path does.
+fn fallback_physical(opt: &crate::Options, md: &std::fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    crate::common_ops::calculate_physical_size(opt, md.len(), md.blocks())
+}
+
 pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let opt = ctx.options;
     // Try io_uring ring (once per thread)
@@ -74,11 +100,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
         Ok(s) => s,
         Err(_) => return,
     };
-    let mut open_flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
-    if !opt.follow_links {
-        open_flags |= libc::O_NOFOLLOW;
-    }
-    let fd = unsafe { libc::open(c_path.as_ptr(), open_flags) };
+    let fd = crate::platform::linux_helpers::open_dir_readonly(&c_path, opt.follow_links);
     if fd < 0 {
         crate::error_handling::record_error(
             opt,
@@ -92,28 +114,23 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
         }
     }
 
-    // Current directory device id for one-file-system check
+    // Current directory device id for one-file-system check, packed the way
+    // `statx` reports devices so the comparisons below are like-for-like.
     let mut st_cur: libc::stat = unsafe { std::mem::zeroed() };
     let cur_dev: u64 = unsafe {
         if libc::fstat(fd, &mut st_cur as *mut _) == 0 {
-            st_cur.st_dev
+            crate::platform::linux_helpers::packed_dev(st_cur.st_dev)
         } else {
             0
         }
     };
 
     let stat_cur = map.entry(dir.to_path_buf()).or_default();
-    let files_before = stat_cur.files;
+    // Same per-directory batching the getdents64 backend uses: one shared
+    // counter update per directory rather than one per file.
+    let mut counted = crate::platform::linux_helpers::FileCounter::new(opt);
     // getdents64 buffer via RAII thread-local pool to avoid reallocs
-    fn buf_size() -> usize {
-        if let Ok(s) = std::env::var("HYPERDU_GETDENTS_BUF_KB") {
-            if let Ok(kb) = s.parse::<usize>() {
-                return (kb.max(4)) * 1024;
-            }
-        }
-        128 * 1024
-    }
-    let mut guard = BufferGuard::borrow(buf_size());
+    let mut guard = BufferGuard::borrow(opt.getdents_buf_bytes);
     let buf = guard.as_mut_slice();
 
     // Window size and slot arrays
@@ -147,20 +164,21 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
     } else {
         libc::AT_SYMLINK_NOFOLLOW
     };
+    flags |= libc::AT_NO_AUTOMOUNT;
     if !matches!(
         opt.compat_mode,
         crate::CompatMode::GnuStrict | crate::CompatMode::PosixStrict
     ) {
         flags |= libc::AT_STATX_DONT_SYNC;
-        #[cfg(target_os = "linux")]
-        {
-            flags |= libc::AT_NO_AUTOMOUNT;
-        }
     }
 
     // Metrics
     let mut enq: u64 = 0;
     let mut fail: u64 = 0;
+    // Completions seen, whatever their result. A failed statx is handled per
+    // entry (the code below falls back to `symlink_metadata` for that one
+    // file), so a completion arriving at all means the ring works.
+    let mut cqe_seen: u64 = 0;
     let mut consec_no_fail: u32 = 0;
 
     // Enumerate and stream submit
@@ -218,6 +236,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                         opt.uring_cqe_err
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
+                    cqe_seen += 1;
                     let slot = cqe.user_data() as usize;
                     if res >= 0 && slot < items.len() {
                         if let Some((ref nm, dt)) = items[slot] {
@@ -232,17 +251,15 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                 if opt.max_depth == 0 || depth < opt.max_depth {
                                     use std::ffi::OsStr;
                                     let child = dir.join(OsStr::from_bytes(nm.as_bytes()));
-                                    if crate::filters::path_excluded(&child, opt) {
+                                    if opt.needs_path_filter
+                                        && crate::filters::path_excluded(&child, opt)
+                                    {
                                         // skip
                                     } else if opt.one_file_system {
                                         let child_dev = ((stx.stx_dev_major as u64) << 32)
                                             | (stx.stx_dev_minor as u64);
                                         if child_dev == cur_dev {
-                                            ctx.normal_injector.push(crate::Job {
-                                                dir: child,
-                                                depth: depth + 1,
-                                                resume: None,
-                                            });
+                                            ctx.enqueue_dir(child, depth + 1);
                                         }
                                     } else {
                                         ctx.enqueue_dir(child, depth + 1);
@@ -276,25 +293,18 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                     crate::common_ops::update_file_stats(
                                         stat_cur, logical, physical,
                                     );
-                                    crate::common_ops::report_file_progress(
-                                        opt,
-                                        ctx.total_files,
-                                        Some(&child),
-                                    );
+                                    counted.record(nm.as_bytes(), logical, physical);
                                 } else if ftype == 0 {
                                     // immediate fallback when type info is missing
                                     if let Ok(md) = std::fs::symlink_metadata(&child) {
                                         if md.file_type().is_file() {
                                             let l = md.len();
                                             if l >= opt.min_file_size {
+                                                let phys = fallback_physical(opt, &md);
                                                 crate::common_ops::update_file_stats(
-                                                    stat_cur, l, l,
+                                                    stat_cur, l, phys,
                                                 );
-                                                crate::common_ops::report_file_progress(
-                                                    opt,
-                                                    ctx.total_files,
-                                                    Some(&child),
-                                                );
+                                                counted.record(nm.as_bytes(), l, phys);
                                             }
                                         }
                                     }
@@ -308,7 +318,8 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                             let child = dir.join(OsStr::from_bytes(nm.as_bytes()));
                             if dt == libc::DT_DIR {
                                 if (opt.max_depth == 0 || depth < opt.max_depth)
-                                    && !crate::filters::path_excluded(&child, opt)
+                                    && !(opt.needs_path_filter
+                                        && crate::filters::path_excluded(&child, opt))
                                 {
                                     ctx.enqueue_dir(child, depth + 1);
                                 }
@@ -316,12 +327,9 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                 if md.file_type().is_file() {
                                     let l = md.len();
                                     if l >= opt.min_file_size {
-                                        crate::common_ops::update_file_stats(stat_cur, l, l);
-                                        crate::common_ops::report_file_progress(
-                                            opt,
-                                            ctx.total_files,
-                                            Some(&child),
-                                        );
+                                        let phys = fallback_physical(opt, &md);
+                                        crate::common_ops::update_file_stats(stat_cur, l, phys);
+                                        counted.record(nm.as_bytes(), l, phys);
                                     }
                                 }
                             }
@@ -369,8 +377,42 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                 bpos += reclen;
                 continue;
             }
+            if crate::name_matches(name_slice, opt) {
+                bpos += reclen;
+                continue;
+            }
+            if opt.needs_path_filter {
+                let child = dir.join(std::ffi::OsStr::from_bytes(name_slice));
+                if crate::filters::path_excluded(&child, opt) {
+                    bpos += reclen;
+                    continue;
+                }
+            }
             if dtype == libc::DT_DIR {
                 if opt.max_depth == 0 || depth < opt.max_depth {
+                    // Directories never enter the STATX pipeline below, so the
+                    // filesystem-boundary check has to happen here. The extra
+                    // statx only runs for `-x` scans.
+                    if opt.one_file_system {
+                        match child_device(fd, name_slice) {
+                            Some(dev) if dev == cur_dev => {}
+                            Some(_) => {
+                                bpos += reclen;
+                                continue;
+                            }
+                            None => {
+                                let child = dir.join(std::ffi::OsStr::from_bytes(name_slice));
+                                crate::error_handling::record_error(
+                                    opt,
+                                    &crate::error_handling::last_os_error_systemcall(
+                                        &child, "statx",
+                                    ),
+                                );
+                                bpos += reclen;
+                                continue;
+                            }
+                        }
+                    }
                     let child = dir.join(std::ffi::OsStr::from_bytes(name_slice));
                     ctx.enqueue_dir(child, depth + 1);
                 }
@@ -426,6 +468,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                         opt.uring_cqe_err
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
+                    cqe_seen += 1;
                     let slot = cqe.user_data() as usize;
                     if res >= 0 && slot < items.len() {
                         if let Some((ref nm, _dt)) = items[slot] {
@@ -444,11 +487,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                         let child_dev = ((stx.stx_dev_major as u64) << 32)
                                             | (stx.stx_dev_minor as u64);
                                         if child_dev == cur_dev {
-                                            ctx.normal_injector.push(crate::Job {
-                                                dir: child,
-                                                depth: depth + 1,
-                                                resume: None,
-                                            });
+                                            ctx.enqueue_dir(child, depth + 1);
                                         }
                                     } else {
                                         ctx.enqueue_dir(child, depth + 1);
@@ -550,6 +589,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                     opt.uring_cqe_err
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
+                cqe_seen += 1;
                 let slot = cqe.user_data() as usize;
                 if res >= 0 && slot < items.len() {
                     if let Some((ref nm, dt)) = items[slot] {
@@ -564,17 +604,15 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                             if opt.max_depth == 0 || depth < opt.max_depth {
                                 use std::ffi::OsStr;
                                 let child = dir.join(OsStr::from_bytes(nm.as_bytes()));
-                                if crate::filters::path_excluded(&child, opt) {
+                                if opt.needs_path_filter
+                                    && crate::filters::path_excluded(&child, opt)
+                                {
                                     // skip
                                 } else if opt.one_file_system {
                                     let child_dev = ((stx.stx_dev_major as u64) << 32)
                                         | (stx.stx_dev_minor as u64);
                                     if child_dev == cur_dev {
-                                        ctx.normal_injector.push(crate::Job {
-                                            dir: child,
-                                            depth: depth + 1,
-                                            resume: None,
-                                        });
+                                        ctx.enqueue_dir(child, depth + 1);
                                     }
                                 } else {
                                     ctx.enqueue_dir(child, depth + 1);
@@ -606,22 +644,15 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                     stx.stx_blocks,
                                 );
                                 crate::common_ops::update_file_stats(stat_cur, logical, physical);
-                                crate::common_ops::report_file_progress(
-                                    opt,
-                                    ctx.total_files,
-                                    Some(&child),
-                                );
+                                counted.record(nm.as_bytes(), logical, physical);
                             } else if ftype == 0 {
                                 if let Ok(md) = std::fs::symlink_metadata(&child) {
                                     if md.file_type().is_file() {
                                         let l = md.len();
                                         if l >= opt.min_file_size {
-                                            crate::common_ops::update_file_stats(stat_cur, l, l);
-                                            crate::common_ops::report_file_progress(
-                                                opt,
-                                                ctx.total_files,
-                                                Some(&child),
-                                            );
+                                            let phys = fallback_physical(opt, &md);
+                                            crate::common_ops::update_file_stats(stat_cur, l, phys);
+                                            counted.record(nm.as_bytes(), l, phys);
                                         }
                                     }
                                 }
@@ -634,7 +665,8 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                         let child = dir.join(OsStr::from_bytes(nm.as_bytes()));
                         if dt == libc::DT_DIR {
                             if (opt.max_depth == 0 || depth < opt.max_depth)
-                                && !crate::filters::path_excluded(&child, opt)
+                                && !(opt.needs_path_filter
+                                    && crate::filters::path_excluded(&child, opt))
                             {
                                 ctx.enqueue_dir(child, depth + 1);
                             }
@@ -642,12 +674,9 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                             if md.file_type().is_file() {
                                 let l = md.len();
                                 if l >= opt.min_file_size {
-                                    crate::common_ops::update_file_stats(stat_cur, l, l);
-                                    crate::common_ops::report_file_progress(
-                                        opt,
-                                        ctx.total_files,
-                                        Some(&child),
-                                    );
+                                    let phys = fallback_physical(opt, &md);
+                                    crate::common_ops::update_file_stats(stat_cur, l, phys);
+                                    counted.record(nm.as_bytes(), l, phys);
                                 }
                             }
                         }
@@ -679,10 +708,13 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
     opt.uring_sqe_fail
         .fetch_add(fail, std::sync::atomic::Ordering::Relaxed);
 
-    // Fallback: If we attempted to stat non-directory entries (enq>0) but ended up
-    // recognizing no files for this directory (files unchanged), re-scan this
-    // directory with a conservative per-entry stat approach and metadata fallback.
-    if enq > 0 && stat_cur.files == files_before {
+    // Fall back only when the ring itself produced nothing: work was submitted
+    // and no completion ever arrived. Individual statx failures are already
+    // handled per entry, and keying this off the file count re-scanned every
+    // directory whose entries were all filtered out, all below `min_file_size`,
+    // or all already-seen hardlinks. Those are normal outcomes, and the re-scan
+    // counted every one of their files a second time.
+    if enq > 0 && cqe_seen == 0 {
         // Re-open directory and iterate non-directory entries only.
         let c_path = match CString::new(dir.as_os_str().as_bytes()) {
             Ok(s) => s,
@@ -691,14 +723,10 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                 return;
             }
         };
-        let mut oflags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
-        if !opt.follow_links {
-            oflags |= libc::O_NOFOLLOW;
-        }
-        let fd2 = unsafe { libc::open(c_path.as_ptr(), oflags) };
+        let fd2 = crate::platform::linux_helpers::open_dir_readonly(&c_path, opt.follow_links);
         if fd2 >= 0 {
             // Buffer for getdents64
-            let mut guard2 = BufferGuard::borrow(buf_size());
+            let mut guard2 = BufferGuard::borrow(opt.getdents_buf_bytes);
             let buf2 = guard2.as_mut_slice();
             loop {
                 let nread2 = unsafe {
@@ -723,10 +751,13 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                     if name_slice == b"." || name_slice == b".." {
                         continue;
                     }
+                    if crate::name_matches(name_slice, opt) {
+                        continue;
+                    }
                     // Build full path for filtering and optional progress-path callback
                     use std::ffi::OsStr;
                     let child_path = dir.join(OsStr::from_bytes(name_slice));
-                    if crate::filters::path_excluded(&child_path, opt) {
+                    if opt.needs_path_filter && crate::filters::path_excluded(&child_path, opt) {
                         continue;
                     }
                     if dtype == libc::DT_DIR {
@@ -744,15 +775,12 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                         } else {
                             libc::AT_SYMLINK_NOFOLLOW
                         };
+                        flags |= libc::AT_NO_AUTOMOUNT;
                         if !matches!(
                             opt.compat_mode,
                             crate::CompatMode::GnuStrict | crate::CompatMode::PosixStrict
                         ) {
                             flags |= libc::AT_STATX_DONT_SYNC;
-                            #[cfg(target_os = "linux")]
-                            {
-                                flags |= libc::AT_NO_AUTOMOUNT;
-                            }
                         }
                         let mut mask = libc::STATX_SIZE | libc::STATX_MODE;
                         if opt.compute_physical {
@@ -792,16 +820,13 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                     }
                     if ok_file {
                         crate::common_ops::update_file_stats(stat_cur, logical, physical);
-                        crate::common_ops::report_file_progress(
-                            opt,
-                            ctx.total_files,
-                            Some(&child_path),
-                        );
+                        counted.record(name_slice, logical, physical);
                     }
                 }
             }
             unsafe { libc::close(fd2) };
         }
     }
+    counted.flush(ctx, opt, dir);
     unsafe { libc::close(fd) };
 }

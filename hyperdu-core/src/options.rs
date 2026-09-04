@@ -1,4 +1,4 @@
-use crate::{CompatMode, Options};
+use crate::{CompatMode, IoProfile, Options};
 
 // Grouped configuration types for clearer construction and composition
 #[derive(Default, Clone)]
@@ -19,6 +19,10 @@ pub struct PerformanceConfig {
     pub follow_links: Option<bool>,
     pub prefer_inner_rayon: Option<bool>,
     pub disable_uring: Option<bool>,
+    /// How aggressively the scan is allowed to load the storage device.
+    pub io_profile: Option<IoProfile>,
+    /// Force readahead on or off, overriding whatever `io_profile` implies.
+    pub prefetch: Option<bool>,
 }
 
 #[derive(Default, Clone)]
@@ -46,9 +50,10 @@ pub struct WindowsConfig {
 
 #[derive(Default, Clone)]
 pub struct OptionsBuilder {
-    pub exclude_contains: Vec<String>,
-    pub exclude_regex: Vec<String>,
-    pub exclude_glob: Vec<String>,
+    /// `None` = not set, inherit the default. `Some(vec![])` = exclude nothing.
+    pub exclude_contains: Option<Vec<String>>,
+    pub exclude_regex: Option<Vec<String>>,
+    pub exclude_glob: Option<Vec<String>>,
     pub max_depth: Option<u32>,
     pub min_file_size: Option<u64>,
     pub follow_links: Option<bool>,
@@ -63,6 +68,8 @@ pub struct OptionsBuilder {
     pub tune_interval_ms: Option<u64>,
     pub prefer_inner_rayon: Option<bool>,
     pub disable_uring: Option<bool>,
+    pub io_profile: Option<IoProfile>,
+    pub prefetch: Option<bool>,
     pub win_allow_handle: Option<bool>,
     pub win_handle_sample_every: Option<u64>,
 }
@@ -73,26 +80,26 @@ impl OptionsBuilder {
     }
 
     pub fn with_exclude_contains(mut self, list: impl IntoIterator<Item = String>) -> Self {
-        self.exclude_contains = list.into_iter().collect();
+        self.exclude_contains = Some(list.into_iter().collect());
         self
     }
     pub fn with_exclude_regex(mut self, list: impl IntoIterator<Item = String>) -> Self {
-        self.exclude_regex = list.into_iter().collect();
+        self.exclude_regex = Some(list.into_iter().collect());
         self
     }
     pub fn with_exclude_glob(mut self, list: impl IntoIterator<Item = String>) -> Self {
-        self.exclude_glob = list.into_iter().collect();
+        self.exclude_glob = Some(list.into_iter().collect());
         self
     }
     pub fn with_filters(mut self, cfg: FilterConfig) -> Self {
         if !cfg.exclude_contains.is_empty() {
-            self.exclude_contains = cfg.exclude_contains;
+            self.exclude_contains = Some(cfg.exclude_contains);
         }
         if !cfg.exclude_regex.is_empty() {
-            self.exclude_regex = cfg.exclude_regex;
+            self.exclude_regex = Some(cfg.exclude_regex);
         }
         if !cfg.exclude_glob.is_empty() {
-            self.exclude_glob = cfg.exclude_glob;
+            self.exclude_glob = Some(cfg.exclude_glob);
         }
         self.max_depth = cfg.max_depth.or(self.max_depth);
         self.min_file_size = cfg.min_file_size.or(self.min_file_size);
@@ -134,6 +141,16 @@ impl OptionsBuilder {
         self.follow_links = cfg.follow_links.or(self.follow_links);
         self.prefer_inner_rayon = cfg.prefer_inner_rayon.or(self.prefer_inner_rayon);
         self.disable_uring = cfg.disable_uring.or(self.disable_uring);
+        self.io_profile = cfg.io_profile.or(self.io_profile);
+        self.prefetch = cfg.prefetch.or(self.prefetch);
+        self
+    }
+    pub fn io_profile(mut self, v: IoProfile) -> Self {
+        self.io_profile = Some(v);
+        self
+    }
+    pub fn prefetch(mut self, v: bool) -> Self {
+        self.prefetch = Some(v);
         self
     }
     pub fn progress_every(mut self, n: u64) -> Self {
@@ -213,20 +230,27 @@ impl OptionsBuilder {
         if let Some(v) = self.disable_uring {
             opt.disable_uring = v;
         }
+        if let Some(v) = self.io_profile {
+            opt.io_profile = v;
+        }
+        opt.prefetch = self.prefetch.or(opt.prefetch);
         if let Some(v) = self.win_allow_handle {
             opt.win_allow_handle = v;
         }
         if let Some(v) = self.win_handle_sample_every {
             opt.win_handle_sample_every = v;
         }
-        if !self.exclude_contains.is_empty() {
-            opt.exclude_contains = self.exclude_contains;
+        // Assign whenever the caller said anything, including an empty list:
+        // "exclude nothing" has to be expressible, or the defaults can never
+        // be turned off and every comparison against du is silently unfair.
+        if let Some(v) = self.exclude_contains {
+            opt.exclude_contains = v;
         }
-        if !self.exclude_regex.is_empty() {
-            opt.exclude_regex = self.exclude_regex;
+        if let Some(v) = self.exclude_regex {
+            opt.exclude_regex = v;
         }
-        if !self.exclude_glob.is_empty() {
-            opt.exclude_glob = self.exclude_glob;
+        if let Some(v) = self.exclude_glob {
+            opt.exclude_glob = v;
         }
         // Initialize runtime-tunable active_threads to full threads
         opt.active_threads

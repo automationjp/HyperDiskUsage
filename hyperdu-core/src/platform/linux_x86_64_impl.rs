@@ -25,29 +25,39 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
         Ok(s) => s,
         Err(_) => return,
     };
-    // Respect follow_links: only use O_NOFOLLOW when not following links.
-    let mut open_flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
-    if !opt.follow_links {
-        open_flags |= libc::O_NOFOLLOW;
-    }
-    let fd = unsafe { libc::open(c_path.as_ptr(), open_flags) };
+    let fd = crate::platform::linux_helpers::open_dir_readonly(&c_path, opt.follow_links);
     if fd < 0 {
         record_error(opt, &last_os_error_systemcall(dir, "open"));
         return;
     }
-    // Current directory device id for one-file-system check
-    let mut st_cur: libc::stat = unsafe { std::mem::zeroed() };
-    let cur_dev: u64 = unsafe {
-        if libc::fstat(fd, &mut st_cur as *mut _) == 0 {
-            st_cur.st_dev
-        } else {
-            0
+    // Decide about this directory from its own descriptor rather than from a
+    // `statx` the parent issued on its behalf. One `fstat` answers both
+    // questions, the identity is the real one even when we arrived through a
+    // symlink, and the scan root is covered like any other directory. When
+    // neither question is asked, the syscall is skipped entirely.
+    if opt.one_file_system || crate::follows_links(opt) {
+        let mut st_cur: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstat(fd, &mut st_cur as *mut _) } == 0 {
+            let dev = crate::platform::linux_helpers::packed_dev(st_cur.st_dev);
+            // root_fs_id is zero only when the root itself could not be stat'd,
+            // in which case there is no boundary to enforce.
+            let leaves_root_fs =
+                opt.one_file_system && opt.root_fs_id != 0 && dev != opt.root_fs_id;
+            if leaves_root_fs || check_visited_directory(opt, dev, st_cur.st_ino) {
+                unsafe { libc::close(fd) };
+                return;
+            }
+        } else if opt.one_file_system {
+            // Cannot confirm which filesystem this is, so `-x` must not cross.
+            record_error(opt, &last_os_error_systemcall(dir, "fstat"));
+            unsafe { libc::close(fd) };
+            return;
         }
-    };
+    }
     // Optional prefetch hints
     #[cfg(feature = "prefetch-advise")]
     unsafe {
-        if std::env::var("HYPERDU_PREFETCH").ok().as_deref() == Some("1") {
+        if opt.io_prefetch {
             let _ = libc::posix_fadvise(fd, 0, 0, libc::POSIX_FADV_SEQUENTIAL);
             let ra: libc::size_t = 1 << 20; // 1MiB
             let _ = libc::readahead(fd, 0, ra);
@@ -59,23 +69,13 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
         }
     }
 
-    fn buf_size() -> usize {
-        if let Ok(s) = std::env::var("HYPERDU_GETDENTS_BUF_KB") {
-            if let Ok(kb) = s.parse::<usize>() {
-                return (kb.max(4)) * 1024;
-            }
-        }
-        128 * 1024 // default: 128KB (tune NVMe/SSD friendly)
-    }
-    let mut guard = BufferGuard::borrow(buf_size());
+    let mut guard = BufferGuard::borrow(opt.getdents_buf_bytes);
     let buf = guard.as_mut_slice();
-    #[cfg(feature = "prefetch-advise")]
-    unsafe {
-        if std::env::var("HYPERDU_PREFETCH").ok().as_deref() == Some("1") {
-            let _ = libc::madvise(buf.as_mut_ptr() as *mut _, buf.len(), libc::MADV_WILLNEED);
-        }
-    }
     let stat_cur = map.entry(dir.to_path_buf()).or_default();
+    // Progress is accounted once per directory. Touching the shared counter and
+    // building a PathBuf for every file costs more than the scan itself once the
+    // sizes come from a cheap `statx`.
+    let mut counted = crate::platform::linux_helpers::FileCounter::new(opt);
     let mut yield_every = opt.dir_yield_every.load(Ordering::Relaxed);
     let mut processed: usize = 0;
     loop {
@@ -136,109 +136,12 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
 
             if is_dir_hint {
                 if opt.max_depth == 0 || depth < opt.max_depth {
+                    // No per-child `statx` here. The filesystem-boundary and
+                    // cycle checks happen when the child is opened, which is
+                    // both cheaper (one `fstat` on a descriptor we need anyway)
+                    // and correct for symlinked directories, whose identity the
+                    // parent cannot see.
                     use std::ffi::OsStr;
-                    // one-file-system: compare child dev to current dev
-                    if opt.one_file_system {
-                        #[cfg(not(target_env = "musl"))]
-                        {
-                            // Use statx to fetch device id once (comparable cost to fstatat)
-                            let mut stx: libc::statx = unsafe { std::mem::zeroed() };
-                            if let Ok(cn) = CString::new(name_slice) {
-                                let mut flags = libc::AT_SYMLINK_NOFOLLOW;
-                                if !matches!(
-                                    opt.compat_mode,
-                                    crate::CompatMode::GnuStrict | crate::CompatMode::PosixStrict
-                                ) {
-                                    flags |= libc::AT_STATX_DONT_SYNC;
-                                    #[cfg(target_os = "linux")]
-                                    {
-                                        flags |= libc::AT_NO_AUTOMOUNT;
-                                    }
-                                }
-                                let rc = unsafe {
-                                    libc::statx(
-                                        fd,
-                                        cn.as_ptr(),
-                                        flags,
-                                        libc::STATX_TYPE | libc::STATX_INO | libc::STATX_MODE,
-                                        &mut stx,
-                                    )
-                                };
-                                if rc == 0 {
-                                    let child_dev = ((stx.stx_dev_major as u64) << 32)
-                                        | (stx.stx_dev_minor as u64);
-                                    if child_dev != cur_dev {
-                                        bpos += d_reclen;
-                                        continue;
-                                    }
-                                }
-                            }
-                        }
-                        #[cfg(target_env = "musl")]
-                        {
-                            // Fallback: use std metadata (best-effort)
-                            use std::os::unix::fs::MetadataExt;
-                            let child_path = dir.join(OsStr::from_bytes(name_slice));
-                            if let Ok(md) = std::fs::symlink_metadata(&child_path) {
-                                let child_dev = md.dev() as u64;
-                                if child_dev != cur_dev {
-                                    bpos += d_reclen;
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-                    // Symlink loop detection (optional)
-                    if opt.follow_links {
-                        #[cfg(not(target_env = "musl"))]
-                        {
-                            if let Ok(cn) = CString::new(name_slice) {
-                                let mut stx: libc::statx = unsafe { std::mem::zeroed() };
-                                let mut flags = libc::AT_SYMLINK_NOFOLLOW;
-                                if !matches!(
-                                    opt.compat_mode,
-                                    crate::CompatMode::GnuStrict | crate::CompatMode::PosixStrict
-                                ) {
-                                    flags |= libc::AT_STATX_DONT_SYNC;
-                                    #[cfg(target_os = "linux")]
-                                    {
-                                        flags |= libc::AT_NO_AUTOMOUNT;
-                                    }
-                                }
-                                let rc = unsafe {
-                                    libc::statx(
-                                        fd,
-                                        cn.as_ptr(),
-                                        flags,
-                                        libc::STATX_INO | libc::STATX_MODE,
-                                        &mut stx,
-                                    )
-                                };
-                                if rc == 0 {
-                                    let dev = cur_dev; // same device after -x check above
-                                    let ino = stx.stx_ino;
-                                    if check_visited_directory(opt, dev, ino) {
-                                        bpos += d_reclen;
-                                        continue;
-                                    }
-                                }
-                            }
-                        }
-                        #[cfg(target_env = "musl")]
-                        {
-                            // Fallback: use std metadata to approximate loop detection
-                            use std::os::unix::fs::MetadataExt;
-                            let child_path = dir.join(OsStr::from_bytes(name_slice));
-                            if let Ok(md) = std::fs::symlink_metadata(&child_path) {
-                                let dev = cur_dev;
-                                let ino = md.ino() as u64;
-                                if check_visited_directory(opt, dev, ino) {
-                                    bpos += d_reclen;
-                                    continue;
-                                }
-                            }
-                        }
-                    }
                     let child_path = dir.join(OsStr::from_bytes(name_slice));
                     ctx.enqueue_dir(child_path, depth + 1);
                 }
@@ -247,9 +150,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                 if !opt.compute_physical && opt.approximate_sizes && opt.min_file_size == 0 {
                     let logical = 4096u64; // estimate 4KiB per regular file
                     update_file_stats(stat_cur, logical, logical);
-                    use std::ffi::OsStr;
-                    let child_path = dir.join(OsStr::from_bytes(name_slice));
-                    ctx.report_progress(opt, Some(&child_path));
+                    counted.record(name_slice, logical, logical);
                 } else {
                     // Need precise size information
                     #[cfg(not(target_env = "musl"))]
@@ -267,15 +168,12 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                         } else {
                             libc::AT_SYMLINK_NOFOLLOW
                         };
+                        flags |= libc::AT_NO_AUTOMOUNT;
                         if !matches!(
                             opt.compat_mode,
                             crate::CompatMode::GnuStrict | crate::CompatMode::PosixStrict
                         ) {
                             flags |= libc::AT_STATX_DONT_SYNC;
-                            #[cfg(target_os = "linux")]
-                            {
-                                flags |= libc::AT_NO_AUTOMOUNT;
-                            }
                         }
                         #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
                         profiling::scope!("statx_reg");
@@ -304,9 +202,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                                 let physical =
                                     calculate_physical_size(opt, logical, stx.stx_blocks);
                                 update_file_stats(stat_cur, logical, physical);
-                                use std::ffi::OsStr;
-                                let child_path = dir.join(OsStr::from_bytes(name_slice));
-                                ctx.report_progress(opt, Some(&child_path));
+                                counted.record(name_slice, logical, physical);
                             }
                         }
                     }
@@ -320,7 +216,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                                 if logical >= opt.min_file_size {
                                     let physical = logical; // best effort on musl
                                     update_file_stats(stat_cur, logical, physical);
-                                    ctx.report_progress(opt, Some(&child_path));
+                                    counted.record(name_slice, logical, physical);
                                 }
                             }
                         }
@@ -343,20 +239,19 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                     } else {
                         libc::AT_SYMLINK_NOFOLLOW
                     };
+                    flags |= libc::AT_NO_AUTOMOUNT;
                     if !matches!(
                         opt.compat_mode,
                         crate::CompatMode::GnuStrict | crate::CompatMode::PosixStrict
                     ) {
                         flags |= libc::AT_STATX_DONT_SYNC;
-                        #[cfg(target_os = "linux")]
-                        {
-                            flags |= libc::AT_NO_AUTOMOUNT;
-                        }
                     }
                     #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
                     profiling::scope!("statx_unknown");
                     let need_blocks = opt.compute_physical;
-                    let need_ino = !opt.count_hardlinks;
+                    // The inode is also what cycle detection keys on, so it is
+                    // required whenever links are followed.
+                    let need_ino = !opt.count_hardlinks || opt.follow_links;
                     let mut mask = libc::STATX_SIZE | libc::STATX_MODE; // MODE needed to detect type in unknown branch
                     if need_blocks {
                         mask |= libc::STATX_BLOCKS;
@@ -371,12 +266,10 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                         if ftype == libc::S_IFDIR {
                             if opt.max_depth == 0 || depth < opt.max_depth {
                                 use std::ffi::OsStr;
+                                // Boundary and cycle checks happen when this
+                                // directory is opened, as in the DT_DIR branch.
                                 let child_path = dir.join(OsStr::from_bytes(name_slice));
-                                ctx.normal_injector.push(crate::Job {
-                                    dir: child_path,
-                                    depth: depth + 1,
-                                    resume: None,
-                                });
+                                ctx.enqueue_dir(child_path, depth + 1);
                             }
                         } else if ftype == libc::S_IFREG
                             || (opt.follow_links && ftype == libc::S_IFLNK)
@@ -397,9 +290,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                                 let physical =
                                     calculate_physical_size(opt, logical, stx.stx_blocks);
                                 update_file_stats(stat_cur, logical, physical);
-                                use std::ffi::OsStr;
-                                let child_path = dir.join(OsStr::from_bytes(name_slice));
-                                ctx.report_progress(opt, Some(&child_path));
+                                counted.record(name_slice, logical, physical);
                             }
                         }
                     } else {
@@ -414,7 +305,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                                 let logical = md.len();
                                 if logical >= opt.min_file_size {
                                     update_file_stats(stat_cur, logical, logical);
-                                    ctx.report_progress(opt, Some(&child_path));
+                                    counted.record(name_slice, logical, logical);
                                 }
                             }
                         }
@@ -433,7 +324,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                             let logical = md.len();
                             if logical >= opt.min_file_size {
                                 update_file_stats(stat_cur, logical, logical);
-                                ctx.report_progress(opt, Some(&child_path));
+                                counted.record(name_slice, logical, logical);
                             }
                         }
                     }
@@ -448,11 +339,13 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
             }
             if yield_every > 0 && processed % yield_every == 0 {
                 // Enqueue continuation from current offset and stop to let other threads proceed
+                counted.flush(ctx, opt, dir);
                 ctx.enqueue_resume(dir.to_path_buf(), depth, d_off);
                 unsafe { libc::close(fd) };
                 return;
             }
         }
     }
+    counted.flush(ctx, opt, dir);
     unsafe { libc::close(fd) };
 }

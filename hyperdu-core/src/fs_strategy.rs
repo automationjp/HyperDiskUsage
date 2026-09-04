@@ -27,13 +27,10 @@ impl FileSystemStrategy for Ext4Strategy {
     fn name(&self) -> &'static str {
         "ext4"
     }
-    fn apply(&self, _opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
+    fn apply(&self, opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
         // Favor larger dirent buffer on fast storage
-        std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
+        opt.getdents_buf_bytes = 128 * 1024;
         report.push("getdents_buf_kb=128".into());
-        // Enable prefetch hints if compiled
-        std::env::set_var("HYPERDU_PREFETCH", "1");
-        report.push("prefetch=1".into());
         FsApplyOutcome {
             recommended_threads: None,
             disable_uring: false,
@@ -47,11 +44,9 @@ impl FileSystemStrategy for XfsStrategy {
     fn name(&self) -> &'static str {
         "xfs"
     }
-    fn apply(&self, _opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
-        std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
+    fn apply(&self, opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
+        opt.getdents_buf_bytes = 128 * 1024;
         report.push("getdents_buf_kb=128".into());
-        std::env::set_var("HYPERDU_PREFETCH", "1");
-        report.push("prefetch=1".into());
         FsApplyOutcome {
             recommended_threads: None,
             disable_uring: false,
@@ -70,12 +65,8 @@ impl FileSystemStrategy for BtrfsStrategy {
         // Switch to logical-only by default for better responsiveness
         opt.compute_physical = false;
         report.push("compute_physical=false".into());
-        std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
+        opt.getdents_buf_bytes = 128 * 1024;
         report.push("getdents_buf_kb=128".into());
-        // Do not enable prefetch by default
-        std::env::set_var("HYPERDU_PREFETCH", "0");
-        report.push("prefetch=0".into());
-        let _ = opt; // placeholder for future
         FsApplyOutcome {
             recommended_threads: None,
             disable_uring: false,
@@ -89,11 +80,9 @@ impl FileSystemStrategy for ZfsStrategy {
     fn name(&self) -> &'static str {
         "zfs"
     }
-    fn apply(&self, _opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
-        std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
+    fn apply(&self, opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
+        opt.getdents_buf_bytes = 128 * 1024;
         report.push("getdents_buf_kb=128".into());
-        std::env::set_var("HYPERDU_PREFETCH", "1");
-        report.push("prefetch=1".into());
         FsApplyOutcome {
             recommended_threads: None,
             disable_uring: false,
@@ -112,11 +101,8 @@ impl FileSystemStrategy for DrvfsStrategy {
         opt.compute_physical = false;
         report.push("compute_physical=false".into());
         // Slightly smaller buffer (context switch heavy)
-        std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "64");
+        opt.getdents_buf_bytes = 64 * 1024;
         report.push("getdents_buf_kb=64".into());
-        // Disable prefetch hints
-        std::env::set_var("HYPERDU_PREFETCH", "0");
-        report.push("prefetch=0".into());
         // Suggest fewer threads and disable uring
         FsApplyOutcome {
             recommended_threads: Some(4),
@@ -135,10 +121,8 @@ impl FileSystemStrategy for NetworkStrategy {
         // Network FS: prefer logical sizes, limit pressure
         opt.compute_physical = false;
         report.push("compute_physical=false".into());
-        std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "64");
+        opt.getdents_buf_bytes = 64 * 1024;
         report.push("getdents_buf_kb=64".into());
-        std::env::set_var("HYPERDU_PREFETCH", "0");
-        report.push("prefetch=0".into());
         // Optionally reduce threads in caller if needed (not adjusted here)
         FsApplyOutcome {
             recommended_threads: Some(4),
@@ -146,6 +130,46 @@ impl FileSystemStrategy for NetworkStrategy {
             recommend_logical_only: false,
         }
     }
+}
+
+/// Whether `path` is at or below the mount point `mp`.
+///
+/// A plain string prefix test is wrong: it makes `/mnt/foo` look like it lives
+/// under the mount `/mnt/f`, which then picks that mount's strategy and can
+/// silently switch the whole scan to logical sizes. The match has to land on a
+/// path separator, or consume the whole path.
+#[cfg(target_os = "linux")]
+fn path_under_mount(path: &str, mp: &str) -> bool {
+    if mp == "/" {
+        return path.starts_with('/');
+    }
+    let Some(rest) = path.strip_prefix(mp) else {
+        return false;
+    };
+    rest.is_empty() || rest.starts_with('/')
+}
+
+/// Decode the octal escapes the kernel writes for characters that would
+/// otherwise break the field split (`\040` space, `\011` tab, `\012` newline,
+/// `\134` backslash). Applied to mount points only; the source field is never
+/// compared against a path and must not be rewritten.
+#[cfg(target_os = "linux")]
+fn unescape_mount_field(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'\\' && i + 3 < b.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 4], 8) {
+                out.push(v as char);
+                i += 4;
+                continue;
+            }
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
 }
 
 #[cfg(target_os = "linux")]
@@ -168,8 +192,8 @@ fn fs_type_for_path_linux(p: &Path) -> Option<String> {
                         let (pre, post) = line.split_at(idx);
                         let pre_parts: Vec<&str> = pre.split_whitespace().collect();
                         if pre_parts.len() >= 5 {
-                            let mp = pre_parts[4];
-                            if path.to_string_lossy().starts_with(mp) {
+                            let mp = unescape_mount_field(pre_parts[4]);
+                            if path_under_mount(&path.to_string_lossy(), &mp) {
                                 let post_parts: Vec<&str> = post[3..].split_whitespace().collect();
                                 if !post_parts.is_empty() {
                                     let fs = post_parts[0].to_string();
@@ -185,9 +209,9 @@ fn fs_type_for_path_linux(p: &Path) -> Option<String> {
                     // mounts/mtab: src mp fstype ...
                     let parts: Vec<&str> = line.split_whitespace().collect();
                     if parts.len() >= 3 {
-                        let mp = parts[1];
+                        let mp = unescape_mount_field(parts[1]);
                         let fs = parts[2];
-                        if path.to_string_lossy().starts_with(mp) {
+                        if path_under_mount(&path.to_string_lossy(), &mp) {
                             let l = mp.len();
                             if best.as_ref().map(|(bl, _)| l > *bl).unwrap_or(true) {
                                 best = Some((l, fs.to_string()));
@@ -256,4 +280,33 @@ pub fn detect_and_apply(path: &Path, opt: &mut Options) -> Option<FsApplyReport>
         disable_uring: outcome.disable_uring,
         recommend_logical_only: outcome.recommend_logical_only,
     })
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mount_match_requires_a_path_boundary() {
+        assert!(path_under_mount("/mnt/f", "/mnt/f"));
+        assert!(path_under_mount("/mnt/f/github", "/mnt/f"));
+        // The case that misdetected: a sibling directory sharing a prefix.
+        assert!(!path_under_mount("/mnt/foo", "/mnt/f"));
+        assert!(!path_under_mount("/mnt/foo/bar", "/mnt/f"));
+    }
+
+    #[test]
+    fn root_mount_matches_every_absolute_path() {
+        assert!(path_under_mount("/", "/"));
+        assert!(path_under_mount("/home/user", "/"));
+    }
+
+    #[test]
+    fn octal_escapes_are_decoded_in_mount_points() {
+        assert_eq!(unescape_mount_field(r"/mnt/my\040disk"), "/mnt/my disk");
+        assert_eq!(unescape_mount_field(r"/mnt/a\011b"), "/mnt/a\tb");
+        assert_eq!(unescape_mount_field("/plain/path"), "/plain/path");
+        // A trailing backslash must not read past the end of the string.
+        assert_eq!(unescape_mount_field("/trailing\\"), "/trailing\\");
+    }
 }

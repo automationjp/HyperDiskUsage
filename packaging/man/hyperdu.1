@@ -91,7 +91,8 @@ Linux: enable posix_fadvise/readahead hints.
 Linux: pin worker threads to CPUs.
 .TP
 .BR --win-ntquery
-Windows: use NT Query API based fast path.
+Windows: force the NtQueryDirectoryFile enumeration path (default on MSVC builds).
+Set HYPERDU_WIN_USE_NTQUERY=0 to fall back to FindFirstFileExW.
 .TP
 .BR --tune
 Enable live tuning.
