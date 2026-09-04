@@ -35,11 +35,12 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
         record_error(opt, &last_os_error_systemcall(dir, "open"));
         return;
     }
-    // Current directory device id for one-file-system check
+    // Current directory device id for one-file-system check, packed the way
+    // `statx` reports devices so the comparisons below are like-for-like.
     let mut st_cur: libc::stat = unsafe { std::mem::zeroed() };
     let cur_dev: u64 = unsafe {
         if libc::fstat(fd, &mut st_cur as *mut _) == 0 {
-            st_cur.st_dev
+            crate::platform::linux_helpers::packed_dev(st_cur.st_dev)
         } else {
             0
         }
@@ -164,13 +165,25 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                                         &mut stx,
                                     )
                                 };
-                                if rc == 0 {
-                                    let child_dev = ((stx.stx_dev_major as u64) << 32)
-                                        | (stx.stx_dev_minor as u64);
-                                    if child_dev != cur_dev {
-                                        bpos += d_reclen;
-                                        continue;
-                                    }
+                                let child_dev = if rc == 0 {
+                                    Some(
+                                        ((stx.stx_dev_major as u64) << 32)
+                                            | (stx.stx_dev_minor as u64),
+                                    )
+                                } else {
+                                    // Without an answer the child cannot be
+                                    // confirmed to be on this filesystem, and
+                                    // `-x` must not cross on a guess.
+                                    let child_path = dir.join(OsStr::from_bytes(name_slice));
+                                    record_error(
+                                        opt,
+                                        &last_os_error_systemcall(&child_path, "statx"),
+                                    );
+                                    None
+                                };
+                                if child_dev != Some(cur_dev) {
+                                    bpos += d_reclen;
+                                    continue;
                                 }
                             }
                         }
@@ -179,12 +192,12 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                             // Fallback: use std metadata (best-effort)
                             use std::os::unix::fs::MetadataExt;
                             let child_path = dir.join(OsStr::from_bytes(name_slice));
-                            if let Ok(md) = std::fs::symlink_metadata(&child_path) {
-                                let child_dev = md.dev() as u64;
-                                if child_dev != cur_dev {
-                                    bpos += d_reclen;
-                                    continue;
-                                }
+                            let child_dev = std::fs::symlink_metadata(&child_path)
+                                .ok()
+                                .map(|md| crate::platform::linux_helpers::packed_dev(md.dev()));
+                            if child_dev != Some(cur_dev) {
+                                bpos += d_reclen;
+                                continue;
                             }
                         }
                     }

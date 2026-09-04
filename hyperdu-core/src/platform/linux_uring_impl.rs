@@ -15,20 +15,19 @@ thread_local! {
     static TL_RING: RefCell<Option<RingCtx>> = const { RefCell::new(None) };
 }
 
-/// Whether the named child sits on a different filesystem than `cur_dev`.
+/// Device of the named child, in the packed form the comparisons use.
 /// `statx` always fills the device fields, so a minimal mask is enough.
-fn leaves_filesystem(dirfd: i32, name: &[u8], cur_dev: u64) -> bool {
-    let Ok(cn) = CString::new(name) else {
-        return false;
-    };
+/// `None` means the lookup failed and the caller cannot know where the child
+/// lives, which under `-x` has to be treated as "do not cross".
+fn child_device(dirfd: i32, name: &[u8]) -> Option<u64> {
+    let cn = CString::new(name).ok()?;
     let mut stx: libc::statx = unsafe { std::mem::zeroed() };
     let flags = libc::AT_SYMLINK_NOFOLLOW | libc::AT_STATX_DONT_SYNC | libc::AT_NO_AUTOMOUNT;
     let rc = unsafe { libc::statx(dirfd, cn.as_ptr(), flags, libc::STATX_TYPE, &mut stx) };
     if rc != 0 {
-        return false;
+        return None;
     }
-    let child_dev = ((stx.stx_dev_major as u64) << 32) | (stx.stx_dev_minor as u64);
-    child_dev != cur_dev
+    Some(((stx.stx_dev_major as u64) << 32) | (stx.stx_dev_minor as u64))
 }
 
 pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
@@ -108,11 +107,12 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
         }
     }
 
-    // Current directory device id for one-file-system check
+    // Current directory device id for one-file-system check, packed the way
+    // `statx` reports devices so the comparisons below are like-for-like.
     let mut st_cur: libc::stat = unsafe { std::mem::zeroed() };
     let cur_dev: u64 = unsafe {
         if libc::fstat(fd, &mut st_cur as *mut _) == 0 {
-            st_cur.st_dev
+            crate::platform::linux_helpers::packed_dev(st_cur.st_dev)
         } else {
             0
         }
@@ -400,9 +400,25 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                     // Directories never enter the STATX pipeline below, so the
                     // filesystem-boundary check has to happen here. The extra
                     // statx only runs for `-x` scans.
-                    if opt.one_file_system && leaves_filesystem(fd, name_slice, cur_dev) {
-                        bpos += reclen;
-                        continue;
+                    if opt.one_file_system {
+                        match child_device(fd, name_slice) {
+                            Some(dev) if dev == cur_dev => {}
+                            Some(_) => {
+                                bpos += reclen;
+                                continue;
+                            }
+                            None => {
+                                let child = dir.join(std::ffi::OsStr::from_bytes(name_slice));
+                                crate::error_handling::record_error(
+                                    opt,
+                                    &crate::error_handling::last_os_error_systemcall(
+                                        &child, "statx",
+                                    ),
+                                );
+                                bpos += reclen;
+                                continue;
+                            }
+                        }
                     }
                     let child = dir.join(std::ffi::OsStr::from_bytes(name_slice));
                     ctx.enqueue_dir(child, depth + 1);

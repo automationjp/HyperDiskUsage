@@ -290,3 +290,31 @@ pub fn get_entry_stats(
         is_reg: (mode & libc::S_IFMT) == libc::S_IFREG,
     })
 }
+
+/// Pack a `dev_t` the way `statx` reports devices, as `(major << 32) | minor`.
+///
+/// `fstat` hands back a packed `dev_t` while `statx` splits the device into
+/// major and minor fields. Comparing the two encodings directly never matches,
+/// so the current directory's device is converted once, here.
+#[inline]
+pub fn packed_dev(dev: libc::dev_t) -> u64 {
+    ((libc::major(dev) as u64) << 32) | (libc::minor(dev) as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packed_dev_matches_the_statx_encoding() {
+        assert_eq!(packed_dev(libc::makedev(8, 17)), (8u64 << 32) | 17);
+    }
+
+    #[test]
+    fn packed_dev_separates_devices_sharing_a_minor() {
+        assert_ne!(
+            packed_dev(libc::makedev(8, 1)),
+            packed_dev(libc::makedev(9, 1))
+        );
+    }
+}
