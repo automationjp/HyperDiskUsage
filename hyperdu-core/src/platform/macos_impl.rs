@@ -229,7 +229,11 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                             logical
                         };
                         update_file_stats(stat_cur, logical, physical);
-                        report_file_progress(opt, ctx.total_files, Some((&child, logical, physical)));
+                        report_file_progress(
+                            opt,
+                            ctx.total_files,
+                            Some((&child, logical, physical)),
+                        );
                     }
                 }
 

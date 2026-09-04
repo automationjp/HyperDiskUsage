@@ -1531,7 +1531,9 @@ fn main() -> Result<()> {
         println!("  Threads: {}", hyperdu_core::effective_threads(&opt));
         // Print the active exclusions. They change the totals, so a comparison
         // against du that does not account for them is not a fair one.
-        if opt.exclude_contains.is_empty() && opt.exclude_regex.is_empty() && opt.exclude_glob.is_empty()
+        if opt.exclude_contains.is_empty()
+            && opt.exclude_regex.is_empty()
+            && opt.exclude_glob.is_empty()
         {
             println!("  Excludes: (none)");
         } else {
