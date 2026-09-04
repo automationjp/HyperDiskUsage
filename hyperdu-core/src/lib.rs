@@ -124,6 +124,12 @@ pub struct Options {
     /// When false, backends may skip building child paths for files entirely.
     #[doc(hidden)]
     pub needs_path_filter: bool,
+    /// Filled in by the scan bootstrap: identifier of the filesystem holding the
+    /// scan root, as the platform reports it (packed `dev_t` on Linux, volume
+    /// serial on Windows). `--one-file-system` compares against this rather than
+    /// against each parent, which is what GNU du means by "the starting point".
+    #[doc(hidden)]
+    pub root_fs_id: u64,
     // Compatibility and correctness knobs
     pub compat_mode: CompatMode,
     pub count_hardlinks: bool, // if true, count hardlinks as separate (non-GNU). Default false = dedupe hardlinks like GNU du
@@ -209,6 +215,7 @@ impl Default for Options {
             exclude_glob_set: None,
             exclude_contains_w: Vec::new(),
             needs_path_filter: false,
+            root_fs_id: 0,
             compat_mode: CompatMode::HyperDU,
             count_hardlinks: false,
             inode_cache: None,
@@ -290,6 +297,12 @@ pub type StatMap = HashMap<PathBuf, Stat>;
 /// A warm scan gives up a few percent to the extra threads, and a very small
 /// tree pays the spawn cost of roughly 0.3 ms per thread, so the multiplier is
 /// capped. Set `Options::threads` when a specific count is wanted.
+/// Cycle detection is active: links are followed and a visited set exists.
+#[inline]
+pub(crate) fn follows_links(opt: &Options) -> bool {
+    opt.follow_links && opt.visited_dirs.is_some()
+}
+
 pub fn default_threads() -> usize {
     let cpus = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -418,9 +431,9 @@ fn prepare_scan(
     // pointing at an ancestor). Cycle detection is mandatory, not opt-in.
     if compiled.follow_links && compiled.visited_dirs.is_none() {
         compiled.visited_dirs = Some(Arc::new(DashMap::with_capacity(1024)));
-        if compiled.visited_bloom.is_none() {
-            compiled.visited_bloom = Some(Arc::new(Bloom::with_bits(1 << 20)));
-        }
+    }
+    if compiled.one_file_system {
+        compiled.root_fs_id = platform::filesystem_id(root);
     }
     let workers = Scheduler::make_workers(threads);
     let sched = Arc::new(Scheduler::new(&workers));
@@ -646,9 +659,20 @@ fn name_contains_patterns_bytes(name: &[u8], patterns: &[String]) -> bool {
 #[cfg(not(windows))]
 #[inline(always)]
 pub(crate) fn name_matches(name: &[u8], opt: &Options) -> bool {
-    if let Some(ac) = &opt.exclude_ac {
-        if ac.is_match(name) {
-            return true;
+    // The automaton is built from exactly `exclude_contains`, so a miss already
+    // proves none of those patterns occur. Re-scanning with memmem afterwards
+    // doubled the per-entry substring work for every name that is kept, which is
+    // almost all of them.
+    match &opt.exclude_ac {
+        Some(ac) => {
+            if ac.is_match(name) {
+                return true;
+            }
+        }
+        None => {
+            if name_contains_patterns_bytes(name, &opt.exclude_contains) {
+                return true;
+            }
         }
     }
     if let Some(rs) = &opt.exclude_regex_set {
@@ -658,7 +682,7 @@ pub(crate) fn name_matches(name: &[u8], opt: &Options) -> bool {
             }
         }
     }
-    name_contains_patterns_bytes(name, &opt.exclude_contains)
+    false
 }
 
 /// Name-level exclusion on UTF-16 names (Windows backends). No allocation.

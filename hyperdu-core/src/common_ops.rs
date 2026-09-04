@@ -78,17 +78,11 @@ pub fn check_visited_directory(opt: &Options, dev: u64, ino: u64) -> bool {
     }
 
     if let Some(vset) = &opt.visited_dirs {
-        // The bloom filter only gives a fast "definitely new" answer. Either way
-        // the exact set must record the entry, or the second visit would also be
-        // reported as new and a cycle would be entered twice before it is cut.
-        if let Some(bf) = &opt.visited_bloom {
-            if !bf.test_and_set(dev, ino) {
-                vset.insert((dev, ino), ());
-                return false;
-            }
-        }
-
-        // DashMap returns Some if key already existed
+        // Only the map decides. A bloom "definitely new" answer cannot, because
+        // two workers that discover the same directory at once both get it: the
+        // one that loses the bloom race would still have to consult the map, so
+        // the map has to be the single arbiter. Insert returns the previous
+        // value, which makes claiming the directory one atomic step.
         vset.insert((dev, ino), ()).is_some()
     } else {
         false
@@ -111,12 +105,12 @@ pub fn calculate_physical_size(opt: &Options, logical: u64, blocks: u64) -> u64 
         return logical;
     }
 
-    let block_size = blocks * 512;
-    if block_size == 0 {
-        logical
-    } else {
-        block_size
-    }
+    // Zero blocks is a real answer, not a missing one: a sparse or fully
+    // punched file occupies nothing, and GNU du reports it as zero. Falling
+    // back to the logical size here billed a 1 GiB sparse file as 1 GiB of
+    // disk usage.
+    let _ = logical;
+    blocks.saturating_mul(512)
 }
 
 /// True when backends may skip building the full child path for filtering

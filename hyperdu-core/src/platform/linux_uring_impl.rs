@@ -119,7 +119,6 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
     };
 
     let stat_cur = map.entry(dir.to_path_buf()).or_default();
-    let files_before = stat_cur.files;
     // getdents64 buffer via RAII thread-local pool to avoid reallocs
     fn buf_size() -> usize {
         if let Ok(s) = std::env::var("HYPERDU_GETDENTS_BUF_KB") {
@@ -177,6 +176,10 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
     // Metrics
     let mut enq: u64 = 0;
     let mut fail: u64 = 0;
+    // Completions seen, whatever their result. A failed statx is handled per
+    // entry (the code below falls back to `symlink_metadata` for that one
+    // file), so a completion arriving at all means the ring works.
+    let mut cqe_seen: u64 = 0;
     let mut consec_no_fail: u32 = 0;
 
     // Enumerate and stream submit
@@ -234,6 +237,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                         opt.uring_cqe_err
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
+                    cqe_seen += 1;
                     let slot = cqe.user_data() as usize;
                     if res >= 0 && slot < items.len() {
                         if let Some((ref nm, dt)) = items[slot] {
@@ -475,6 +479,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                         opt.uring_cqe_err
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
+                    cqe_seen += 1;
                     let slot = cqe.user_data() as usize;
                     if res >= 0 && slot < items.len() {
                         if let Some((ref nm, _dt)) = items[slot] {
@@ -595,6 +600,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                     opt.uring_cqe_err
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
+                cqe_seen += 1;
                 let slot = cqe.user_data() as usize;
                 if res >= 0 && slot < items.len() {
                     if let Some((ref nm, dt)) = items[slot] {
@@ -723,10 +729,13 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
     opt.uring_sqe_fail
         .fetch_add(fail, std::sync::atomic::Ordering::Relaxed);
 
-    // Fallback: If we attempted to stat non-directory entries (enq>0) but ended up
-    // recognizing no files for this directory (files unchanged), re-scan this
-    // directory with a conservative per-entry stat approach and metadata fallback.
-    if enq > 0 && stat_cur.files == files_before {
+    // Fall back only when the ring itself produced nothing: work was submitted
+    // and no completion ever arrived. Individual statx failures are already
+    // handled per entry, and keying this off the file count re-scanned every
+    // directory whose entries were all filtered out, all below `min_file_size`,
+    // or all already-seen hardlinks. Those are normal outcomes, and the re-scan
+    // counted every one of their files a second time.
+    if enq > 0 && cqe_seen == 0 {
         // Re-open directory and iterate non-directory entries only.
         let c_path = match CString::new(dir.as_os_str().as_bytes()) {
             Ok(s) => s,

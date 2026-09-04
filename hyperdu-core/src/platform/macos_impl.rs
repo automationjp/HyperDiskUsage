@@ -11,10 +11,14 @@ use crate::{
 /// Whether a subdirectory must not be descended into: it sits on another file
 /// system while `-x` is in force, or it has already been visited through a
 /// symlink. Costs one `lstat`, and only when one of those options is on.
-fn skip_directory(opt: &crate::Options, child: &std::path::Path, cur_dev: u64) -> bool {
+///
+/// `-x` compares against the scan root, which is what GNU du means by staying
+/// on the filesystem of the starting point. A failed lookup answers "skip" for
+/// `-x`: a child whose filesystem cannot be confirmed must not be crossed.
+fn skip_directory(opt: &crate::Options, child: &std::path::Path) -> bool {
     use std::{ffi::CString, os::unix::ffi::OsStrExt};
 
-    if !opt.one_file_system && !opt.follow_links {
+    if !opt.one_file_system && !crate::follows_links(opt) {
         return false;
     }
     let Ok(c_child) = CString::new(child.as_os_str().as_bytes()) else {
@@ -22,10 +26,10 @@ fn skip_directory(opt: &crate::Options, child: &std::path::Path, cur_dev: u64) -
     };
     let mut st: libc::stat = unsafe { std::mem::zeroed() };
     if unsafe { libc::lstat(c_child.as_ptr(), &mut st) } != 0 {
-        return false;
+        return opt.one_file_system;
     }
     let dev = st.st_dev as u64;
-    if opt.one_file_system && dev != cur_dev {
+    if opt.one_file_system && opt.root_fs_id != 0 && dev != opt.root_fs_id {
         return true;
     }
     check_visited_directory(opt, dev, st.st_ino)
@@ -94,16 +98,6 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
         record_error(opt, &last_os_error_systemcall(dir, "open"));
         return;
     }
-    // Current dir device id
-    let mut st_cur: libc::stat = unsafe { std::mem::zeroed() };
-    let cur_dev: u64 = unsafe {
-        if libc::fstat(fd, &mut st_cur as *mut _) == 0 {
-            st_cur.st_dev as u64
-        } else {
-            0
-        }
-    };
-
     let mut al = AttrList {
         bitmapcount: ATTR_BIT_MAP_COUNT,
         reserved: 0,
@@ -206,7 +200,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                     let within_depth = opt.max_depth == 0 || depth < opt.max_depth;
                     // These checks have to run before the directory is queued:
                     // once it is queued another worker may already be inside it.
-                    if within_depth && !skip_directory(opt, &child, cur_dev) {
+                    if within_depth && !skip_directory(opt, &child) {
                         ctx.enqueue_dir(child.clone(), depth + 1);
                     }
                 } else {

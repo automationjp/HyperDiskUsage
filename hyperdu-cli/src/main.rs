@@ -790,18 +790,13 @@ fn main() -> Result<()> {
             opt.approximate_sizes = true;
             opt.count_hardlinks = true; // do not dedupe
                                         // keep compat in HyperDU unless明示
-                                        // io_uring の強化を環境変数でオプトイン（安全・可搬性優先）
-            if std::env::var("HYPERDU_URING_SQPOLL").is_err() {
-                std::env::set_var("HYPERDU_URING_SQPOLL", "1");
-            }
-            if std::env::var("HYPERDU_URING_COOP_TASKRUN").is_err() {
-                std::env::set_var("HYPERDU_URING_COOP_TASKRUN", "1");
-            }
-            if std::env::var("HYPERDU_USE_URING").is_err() {
-                std::env::set_var("HYPERDU_USE_URING", "1");
-            }
-            // 初期バッチ/深さを強めに（ライブチューナが追従）
-            // 簡易ヒューリスティクス（環境変数で上書き可）
+                                        // io_uring のチューニングはオプトインのままにする。
+                                        // SQPOLL はワーカーごとに ring を持つ設計と噛み合わず、
+                                        // カーネル側の polling スレッドが CPU を奪うため、
+                                        // 小さなツリーや CPU 数の少ない環境では逆効果になる。
+                                        // 必要なら --uring-sqpoll で明示的に有効化する。
+                                        // 初期バッチ/深さを強めに（ライブチューナが追従）
+                                        // 簡易ヒューリスティクス（環境変数で上書き可）
             let (b_default, d_default) =
                 match std::env::var("HYPERDU_DEVICE_ROTATIONAL").ok().as_deref() {
                     Some("1") => (128usize, 512usize), // HDD

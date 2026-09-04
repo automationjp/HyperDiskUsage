@@ -101,9 +101,19 @@ impl Scheduler {
         }
     }
 
-    /// Try to obtain a job: own deque, then high-priority, then steal from
-    /// peers (round-robin starting at `*next`).
+    /// Try to obtain a job: the high-priority queue when it holds anything, then
+    /// the own deque, then steal from peers (round-robin starting at `*next`).
+    ///
+    /// High priority is checked first so a split directory is finished promptly
+    /// instead of waiting behind a worker's whole local backlog. That queue is
+    /// almost always empty and `is_empty` is a relaxed load, so the common path
+    /// still effectively starts at the local deque.
     pub fn find_job(&self, local: &Worker<Job>, next: &mut usize) -> Option<Job> {
+        if !self.high.is_empty() {
+            if let Some(j) = steal_retrying(|| self.high.steal_batch_and_pop(local)) {
+                return Some(j);
+            }
+        }
         if let Some(j) = local.pop() {
             return Some(j);
         }

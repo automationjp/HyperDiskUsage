@@ -251,6 +251,23 @@ fn sparse_file_costs_no_physical_bytes() {
     );
 }
 
+/// `--one-file-system` compares against the scan root. With everything on one
+/// volume nothing may be pruned. The point is that the root's own id is
+/// resolved and used at all: a zero or mismatched id prunes the whole tree.
+#[test]
+fn one_file_system_keeps_everything_on_a_single_volume() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("r");
+    build_tree(&root);
+    let mut opt = quiet_opts();
+    opt.one_file_system = true;
+    let map = scan_directory(&root, &opt).unwrap();
+    let s = stat_of(&map, &root);
+    assert_eq!(s.files, 4, "single volume: nothing is pruned");
+    assert_eq!(s.logical, 607);
+    assert_eq!(stat_of(&map, &root.join("sub").join("deep")).files, 1);
+}
+
 #[test]
 fn long_paths_beyond_max_path_are_scanned() {
     let tmp = tempfile::tempdir().unwrap();

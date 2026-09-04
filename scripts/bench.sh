@@ -25,6 +25,7 @@ ROOT="."
 RUNS=${RUNS:-3}
 BIN="${BIN:-}"
 WITH_RAYON=${WITH_RAYON:-1}
+WITH_URING=${WITH_URING:-0}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -40,16 +41,29 @@ bench_one() {
   local name="$1"; shift
   local cmd=("$@")
   echo "==> $name"
-  local total=0
+  local total=0 best=""
+  local out err
+  out=$(mktemp) || return 1
+  err=$(mktemp) || return 1
   for i in $(seq 1 "$RUNS"); do
     local t0=$(date +%s%N)
-    "${cmd[@]}" >/dev/null 2>&1 || true
+    # A failed run finishes early, so counting it as a fast run is worse than
+    # useless: it makes a broken build look like an improvement.
+    if ! "${cmd[@]}" >"$out" 2>"$err"; then
+      local rc=$?
+      echo "  run $i: FAILED (exit $rc)" >&2
+      sed 's/^/    /' "$err" >&2
+      rm -f "$out" "$err"
+      return 1
+    fi
     local t1=$(date +%s%N)
     local dt=$(( (t1 - t0)/1000000 ))
     echo "  run $i: ${dt} ms"
     total=$(( total + dt ))
+    if [[ -z "$best" ]] || (( dt < best )); then best=$dt; fi
   done
-  echo "  avg: $(( total / RUNS )) ms"
+  rm -f "$out" "$err"
+  echo "  avg: $(( total / RUNS )) ms   min: ${best} ms"
 }
 
 if [[ -z "$BIN" ]]; then
@@ -60,15 +74,29 @@ if [[ -z "$BIN" ]]; then
   exit 1
 fi
 
-bench_one "turbo-off" "$BIN" "$ROOT" --perf turbo --no-uring
-HYPERDU_USE_URING=1 bench_one "turbo-uring" "$BIN" "$ROOT" --perf turbo
+bench_one "turbo-getdents" "$BIN" "$ROOT" --perf turbo
+
+# The io_uring backend is a compile-time feature, not an environment switch, so
+# it needs its own binary. Building into a separate target dir keeps the two
+# variants from overwriting each other, which previously made both cases measure
+# whichever binary happened to be built last.
+if [[ "$WITH_URING" == "1" ]]; then
+  echo "==> building io_uring variant"
+  if cargo build -p hyperdu-cli --release --features uring \
+      --target-dir target/bench-uring >/dev/null; then
+    bench_one "turbo-uring" target/bench-uring/release/hyperdu-cli "$ROOT" --perf turbo
+  else
+    echo "  (skipped: io_uring variant failed to build)" >&2
+  fi
+fi
 
 if [[ "$WITH_RAYON" == "1" ]]; then
   echo "==> building rayon-par variant"
-  cargo build -p hyperdu-cli --release --features rayon-par >/dev/null 2>&1
-  BIN2=target/release/hyperdu-cli
-  if [[ -x "$BIN2" ]]; then
-    HYPERDU_USE_URING=1 bench_one "turbo-uring+rayon-par" "$BIN2" "$ROOT" --perf turbo
+  if cargo build -p hyperdu-cli --release --features rayon-par \
+      --target-dir target/bench-rayon >/dev/null; then
+    bench_one "turbo+rayon-par" target/bench-rayon/release/hyperdu-cli "$ROOT" --perf turbo
+  else
+    echo "  (skipped: rayon-par variant failed to build)" >&2
   fi
 fi
 

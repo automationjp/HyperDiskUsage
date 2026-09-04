@@ -19,6 +19,13 @@ mod win32;
 
 use crate::{DirContext, ScanContext, StatMap};
 
+/// Volume serial of `path`, or zero when it cannot be read.
+pub fn volume_id(path: &std::path::Path) -> u64 {
+    entry::file_id_by_path(&path::to_wide_for_open(path))
+        .map(|(vol, _)| vol)
+        .unwrap_or(0)
+}
+
 pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     #[cfg(target_env = "msvc")]
     {

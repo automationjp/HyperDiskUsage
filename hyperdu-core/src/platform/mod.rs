@@ -22,6 +22,35 @@ mod unix_fallback_impl;
 #[cfg(windows)]
 mod windows_impl;
 
+/// Identifier of the filesystem holding `path`, in the same form the
+/// per-directory check compares against. Zero when it cannot be determined,
+/// which backends read as "no boundary known" so that `--one-file-system`
+/// fails open instead of silently scanning nothing.
+#[cfg(unix)]
+pub fn filesystem_id(path: &std::path::Path) -> u64 {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+    let Ok(c_path) = CString::new(path.as_os_str().as_bytes()) else {
+        return 0;
+    };
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::stat(c_path.as_ptr(), &mut st) } != 0 {
+        return 0;
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        linux_helpers::packed_dev(st.st_dev)
+    }
+    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    {
+        st.st_dev as u64
+    }
+}
+
+#[cfg(windows)]
+pub fn filesystem_id(path: &std::path::Path) -> u64 {
+    windows_impl::volume_id(path)
+}
+
 #[cfg(windows)]
 pub fn process_dir_wrapped(ctx: &ScanContext, dir_ctx: &DirContext, map: &mut StatMap) {
     windows_impl::process_dir(ctx, dir_ctx, map)

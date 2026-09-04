@@ -69,7 +69,7 @@ impl DirState {
     /// Whether the backend must resolve the directory's own identity
     /// (volume serial, plus file id when cycle detection is active).
     pub fn needs_identity(&self, opt: &Options) -> bool {
-        self.dedupe || opt.one_file_system || follows_links(opt)
+        self.dedupe || opt.one_file_system || crate::follows_links(opt)
     }
 
     /// Hand the directory's file tally to the shared progress counter. The
@@ -87,12 +87,6 @@ impl DirState {
             v
         });
     }
-}
-
-/// Cycle detection is active: links are followed and a visited set exists.
-#[inline]
-pub(super) fn follows_links(opt: &Options) -> bool {
-    opt.follow_links && opt.visited_dirs.is_some()
 }
 
 #[inline(always)]
@@ -157,11 +151,15 @@ fn handle_dir(
     // Only a followed link can leave the volume, and resolving it costs a handle
     // open, so check just those. Cycles are caught when the target is opened for
     // enumeration and registers its own id (see `visited_before`).
+    //
+    // The comparison is against the scan root, not the parent: `-x` means "stay
+    // on the filesystem of the starting point", so a link that lands back on the
+    // root's volume is followed even from a directory that is itself elsewhere.
     if link && opt.one_file_system {
         let Some((vol, _)) = file_id_by_path(st.paths.wide_open(e.name)) else {
             return;
         };
-        if vol != st.volume {
+        if vol != opt.root_fs_id {
             return;
         }
     }
@@ -170,17 +168,16 @@ fn handle_dir(
 }
 
 /// Record `(vol, id)` as visited; returns true if it was already there.
+///
+/// Only the map decides. A bloom "definitely new" answer cannot, because two
+/// workers discovering the same directory at once can both receive it: the one
+/// that loses the bloom race would still have to consult the map, so the map
+/// has to be the single arbiter. Insert returns the previous value, which makes
+/// claiming a directory one atomic step.
 pub(super) fn visited_before(opt: &Options, vol: u64, id: u64) -> bool {
     let Some(set) = &opt.visited_dirs else {
         return false;
     };
-    if let Some(bf) = &opt.visited_bloom {
-        if !bf.test_and_set(vol, id) {
-            // Definitely new; still record it in the exact set.
-            set.insert((vol, id), ());
-            return false;
-        }
-    }
     set.insert((vol, id), ()).is_some()
 }
 
@@ -247,7 +244,7 @@ pub(super) fn identity_of(h: HANDLE) -> Option<(u64, u64)> {
 /// claiming an id and then bailing out would make a fallback backend mistake
 /// the directory for a cycle and skip it entirely.
 pub(super) fn claim_visited(opt: &Options, id: Option<(u64, u64)>) -> bool {
-    if !follows_links(opt) {
+    if !crate::follows_links(opt) {
         return true;
     }
     match id {
