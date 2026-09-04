@@ -7,11 +7,17 @@ description = "Core engine for HyperDU: ultra-fast cross-platform disk usage ana
 rust-version = "1.75"
 
 [features]
-default = ["uring", "prefetch-advise"]
+default = ["prefetch-advise"]
 mimalloc = ["dep:mimalloc"]
 prof-tracy = ["dep:profiling", "profiling/profile-with-tracy", "dep:tracy-client"]
 prof-puffin = ["dep:profiling", "profiling/profile-with-puffin", "dep:puffin"]
-# Linux io_uring batched statx (enabled by default on Linux builds)
+# Linux io_uring batched statx. Off by default: io_uring has no inline statx, so
+# every request is punted to an io-wq kernel worker, and the extra scheduling and
+# page faults cost more than the batching saves. Measured on Amazon Linux 2023
+# (kernel 6.1, xfs, 2 vCPU), best of 5, versus the getdents64 + statx backend:
+#   warm cache, /usr:                  273 ms -> 117 ms
+#   warm cache, 100k files / 200 dirs: 369 ms -> 134 ms
+#   cold cache, /usr:                 1556 ms -> 1057 ms
 uring = ["dep:io-uring"]
 simd-prefetch = []        # x86_64 prefetch next dirent into cache
 prefetch-advise = []      # posix_fadvise(SEQUENTIAL) hint on directory fd (now default)
