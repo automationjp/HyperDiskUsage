@@ -1477,15 +1477,28 @@ fn main() -> Result<()> {
     let mut exit_code = 0i32;
 
     if matches!(opt.compat_mode, hyperdu_core::CompatMode::HyperDU) {
-        if roots.len() > 1 {
-            eprintln!("note: multiple roots given; showing report for first only");
-        }
-        let root = roots.first().expect("at least one root");
+        let root = roots.first().expect("at least one root").clone();
         let t0 = std::time::Instant::now();
-        let map = hyperdu_core::scan_directory(root, &opt)?;
+        // Every root is scanned, and roots on different devices are scanned at
+        // the same time. Reporting only the first was surprising for the very
+        // case multiple roots exist for: comparing two drives.
+        let mut map: hyperdu_core::StatMap = Default::default();
+        let mut total_stat = hyperdu_core::Stat::default();
+        let mut root_totals: Vec<(PathBuf, hyperdu_core::Stat)> = Vec::new();
+        for (r, res) in hyperdu_core::scan_roots(&roots, &opt) {
+            let m = res?;
+            let s = *m.get(&r).unwrap_or(&hyperdu_core::Stat::default());
+            total_stat.logical += s.logical;
+            total_stat.physical += s.physical;
+            total_stat.files += s.files;
+            root_totals.push((r, s));
+            // Paths are absolute, so two roots cannot collide unless one
+            // contains the other, in which case the inner one's entries are
+            // identical and overwriting is correct.
+            map.extend(m);
+        }
         let dt = t0.elapsed();
         total_dt += dt;
-        let total_stat = *map.get(root).unwrap_or(&hyperdu_core::Stat::default());
         // Emit a final progress line if progress enabled and threshold未達で未出力の場合
         if print_progress {
             let now = std::time::Instant::now();
@@ -1527,7 +1540,20 @@ fn main() -> Result<()> {
         }
         println!();
         println!("Summary:");
-        println!("  Root: {}", root.display());
+        if root_totals.len() == 1 {
+            println!("  Root: {}", root.display());
+        } else {
+            println!("  Roots: {} (別デバイスは並列に走査)", root_totals.len());
+            for (r, s) in &root_totals {
+                println!(
+                    "    {} | phys={} | log={} | files={}",
+                    r.display(),
+                    format_size(s.physical, BINARY),
+                    format_size(s.logical, BINARY),
+                    s.files
+                );
+            }
+        }
         println!("  Elapsed: {:.3}s", dt.as_secs_f64());
         // The profile may cap the worker count; report what actually runs.
         println!("  Threads: {}", hyperdu_core::effective_threads(&opt));
@@ -1592,7 +1618,7 @@ fn main() -> Result<()> {
         );
 
         // Disk/Volume usage (best-effort)
-        if let Some((vol_total, vol_free)) = fs_total_free(root) {
+        if let Some((vol_total, vol_free)) = fs_total_free(&root) {
             let used = vol_total.saturating_sub(vol_free);
             let pct: f64 = if vol_total > 0 {
                 (used as f64) * 100.0 / (vol_total as f64)
@@ -1637,7 +1663,7 @@ fn main() -> Result<()> {
                 "deep" => hyperdu_core::classify::ClassifyMode::Deep,
                 _ => hyperdu_core::classify::ClassifyMode::Basic,
             };
-            let class_stats = hyperdu_core::classify::classify_directory(root, &opt, cmode);
+            let class_stats = hyperdu_core::classify::classify_directory(&root, &opt, cmode);
             println!(
                 "classify: categories={} extensions={} top_entries={}",
                 class_stats.by_category.len(),
@@ -1673,15 +1699,15 @@ fn main() -> Result<()> {
         if let Some(dbp) = &args.incr_db {
             let db = hyperdu_core::incremental::open_db(dbp)?;
             if args.compute_delta {
-                let d = hyperdu_core::incremental::compute_delta(&db, root, &opt)?;
+                let d = hyperdu_core::incremental::compute_delta(&db, &root, &opt)?;
                 eprintln!(
                     "delta: added={} modified={} removed={}",
                     d.added, d.modified, d.removed
                 );
             }
             if args.update_snapshot {
-                hyperdu_core::incremental::snapshot_walk_and_update(&db, root, &opt)?;
-                let pruned = hyperdu_core::incremental::snapshot_prune_removed(&db, root)?;
+                hyperdu_core::incremental::snapshot_walk_and_update(&db, &root, &opt)?;
+                let pruned = hyperdu_core::incremental::snapshot_prune_removed(&db, &root)?;
                 eprintln!(
                     "snapshot: updated DB at {} (pruned {} stale entries)",
                     dbp.display(),
@@ -1690,7 +1716,7 @@ fn main() -> Result<()> {
             }
             if args.watch {
                 eprintln!("watch: monitoring {} (Ctrl-C to stop)", root.display());
-                let _w = hyperdu_core::incremental::watch(root, |kind, p| {
+                let _w = hyperdu_core::incremental::watch(&root, |kind, p| {
                     eprintln!("fswatch: {} {}", kind, p.display())
                 });
                 loop {

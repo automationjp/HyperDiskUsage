@@ -496,6 +496,72 @@ fn compile_filters_in_place(opt: &mut Options) {
         contains_has_separator || opt.exclude_glob_set.is_some() || opt.exclude_regex_set.is_some();
 }
 
+/// Scan several roots, overlapping the ones that sit on different devices.
+///
+/// Roots on the same device are scanned one after another: they share a queue
+/// of physical reads, so overlapping them only adds seeking. Roots on different
+/// devices have nothing in common and are scanned at the same time, which turns
+/// the total for e.g. `C:\` plus `F:\` from a sum into a maximum.
+///
+/// Returns one entry per root in the order given, so a caller printing a report
+/// per root does not have to re-order anything.
+pub fn scan_roots(roots: &[PathBuf], opt: &Options) -> Vec<(PathBuf, Result<StatMap>)> {
+    if roots.len() < 2 {
+        return roots
+            .iter()
+            .map(|r| (r.clone(), scan_directory(r, opt)))
+            .collect();
+    }
+
+    // Group by device, preserving the caller's order within each group.
+    let mut groups: Vec<(u64, Vec<usize>)> = Vec::new();
+    for (i, r) in roots.iter().enumerate() {
+        let dev = platform::filesystem_id(r);
+        match groups.iter_mut().find(|(d, _)| *d == dev && dev != 0) {
+            Some((_, idx)) => idx.push(i),
+            // Device 0 means "unknown", and two unknowns are not known to be
+            // the same device, so each gets its own group.
+            None => groups.push((dev, vec![i])),
+        }
+    }
+
+    let mut out: Vec<Option<Result<StatMap>>> = (0..roots.len()).map(|_| None).collect();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = groups
+            .iter()
+            .map(|(_, idx)| {
+                scope.spawn(move || {
+                    idx.iter()
+                        .map(|&i| (i, scan_directory(&roots[i], opt)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for h in handles {
+            // A worker thread panicking must not lose the other groups'
+            // results, so the failure is reported per root instead.
+            match h.join() {
+                Ok(results) => {
+                    for (i, r) in results {
+                        out[i] = Some(r);
+                    }
+                }
+                Err(_) => return,
+            }
+        }
+    });
+
+    roots
+        .iter()
+        .cloned()
+        .zip(out)
+        .map(|(r, res)| {
+            let res = res.unwrap_or_else(|| Err(anyhow!("scan thread for {} failed", r.display())));
+            (r, res)
+        })
+        .collect()
+}
+
 pub fn scan_directory(root: impl AsRef<Path>, opt: &Options) -> Result<StatMap> {
     let scanner = Arc::new(crate::scanner::platform_scanner());
     scan_directory_with(root, opt, scanner)
