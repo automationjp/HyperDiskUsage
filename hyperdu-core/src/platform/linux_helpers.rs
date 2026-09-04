@@ -69,6 +69,24 @@ pub unsafe fn dirent_name_slice<'a>(ptr: *const u8, reclen: isize) -> &'a [u8] {
     std::slice::from_raw_parts(name_ptr, name_len)
 }
 
+/// The dirent's name as a NUL-terminated C string, borrowed from the getdents64
+/// buffer itself.
+///
+/// `d_name` is already NUL-terminated (the kernel pads the record out to
+/// `d_reclen`), so a syscall that wants a `*const c_char` can use this pointer
+/// directly. Copying the name into a `CString` first cost one malloc and one
+/// free per file, and the allocator is the second-largest item in a warm scan
+/// profile after `statx` itself.
+///
+/// # Safety
+/// The pointer is only valid until the next `getdents64` overwrites the buffer,
+/// so it must be consumed within the same iteration. Anything that outlives the
+/// iteration has to copy the bytes.
+#[inline(always)]
+pub unsafe fn dirent_name_ptr(ptr: *const u8) -> *const libc::c_char {
+    ptr.add(19) as *const libc::c_char
+}
+
 /// Perform statx syscall with proper error handling (glibc)
 #[cfg(not(target_env = "musl"))]
 #[inline]

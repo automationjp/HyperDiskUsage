@@ -679,52 +679,54 @@ fn exe_dir() -> Option<PathBuf> {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
 }
 
-fn load_or_init_config() -> AppConfig {
-    let dir = exe_dir().unwrap_or_else(|| PathBuf::from("."));
-    let path = dir.join("hyperdu-config.json");
-    if path.exists() {
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                let get_bool =
-                    |k: &str, def: bool| v.get(k).and_then(|x| x.as_bool()).unwrap_or(def);
-                let get_u64 = |k: &str, def: u64| v.get(k).and_then(|x| x.as_u64()).unwrap_or(def);
-                let get_str = |k: &str, def: &str| {
-                    v.get(k).and_then(|x| x.as_str()).unwrap_or(def).to_string()
-                };
-                return AppConfig {
-                    auto_parallel: get_bool("auto_parallel", false),
-                    heuristics_mode: get_str("heuristics_mode", "auto"),
-                    prefer_inner_rayon: get_bool("prefer_inner_rayon", false),
-                    tune_enabled: get_bool("tune_enabled", false),
-                    tune_interval_ms: get_u64("tune_interval_ms", 800),
-                    win_allow_handle: get_bool("win_allow_handle", false),
-                    win_handle_sample_every: get_u64("win_handle_sample_every", 64),
-                };
-            }
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            auto_parallel: false,
+            heuristics_mode: "auto".into(),
+            prefer_inner_rayon: false,
+            tune_enabled: false,
+            tune_interval_ms: 800,
+            win_allow_handle: false,
+            win_handle_sample_every: 64,
         }
     }
-    let cfg = AppConfig {
-        auto_parallel: false,
-        heuristics_mode: "auto".into(),
-        prefer_inner_rayon: false,
-        tune_enabled: false,
-        tune_interval_ms: 800,
-        win_allow_handle: false,
-        win_handle_sample_every: 64,
+}
+
+/// Read the optional config file next to the executable.
+///
+/// Absent or unreadable means "use the defaults", silently. Every run used to
+/// `exists()` the path and then, when it was missing, write the defaults back
+/// out and print a line about it. Beside a system-installed binary that
+/// directory is not writable, so the attempt failed on every single run — and
+/// still printed. The read alone is enough; `read_to_string` already reports a
+/// missing file, so the extra `exists()` stat is gone too.
+fn load_config() -> AppConfig {
+    let dir = exe_dir().unwrap_or_else(|| PathBuf::from("."));
+    let path = dir.join("hyperdu-config.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return AppConfig::default();
     };
-    let s = serde_json::to_string_pretty(&serde_json::json!({
-        "auto_parallel": cfg.auto_parallel,
-        "heuristics_mode": cfg.heuristics_mode,
-        "prefer_inner_rayon": cfg.prefer_inner_rayon,
-        "tune_enabled": cfg.tune_enabled,
-        "tune_interval_ms": cfg.tune_interval_ms,
-        "win_allow_handle": cfg.win_allow_handle,
-        "win_handle_sample_every": cfg.win_handle_sample_every,
-    }))
-    .unwrap();
-    let _ = std::fs::write(&path, s);
-    eprintln!("initialized config: {}", path.display());
-    cfg
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        eprintln!("config は不正な JSON のため無視します: {}", path.display());
+        return AppConfig::default();
+    };
+    let d = AppConfig::default();
+    let get_bool = |k: &str, def: bool| v.get(k).and_then(|x| x.as_bool()).unwrap_or(def);
+    let get_u64 = |k: &str, def: u64| v.get(k).and_then(|x| x.as_u64()).unwrap_or(def);
+    AppConfig {
+        auto_parallel: get_bool("auto_parallel", d.auto_parallel),
+        heuristics_mode: v
+            .get("heuristics_mode")
+            .and_then(|x| x.as_str())
+            .map(str::to_owned)
+            .unwrap_or(d.heuristics_mode),
+        prefer_inner_rayon: get_bool("prefer_inner_rayon", d.prefer_inner_rayon),
+        tune_enabled: get_bool("tune_enabled", d.tune_enabled),
+        tune_interval_ms: get_u64("tune_interval_ms", d.tune_interval_ms),
+        win_allow_handle: get_bool("win_allow_handle", d.win_allow_handle),
+        win_handle_sample_every: get_u64("win_handle_sample_every", d.win_handle_sample_every),
+    }
 }
 
 fn main() -> Result<()> {
@@ -746,7 +748,7 @@ fn main() -> Result<()> {
     if args.bytes {
         args.apparent_size = true;
     }
-    let cfg = load_or_init_config();
+    let cfg = load_config();
 
     let mut exclude_contains: Vec<String> = args
         .exclude
@@ -1475,15 +1477,28 @@ fn main() -> Result<()> {
     let mut exit_code = 0i32;
 
     if matches!(opt.compat_mode, hyperdu_core::CompatMode::HyperDU) {
-        if roots.len() > 1 {
-            eprintln!("note: multiple roots given; showing report for first only");
-        }
-        let root = roots.first().expect("at least one root");
+        let root = roots.first().expect("at least one root").clone();
         let t0 = std::time::Instant::now();
-        let map = hyperdu_core::scan_directory(root, &opt)?;
+        // Every root is scanned, and roots on different devices are scanned at
+        // the same time. Reporting only the first was surprising for the very
+        // case multiple roots exist for: comparing two drives.
+        let mut map: hyperdu_core::StatMap = Default::default();
+        let mut total_stat = hyperdu_core::Stat::default();
+        let mut root_totals: Vec<(PathBuf, hyperdu_core::Stat)> = Vec::new();
+        for (r, res) in hyperdu_core::scan_roots(&roots, &opt) {
+            let m = res?;
+            let s = *m.get(&r).unwrap_or(&hyperdu_core::Stat::default());
+            total_stat.logical += s.logical;
+            total_stat.physical += s.physical;
+            total_stat.files += s.files;
+            root_totals.push((r, s));
+            // Paths are absolute, so two roots cannot collide unless one
+            // contains the other, in which case the inner one's entries are
+            // identical and overwriting is correct.
+            map.extend(m);
+        }
         let dt = t0.elapsed();
         total_dt += dt;
-        let total_stat = *map.get(root).unwrap_or(&hyperdu_core::Stat::default());
         // Emit a final progress line if progress enabled and threshold未達で未出力の場合
         if print_progress {
             let now = std::time::Instant::now();
@@ -1525,7 +1540,20 @@ fn main() -> Result<()> {
         }
         println!();
         println!("Summary:");
-        println!("  Root: {}", root.display());
+        if root_totals.len() == 1 {
+            println!("  Root: {}", root.display());
+        } else {
+            println!("  Roots: {} (別デバイスは並列に走査)", root_totals.len());
+            for (r, s) in &root_totals {
+                println!(
+                    "    {} | phys={} | log={} | files={}",
+                    r.display(),
+                    format_size(s.physical, BINARY),
+                    format_size(s.logical, BINARY),
+                    s.files
+                );
+            }
+        }
         println!("  Elapsed: {:.3}s", dt.as_secs_f64());
         // The profile may cap the worker count; report what actually runs.
         println!("  Threads: {}", hyperdu_core::effective_threads(&opt));
@@ -1590,7 +1618,7 @@ fn main() -> Result<()> {
         );
 
         // Disk/Volume usage (best-effort)
-        if let Some((vol_total, vol_free)) = fs_total_free(root) {
+        if let Some((vol_total, vol_free)) = fs_total_free(&root) {
             let used = vol_total.saturating_sub(vol_free);
             let pct: f64 = if vol_total > 0 {
                 (used as f64) * 100.0 / (vol_total as f64)
@@ -1635,7 +1663,7 @@ fn main() -> Result<()> {
                 "deep" => hyperdu_core::classify::ClassifyMode::Deep,
                 _ => hyperdu_core::classify::ClassifyMode::Basic,
             };
-            let class_stats = hyperdu_core::classify::classify_directory(root, &opt, cmode);
+            let class_stats = hyperdu_core::classify::classify_directory(&root, &opt, cmode);
             println!(
                 "classify: categories={} extensions={} top_entries={}",
                 class_stats.by_category.len(),
@@ -1671,15 +1699,15 @@ fn main() -> Result<()> {
         if let Some(dbp) = &args.incr_db {
             let db = hyperdu_core::incremental::open_db(dbp)?;
             if args.compute_delta {
-                let d = hyperdu_core::incremental::compute_delta(&db, root, &opt)?;
+                let d = hyperdu_core::incremental::compute_delta(&db, &root, &opt)?;
                 eprintln!(
                     "delta: added={} modified={} removed={}",
                     d.added, d.modified, d.removed
                 );
             }
             if args.update_snapshot {
-                hyperdu_core::incremental::snapshot_walk_and_update(&db, root, &opt)?;
-                let pruned = hyperdu_core::incremental::snapshot_prune_removed(&db, root)?;
+                hyperdu_core::incremental::snapshot_walk_and_update(&db, &root, &opt)?;
+                let pruned = hyperdu_core::incremental::snapshot_prune_removed(&db, &root)?;
                 eprintln!(
                     "snapshot: updated DB at {} (pruned {} stale entries)",
                     dbp.display(),
@@ -1688,7 +1716,7 @@ fn main() -> Result<()> {
             }
             if args.watch {
                 eprintln!("watch: monitoring {} (Ctrl-C to stop)", root.display());
-                let _w = hyperdu_core::incremental::watch(root, |kind, p| {
+                let _w = hyperdu_core::incremental::watch(&root, |kind, p| {
                     eprintln!("fswatch: {} {}", kind, p.display())
                 });
                 loop {

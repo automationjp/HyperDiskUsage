@@ -156,13 +156,8 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                     #[cfg(not(target_env = "musl"))]
                     {
                         let mut stx: libc::statx = unsafe { std::mem::zeroed() };
-                        let c_name = match CString::new(name_slice) {
-                            Ok(s) => s,
-                            Err(_) => {
-                                bpos += d_reclen;
-                                continue;
-                            }
-                        };
+                        let name_ptr =
+                            unsafe { crate::platform::linux_helpers::dirent_name_ptr(ptr) };
                         let mut flags = if opt.follow_links {
                             0
                         } else {
@@ -185,17 +180,21 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                             mask |= libc::STATX_BLOCKS;
                         }
                         if need_ino {
-                            mask |= libc::STATX_INO;
+                            // NLINK comes from the same inode, so asking for it
+                            // costs nothing and lets most files skip the map.
+                            mask |= libc::STATX_INO | libc::STATX_NLINK;
                         }
-                        let rc = unsafe { libc::statx(fd, c_name.as_ptr(), flags, mask, &mut stx) };
+                        let rc = unsafe { libc::statx(fd, name_ptr, flags, mask, &mut stx) };
                         if rc == 0 {
-                            // Hardlink dedupe (strict modes)
-                            let dev =
-                                ((stx.stx_dev_major as u64) << 32) | (stx.stx_dev_minor as u64);
-                            let ino = stx.stx_ino;
-                            if check_hardlink_duplicate(opt, dev, ino) {
-                                bpos += d_reclen;
-                                continue;
+                            // Hardlink dedupe: only files that can actually be
+                            // hardlinks need the shared map.
+                            if crate::common_ops::hardlink_candidate(opt, stx.stx_nlink) {
+                                let dev =
+                                    ((stx.stx_dev_major as u64) << 32) | (stx.stx_dev_minor as u64);
+                                if check_hardlink_duplicate(opt, dev, stx.stx_ino) {
+                                    bpos += d_reclen;
+                                    continue;
+                                }
                             }
                             let logical = stx.stx_size;
                             if logical >= opt.min_file_size {
@@ -227,13 +226,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                 #[cfg(not(target_env = "musl"))]
                 {
                     let mut stx: libc::statx = unsafe { std::mem::zeroed() };
-                    let c_name = match CString::new(name_slice) {
-                        Ok(s) => s,
-                        Err(_) => {
-                            bpos += d_reclen;
-                            continue;
-                        }
-                    };
+                    let name_ptr = unsafe { crate::platform::linux_helpers::dirent_name_ptr(ptr) };
                     let mut flags = if opt.follow_links {
                         0
                     } else {
@@ -257,9 +250,9 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                         mask |= libc::STATX_BLOCKS;
                     }
                     if need_ino {
-                        mask |= libc::STATX_INO;
+                        mask |= libc::STATX_INO | libc::STATX_NLINK;
                     }
-                    let rc = unsafe { libc::statx(fd, c_name.as_ptr(), flags, mask, &mut stx) };
+                    let rc = unsafe { libc::statx(fd, name_ptr, flags, mask, &mut stx) };
                     if rc == 0 {
                         let mode = stx.stx_mode as u32;
                         let ftype = mode & libc::S_IFMT;
@@ -274,8 +267,10 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                         } else if ftype == libc::S_IFREG
                             || (opt.follow_links && ftype == libc::S_IFLNK)
                         {
-                            // Dedupe only for regular files
+                            // Dedupe only for regular files that can actually
+                            // be hardlinks.
                             if ftype == libc::S_IFREG
+                                && crate::common_ops::hardlink_candidate(opt, stx.stx_nlink)
                                 && check_hardlink_duplicate(
                                     opt,
                                     ((stx.stx_dev_major as u64) << 32) | (stx.stx_dev_minor as u64),

@@ -496,6 +496,72 @@ fn compile_filters_in_place(opt: &mut Options) {
         contains_has_separator || opt.exclude_glob_set.is_some() || opt.exclude_regex_set.is_some();
 }
 
+/// Scan several roots, overlapping the ones that sit on different devices.
+///
+/// Roots on the same device are scanned one after another: they share a queue
+/// of physical reads, so overlapping them only adds seeking. Roots on different
+/// devices have nothing in common and are scanned at the same time, which turns
+/// the total for e.g. `C:\` plus `F:\` from a sum into a maximum.
+///
+/// Returns one entry per root in the order given, so a caller printing a report
+/// per root does not have to re-order anything.
+pub fn scan_roots(roots: &[PathBuf], opt: &Options) -> Vec<(PathBuf, Result<StatMap>)> {
+    if roots.len() < 2 {
+        return roots
+            .iter()
+            .map(|r| (r.clone(), scan_directory(r, opt)))
+            .collect();
+    }
+
+    // Group by device, preserving the caller's order within each group.
+    let mut groups: Vec<(u64, Vec<usize>)> = Vec::new();
+    for (i, r) in roots.iter().enumerate() {
+        let dev = platform::filesystem_id(r);
+        match groups.iter_mut().find(|(d, _)| *d == dev && dev != 0) {
+            Some((_, idx)) => idx.push(i),
+            // Device 0 means "unknown", and two unknowns are not known to be
+            // the same device, so each gets its own group.
+            None => groups.push((dev, vec![i])),
+        }
+    }
+
+    let mut out: Vec<Option<Result<StatMap>>> = (0..roots.len()).map(|_| None).collect();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = groups
+            .iter()
+            .map(|(_, idx)| {
+                scope.spawn(move || {
+                    idx.iter()
+                        .map(|&i| (i, scan_directory(&roots[i], opt)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for h in handles {
+            // A worker thread panicking must not lose the other groups'
+            // results, so the failure is reported per root instead.
+            match h.join() {
+                Ok(results) => {
+                    for (i, r) in results {
+                        out[i] = Some(r);
+                    }
+                }
+                Err(_) => return,
+            }
+        }
+    });
+
+    roots
+        .iter()
+        .cloned()
+        .zip(out)
+        .map(|(r, res)| {
+            let res = res.unwrap_or_else(|| Err(anyhow!("scan thread for {} failed", r.display())));
+            (r, res)
+        })
+        .collect()
+}
+
 pub fn scan_directory(root: impl AsRef<Path>, opt: &Options) -> Result<StatMap> {
     let scanner = Arc::new(crate::scanner::platform_scanner());
     scan_directory_with(root, opt, scanner)
@@ -513,6 +579,12 @@ fn prepare_scan(
     // pointing at an ancestor). Cycle detection is mandatory, not opt-in.
     if compiled.follow_links && compiled.visited_dirs.is_none() {
         compiled.visited_dirs = Some(Arc::new(DashMap::with_capacity(1024)));
+    }
+    // `count_hardlinks == false` means "count a hardlinked file once", which
+    // needs the inode map. Leaving it unallocated made the dedupe silently do
+    // nothing, so a tree with hardlinks reported more bytes than `du`.
+    if !compiled.count_hardlinks && compiled.inode_cache.is_none() {
+        compiled.inode_cache = Some(Arc::new(DashMap::with_capacity(1024)));
     }
     if compiled.one_file_system {
         compiled.root_fs_id = platform::filesystem_id(root);
@@ -628,15 +700,32 @@ fn merge_into(acc: &mut StatMap, part: StatMap) {
     }
 }
 
+/// CPU count for thread pinning, or 0 when pinning is off.
+///
+/// Resolved once per process. `env::var` takes a global lock and walks the
+/// environment, and this used to run on every worker as it started, which is
+/// pure startup cost on a scan that never pins.
+#[cfg(target_os = "linux")]
+fn pin_cpu_count() -> i64 {
+    use std::sync::OnceLock;
+    static N: OnceLock<i64> = OnceLock::new();
+    *N.get_or_init(|| {
+        if std::env::var("HYPERDU_PIN_THREADS").ok().as_deref() != Some("1") {
+            return 0;
+        }
+        unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) }.max(0)
+    })
+}
+
 #[cfg(target_os = "linux")]
 fn pin_thread_if_requested(i: usize) {
-    if std::env::var("HYPERDU_PIN_THREADS").ok().as_deref() != Some("1") {
+    let ncpu = pin_cpu_count();
+    if ncpu == 0 {
         return;
     }
     // Pin this worker to a CPU id based on index
     unsafe {
         let mut set: libc::cpu_set_t = std::mem::zeroed();
-        let ncpu = libc::sysconf(libc::_SC_NPROCESSORS_ONLN);
         let cpu = if ncpu > 0 {
             (i as i64 % ncpu) as usize
         } else {

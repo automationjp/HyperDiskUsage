@@ -21,6 +21,23 @@ pub fn check_hardlink_duplicate(opt: &Options, dev: u64, ino: u64) -> bool {
     }
 }
 
+/// Whether a file needs to go through the hardlink-dedupe map at all.
+///
+/// A file with one link cannot be a hardlink, so consulting the shared map for
+/// it can only ever return "new" — and it still costs an insert into a map that
+/// every worker shares. GNU du tracks only `st_nlink > 1` for the same reason.
+/// Skipping the rest also bounds the map by the number of hardlinked files
+/// rather than by the number of files scanned.
+///
+/// `nlink == 0` means the filesystem did not report a link count (the `statx`
+/// mask came back without `STATX_NLINK`); those still go through the map, since
+/// guessing would silently double-count hardlinks.
+#[cfg(unix)]
+#[inline]
+pub fn hardlink_candidate(opt: &Options, nlink: u32) -> bool {
+    !opt.count_hardlinks && opt.inode_cache.is_some() && nlink != 1
+}
+
 /// Report progress for one processed file.
 ///
 /// Prefer [`report_files_batch`]: one shared-counter update per directory

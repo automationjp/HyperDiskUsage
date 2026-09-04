@@ -109,6 +109,42 @@ fn logical_only_mode_reports_declared_size() {
     );
 }
 
+/// Hardlinks are counted once, like GNU du. The dedupe path is only entered for
+/// files whose link count says they could be hardlinks, so this also guards the
+/// `nlink > 1` gate: were the gate to skip a real hardlink, the total would
+/// double.
+#[test]
+fn hardlinks_are_counted_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("links");
+    fs::create_dir_all(&root).unwrap();
+    write_bytes(&root.join("original.bin"), 4096);
+    fs::hard_link(root.join("original.bin"), root.join("alias.bin")).unwrap();
+    // A second, unlinked file makes the nlink == 1 path part of the same scan.
+    write_bytes(&root.join("solo.bin"), 4096);
+
+    let s = stat_of(&scan_directory(&root, &quiet_opts()).unwrap(), &root);
+    assert_eq!(s.files, 2, "the alias is not counted a second time");
+    assert_eq!(s.logical, 8192, "4096 for the shared inode plus 4096 solo");
+}
+
+/// With `count_hardlinks` on, every link is its own file. This is the non-GNU
+/// mode, and the gate must not silently suppress it.
+#[test]
+fn hardlinks_are_counted_separately_when_requested() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("links_counted");
+    fs::create_dir_all(&root).unwrap();
+    write_bytes(&root.join("original.bin"), 4096);
+    fs::hard_link(root.join("original.bin"), root.join("alias.bin")).unwrap();
+
+    let mut opt = quiet_opts();
+    opt.count_hardlinks = true;
+    let s = stat_of(&scan_directory(&root, &opt).unwrap(), &root);
+    assert_eq!(s.files, 2, "both links count");
+    assert_eq!(s.logical, 8192);
+}
+
 /// `min_file_size` filters on the logical size, and a filtered-out file must not
 /// contribute its blocks either.
 #[test]

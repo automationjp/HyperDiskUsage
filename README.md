@@ -30,7 +30,7 @@
 
 1. **プラットフォーム最適化**
    - Linux: `getdents64` システムコール + `statx`（io_uring は現状実験的で未統合）
-   - Windows: `NtQueryDirectoryFile`（`FileIdFullDirectoryInformation`）で 64KiB 単位に一括取得。割り当てサイズとファイル ID も同時に得られるため、物理サイズ計算やハードリンク重複排除でファイル毎のシステムコールが発生しません（MSVC ビルド既定。`HYPERDU_WIN_USE_NTQUERY=0` で `FindFirstFileExW` 経路に切替、`HYPERDU_WIN_DIR_BUF_KB` で列挙バッファサイズを変更）
+   - Windows: `NtQueryDirectoryFile`（`FileIdFullDirectoryInformation`）で 128KiB 単位に一括取得。割り当てサイズとファイル ID も同時に得られるため、物理サイズ計算やハードリンク重複排除でファイル毎のシステムコールが発生しません（MSVC ビルド既定。`HYPERDU_WIN_USE_NTQUERY=0` で `FindFirstFileExW` 経路に切替、`HYPERDU_WIN_DIR_BUF_KB` で列挙バッファサイズを変更）
    - macOS: `getattrlistbulk` による名称・型・サイズのバルク取得
 
 2. **並列処理**
