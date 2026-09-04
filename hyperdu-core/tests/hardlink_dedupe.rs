@@ -1,7 +1,6 @@
 #![allow(clippy::field_reassign_with_default)]
 #[cfg(unix)]
 #[test]
-#[ignore = "Known discrepancy in subtree aggregation on some filesystems; tracked for follow-up."]
 fn hardlink_dedupe_unix() {
     use std::{
         fs::{create_dir_all, hard_link, File},

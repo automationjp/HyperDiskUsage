@@ -514,6 +514,12 @@ fn prepare_scan(
     if compiled.follow_links && compiled.visited_dirs.is_none() {
         compiled.visited_dirs = Some(Arc::new(DashMap::with_capacity(1024)));
     }
+    // `count_hardlinks == false` means "count a hardlinked file once", which
+    // needs the inode map. Leaving it unallocated made the dedupe silently do
+    // nothing, so a tree with hardlinks reported more bytes than `du`.
+    if !compiled.count_hardlinks && compiled.inode_cache.is_none() {
+        compiled.inode_cache = Some(Arc::new(DashMap::with_capacity(1024)));
+    }
     if compiled.one_file_system {
         compiled.root_fs_id = platform::filesystem_id(root);
     }
