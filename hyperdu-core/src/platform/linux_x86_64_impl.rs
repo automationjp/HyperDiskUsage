@@ -10,69 +10,6 @@ use crate::{
     name_matches, DirContext, ScanContext, StatMap,
 };
 
-/// getdents64 buffer size, resolved once per process rather than per directory.
-fn buf_size() -> usize {
-    use std::sync::OnceLock;
-    static SIZE: OnceLock<usize> = OnceLock::new();
-    *SIZE.get_or_init(|| {
-        std::env::var("HYPERDU_GETDENTS_BUF_KB")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .map(|kb| kb.max(4) * 1024)
-            .unwrap_or(128 * 1024) // NVMe/SSD friendly default
-    })
-}
-
-/// Whether readahead hints are wanted, resolved once per process.
-#[cfg(feature = "prefetch-advise")]
-fn prefetch_enabled() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("HYPERDU_PREFETCH").ok().as_deref() == Some("1"))
-}
-
-/// Accumulates a directory's file count so progress is reported once per
-/// directory instead of once per file, and remembers the last accounted name so
-/// a sample path can be built only when a callback actually fires.
-struct FileCounter {
-    files: u64,
-    sample: Option<Vec<u8>>,
-}
-
-impl FileCounter {
-    fn new(opt: &crate::Options) -> Self {
-        Self {
-            files: 0,
-            sample: opt.progress_path_callback.as_ref().map(|_| Vec::new()),
-        }
-    }
-
-    #[inline]
-    fn record(&mut self, name: &[u8]) {
-        self.files += 1;
-        if let Some(sample) = self.sample.as_mut() {
-            sample.clear();
-            sample.extend_from_slice(name);
-        }
-    }
-
-    /// Hand the batch to the shared counter and reset. Called once per directory
-    /// and again whenever a large directory is split.
-    fn flush(&mut self, ctx: &ScanContext, opt: &crate::Options, dir: &std::path::Path) {
-        if self.files == 0 {
-            return;
-        }
-        let files = std::mem::take(&mut self.files);
-        ctx.report_progress_batch(opt, files, || match self.sample.as_deref() {
-            Some(name) if !name.is_empty() => {
-                use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
-                dir.join(OsStr::from_bytes(name))
-            }
-            _ => dir.to_path_buf(),
-        });
-    }
-}
-
 pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let dir = dctx.dir;
     let depth = dctx.depth;
@@ -88,12 +25,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
         Ok(s) => s,
         Err(_) => return,
     };
-    // Respect follow_links: only use O_NOFOLLOW when not following links.
-    let mut open_flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
-    if !opt.follow_links {
-        open_flags |= libc::O_NOFOLLOW;
-    }
-    let fd = unsafe { libc::open(c_path.as_ptr(), open_flags) };
+    let fd = crate::platform::linux_helpers::open_dir_readonly(&c_path, opt.follow_links);
     if fd < 0 {
         record_error(opt, &last_os_error_systemcall(dir, "open"));
         return;
@@ -125,7 +57,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     // Optional prefetch hints
     #[cfg(feature = "prefetch-advise")]
     unsafe {
-        if prefetch_enabled() {
+        if opt.io_prefetch {
             let _ = libc::posix_fadvise(fd, 0, 0, libc::POSIX_FADV_SEQUENTIAL);
             let ra: libc::size_t = 1 << 20; // 1MiB
             let _ = libc::readahead(fd, 0, ra);
@@ -137,19 +69,13 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
         }
     }
 
-    let mut guard = BufferGuard::borrow(buf_size());
+    let mut guard = BufferGuard::borrow(crate::platform::linux_helpers::getdents_buf_size());
     let buf = guard.as_mut_slice();
-    #[cfg(feature = "prefetch-advise")]
-    unsafe {
-        if prefetch_enabled() {
-            let _ = libc::madvise(buf.as_mut_ptr() as *mut _, buf.len(), libc::MADV_WILLNEED);
-        }
-    }
     let stat_cur = map.entry(dir.to_path_buf()).or_default();
     // Progress is accounted once per directory. Touching the shared counter and
     // building a PathBuf for every file costs more than the scan itself once the
     // sizes come from a cheap `statx`.
-    let mut counted = FileCounter::new(opt);
+    let mut counted = crate::platform::linux_helpers::FileCounter::new(opt);
     let mut yield_every = opt.dir_yield_every.load(Ordering::Relaxed);
     let mut processed: usize = 0;
     loop {
@@ -224,7 +150,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                 if !opt.compute_physical && opt.approximate_sizes && opt.min_file_size == 0 {
                     let logical = 4096u64; // estimate 4KiB per regular file
                     update_file_stats(stat_cur, logical, logical);
-                    counted.record(name_slice);
+                    counted.record(name_slice, logical, logical);
                 } else {
                     // Need precise size information
                     #[cfg(not(target_env = "musl"))]
@@ -242,15 +168,12 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                         } else {
                             libc::AT_SYMLINK_NOFOLLOW
                         };
+                        flags |= libc::AT_NO_AUTOMOUNT;
                         if !matches!(
                             opt.compat_mode,
                             crate::CompatMode::GnuStrict | crate::CompatMode::PosixStrict
                         ) {
                             flags |= libc::AT_STATX_DONT_SYNC;
-                            #[cfg(target_os = "linux")]
-                            {
-                                flags |= libc::AT_NO_AUTOMOUNT;
-                            }
                         }
                         #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
                         profiling::scope!("statx_reg");
@@ -279,7 +202,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                                 let physical =
                                     calculate_physical_size(opt, logical, stx.stx_blocks);
                                 update_file_stats(stat_cur, logical, physical);
-                                counted.record(name_slice);
+                                counted.record(name_slice, logical, physical);
                             }
                         }
                     }
@@ -293,7 +216,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                                 if logical >= opt.min_file_size {
                                     let physical = logical; // best effort on musl
                                     update_file_stats(stat_cur, logical, physical);
-                                    counted.record(name_slice);
+                                    counted.record(name_slice, logical, physical);
                                 }
                             }
                         }
@@ -316,15 +239,12 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                     } else {
                         libc::AT_SYMLINK_NOFOLLOW
                     };
+                    flags |= libc::AT_NO_AUTOMOUNT;
                     if !matches!(
                         opt.compat_mode,
                         crate::CompatMode::GnuStrict | crate::CompatMode::PosixStrict
                     ) {
                         flags |= libc::AT_STATX_DONT_SYNC;
-                        #[cfg(target_os = "linux")]
-                        {
-                            flags |= libc::AT_NO_AUTOMOUNT;
-                        }
                     }
                     #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
                     profiling::scope!("statx_unknown");
@@ -370,7 +290,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                                 let physical =
                                     calculate_physical_size(opt, logical, stx.stx_blocks);
                                 update_file_stats(stat_cur, logical, physical);
-                                counted.record(name_slice);
+                                counted.record(name_slice, logical, physical);
                             }
                         }
                     } else {
@@ -385,7 +305,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                                 let logical = md.len();
                                 if logical >= opt.min_file_size {
                                     update_file_stats(stat_cur, logical, logical);
-                                    counted.record(name_slice);
+                                    counted.record(name_slice, logical, logical);
                                 }
                             }
                         }
@@ -404,7 +324,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                             let logical = md.len();
                             if logical >= opt.min_file_size {
                                 update_file_stats(stat_cur, logical, logical);
-                                counted.record(name_slice);
+                                counted.record(name_slice, logical, logical);
                             }
                         }
                     }

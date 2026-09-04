@@ -112,7 +112,7 @@ impl App {
                     .unwrap_or(4),
                 progress_every: 8192,
                 progress_callback: None,
-                progress_path_callback: None,
+                progress_sample_callback: None,
                 compute_physical: true,
                 approximate_sizes: false,
                 dir_yield_every: dir_yield.clone(),

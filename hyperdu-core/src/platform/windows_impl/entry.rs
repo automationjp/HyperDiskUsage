@@ -47,9 +47,10 @@ pub(super) struct DirState {
     /// Volume serial of the directory (set by the backend when `needs_identity`).
     pub volume: u64,
     pub dedupe: bool,
-    /// Name of the most recently accounted file, kept only when a progress
-    /// path callback is installed, so the flush can report a real file.
-    sample: Option<Vec<u16>>,
+    /// The most recently accounted file, kept only when a progress sample
+    /// callback is installed, so the flush can report a real file with the
+    /// sizes already read rather than stat'ing it a second time.
+    sample: Option<SampleSlot>,
 }
 
 impl DirState {
@@ -60,9 +61,9 @@ impl DirState {
             volume: 0,
             dedupe: !opt.count_hardlinks && opt.inode_cache.is_some(),
             sample: opt
-                .progress_path_callback
+                .progress_sample_callback
                 .as_ref()
-                .map(|_| Vec::with_capacity(64)),
+                .map(|_| SampleSlot::default()),
         }
     }
 
@@ -79,14 +80,22 @@ impl DirState {
         self.files = 0;
         let sample = self.sample.take();
         ctx.report_progress_batch(ctx.options, files, || match &sample {
-            Some(name) if !name.is_empty() => self.paths.path(name),
-            _ => dir.to_path_buf(),
+            Some(s) if !s.name.is_empty() => (self.paths.path(&s.name), s.logical, s.physical),
+            _ => (dir.to_path_buf(), 0, 0),
         });
-        self.sample = sample.map(|mut v| {
-            v.clear();
-            v
+        self.sample = sample.map(|mut s| {
+            s.name.clear();
+            s
         });
     }
+}
+
+/// The last file accounted in a directory, reported when progress fires.
+#[derive(Default)]
+struct SampleSlot {
+    name: Vec<u16>,
+    logical: u64,
+    physical: u64,
 }
 
 #[inline(always)]
@@ -211,8 +220,10 @@ fn handle_file(opt: &Options, st: &mut DirState, stat_cur: &mut Stat, e: &RawEnt
     update_file_stats(stat_cur, logical, physical);
     st.files += 1;
     if let Some(sample) = st.sample.as_mut() {
-        sample.clear();
-        sample.extend_from_slice(e.name);
+        sample.name.clear();
+        sample.name.extend_from_slice(e.name);
+        sample.logical = logical;
+        sample.physical = physical;
     }
 }
 

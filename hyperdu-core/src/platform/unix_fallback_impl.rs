@@ -149,16 +149,15 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                 stat_cur.physical += logical;
                 stat_cur.files += 1;
                 if opt.progress_every > 0 {
-                    let n = ctx.total_files.fetch_add(1, Ordering::Relaxed) + 1;
-                    if n % opt.progress_every == 0 {
-                        if let Some(cb) = &opt.progress_callback {
-                            cb(n);
-                        }
-                        if let Some(pcb) = &opt.progress_path_callback {
-                            let child = dir.join(OsStr::from_bytes(name_b));
-                            pcb(&child);
-                        }
-                    }
+                    let child = opt
+                        .progress_sample_callback
+                        .as_ref()
+                        .map(|_| dir.join(OsStr::from_bytes(name_b)));
+                    report_file_progress(
+                        opt,
+                        ctx.total_files,
+                        child.as_deref().map(|c| (c, logical, logical)),
+                    );
                 }
                 processed += 1;
                 if processed % 4096 == 0 {
@@ -217,16 +216,15 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                         stat_cur.physical += physical_eff;
                         stat_cur.files += 1;
                         if opt.progress_every > 0 {
-                            let n = ctx.total_files.fetch_add(1, Ordering::Relaxed) + 1;
-                            if n % opt.progress_every == 0 {
-                                if let Some(cb) = &opt.progress_callback {
-                                    cb(n);
-                                }
-                                if let Some(pcb) = &opt.progress_path_callback {
-                                    let child = dir.join(OsStr::from_bytes(name_b));
-                                    pcb(&child);
-                                }
-                            }
+                            let child = opt
+                                .progress_sample_callback
+                                .as_ref()
+                                .map(|_| dir.join(OsStr::from_bytes(name_b)));
+                            report_file_progress(
+                                opt,
+                                ctx.total_files,
+                                child.as_deref().map(|c| (c, logical, physical_eff)),
+                            );
                         }
                     }
                 } else {
@@ -238,17 +236,11 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                                 stat_cur.logical += logical;
                                 stat_cur.physical += logical;
                                 stat_cur.files += 1;
-                                if opt.progress_every > 0 {
-                                    let n = ctx.total_files.fetch_add(1, Ordering::Relaxed) + 1;
-                                    if n % opt.progress_every == 0 {
-                                        if let Some(cb) = &opt.progress_callback {
-                                            cb(n);
-                                        }
-                                        if let Some(pcb) = &opt.progress_path_callback {
-                                            pcb(&child);
-                                        }
-                                    }
-                                }
+                                report_file_progress(
+                                    opt,
+                                    ctx.total_files,
+                                    Some((&child, logical, logical)),
+                                );
                             }
                         }
                     }

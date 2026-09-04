@@ -31,9 +31,6 @@ impl FileSystemStrategy for Ext4Strategy {
         // Favor larger dirent buffer on fast storage
         std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
         report.push("getdents_buf_kb=128".into());
-        // Enable prefetch hints if compiled
-        std::env::set_var("HYPERDU_PREFETCH", "1");
-        report.push("prefetch=1".into());
         FsApplyOutcome {
             recommended_threads: None,
             disable_uring: false,
@@ -50,8 +47,6 @@ impl FileSystemStrategy for XfsStrategy {
     fn apply(&self, _opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
         std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
         report.push("getdents_buf_kb=128".into());
-        std::env::set_var("HYPERDU_PREFETCH", "1");
-        report.push("prefetch=1".into());
         FsApplyOutcome {
             recommended_threads: None,
             disable_uring: false,
@@ -72,9 +67,6 @@ impl FileSystemStrategy for BtrfsStrategy {
         report.push("compute_physical=false".into());
         std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
         report.push("getdents_buf_kb=128".into());
-        // Do not enable prefetch by default
-        std::env::set_var("HYPERDU_PREFETCH", "0");
-        report.push("prefetch=0".into());
         let _ = opt; // placeholder for future
         FsApplyOutcome {
             recommended_threads: None,
@@ -92,8 +84,6 @@ impl FileSystemStrategy for ZfsStrategy {
     fn apply(&self, _opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
         std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
         report.push("getdents_buf_kb=128".into());
-        std::env::set_var("HYPERDU_PREFETCH", "1");
-        report.push("prefetch=1".into());
         FsApplyOutcome {
             recommended_threads: None,
             disable_uring: false,
@@ -114,9 +104,6 @@ impl FileSystemStrategy for DrvfsStrategy {
         // Slightly smaller buffer (context switch heavy)
         std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "64");
         report.push("getdents_buf_kb=64".into());
-        // Disable prefetch hints
-        std::env::set_var("HYPERDU_PREFETCH", "0");
-        report.push("prefetch=0".into());
         // Suggest fewer threads and disable uring
         FsApplyOutcome {
             recommended_threads: Some(4),
@@ -137,8 +124,6 @@ impl FileSystemStrategy for NetworkStrategy {
         report.push("compute_physical=false".into());
         std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "64");
         report.push("getdents_buf_kb=64".into());
-        std::env::set_var("HYPERDU_PREFETCH", "0");
-        report.push("prefetch=0".into());
         // Optionally reduce threads in caller if needed (not adjusted here)
         FsApplyOutcome {
             recommended_threads: Some(4),

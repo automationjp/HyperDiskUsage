@@ -21,9 +21,16 @@ pub fn check_hardlink_duplicate(opt: &Options, dev: u64, ino: u64) -> bool {
     }
 }
 
-/// Report progress for a processed file
+/// Report progress for one processed file.
+///
+/// Prefer [`report_files_batch`]: one shared-counter update per directory
+/// rather than one per file.
 #[inline]
-pub fn report_file_progress(opt: &Options, total_files: &AtomicU64, path: Option<&Path>) {
+pub fn report_file_progress(
+    opt: &Options,
+    total_files: &AtomicU64,
+    sample: Option<(&Path, u64, u64)>,
+) {
     if opt.progress_every == 0 {
         return;
     }
@@ -33,23 +40,30 @@ pub fn report_file_progress(opt: &Options, total_files: &AtomicU64, path: Option
         if let Some(cb) = &opt.progress_callback {
             cb(n);
         }
-        if let Some(pcb) = &opt.progress_path_callback {
-            if let Some(p) = path {
-                pcb(p);
-            }
+        if let (Some(cb), Some((path, logical, physical))) = (&opt.progress_sample_callback, sample)
+        {
+            cb(&crate::ProgressSample {
+                path,
+                logical,
+                physical,
+            });
         }
     }
 }
 
 /// Batched progress: account for `n` files at once. The callbacks fire when the
-/// running total crosses a multiple of `progress_every`; `path` is evaluated
-/// only in that case.
+/// running total crosses a multiple of `progress_every`, and `sample` is
+/// evaluated only in that case, so a scan with progress disabled pays nothing
+/// beyond one atomic add per directory.
+///
+/// The sample carries the sizes the scan already read. Handing back only a path
+/// made every progress tick cost another `stat`.
 #[inline]
 pub fn report_files_batch(
     opt: &Options,
     total_files: &AtomicU64,
     n: u64,
-    path: impl FnOnce() -> std::path::PathBuf,
+    sample: impl FnOnce() -> (std::path::PathBuf, u64, u64),
 ) {
     if n == 0 || opt.progress_every == 0 {
         return;
@@ -63,8 +77,13 @@ pub fn report_files_batch(
     if let Some(cb) = &opt.progress_callback {
         cb(now);
     }
-    if let Some(pcb) = &opt.progress_path_callback {
-        pcb(&path());
+    if let Some(cb) = &opt.progress_sample_callback {
+        let (path, logical, physical) = sample();
+        cb(&crate::ProgressSample {
+            path: &path,
+            logical,
+            physical,
+        });
     }
 }
 

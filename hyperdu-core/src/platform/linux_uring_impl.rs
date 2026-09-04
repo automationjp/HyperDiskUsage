@@ -89,11 +89,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
         Ok(s) => s,
         Err(_) => return,
     };
-    let mut open_flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
-    if !opt.follow_links {
-        open_flags |= libc::O_NOFOLLOW;
-    }
-    let fd = unsafe { libc::open(c_path.as_ptr(), open_flags) };
+    let fd = crate::platform::linux_helpers::open_dir_readonly(&c_path, opt.follow_links);
     if fd < 0 {
         crate::error_handling::record_error(
             opt,
@@ -119,16 +115,11 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
     };
 
     let stat_cur = map.entry(dir.to_path_buf()).or_default();
+    // Same per-directory batching the getdents64 backend uses: one shared
+    // counter update per directory rather than one per file.
+    let mut counted = crate::platform::linux_helpers::FileCounter::new(opt);
     // getdents64 buffer via RAII thread-local pool to avoid reallocs
-    fn buf_size() -> usize {
-        if let Ok(s) = std::env::var("HYPERDU_GETDENTS_BUF_KB") {
-            if let Ok(kb) = s.parse::<usize>() {
-                return (kb.max(4)) * 1024;
-            }
-        }
-        128 * 1024
-    }
-    let mut guard = BufferGuard::borrow(buf_size());
+    let mut guard = BufferGuard::borrow(crate::platform::linux_helpers::getdents_buf_size());
     let buf = guard.as_mut_slice();
 
     // Window size and slot arrays
@@ -162,15 +153,12 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
     } else {
         libc::AT_SYMLINK_NOFOLLOW
     };
+    flags |= libc::AT_NO_AUTOMOUNT;
     if !matches!(
         opt.compat_mode,
         crate::CompatMode::GnuStrict | crate::CompatMode::PosixStrict
     ) {
         flags |= libc::AT_STATX_DONT_SYNC;
-        #[cfg(target_os = "linux")]
-        {
-            flags |= libc::AT_NO_AUTOMOUNT;
-        }
     }
 
     // Metrics
@@ -294,11 +282,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                     crate::common_ops::update_file_stats(
                                         stat_cur, logical, physical,
                                     );
-                                    crate::common_ops::report_file_progress(
-                                        opt,
-                                        ctx.total_files,
-                                        Some(&child),
-                                    );
+                                    counted.record(nm.as_bytes(), logical, physical);
                                 } else if ftype == 0 {
                                     // immediate fallback when type info is missing
                                     if let Ok(md) = std::fs::symlink_metadata(&child) {
@@ -308,11 +292,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                                 crate::common_ops::update_file_stats(
                                                     stat_cur, l, l,
                                                 );
-                                                crate::common_ops::report_file_progress(
-                                                    opt,
-                                                    ctx.total_files,
-                                                    Some(&child),
-                                                );
+                                                counted.record(nm.as_bytes(), l, l);
                                             }
                                         }
                                     }
@@ -336,11 +316,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                     let l = md.len();
                                     if l >= opt.min_file_size {
                                         crate::common_ops::update_file_stats(stat_cur, l, l);
-                                        crate::common_ops::report_file_progress(
-                                            opt,
-                                            ctx.total_files,
-                                            Some(&child),
-                                        );
+                                        counted.record(nm.as_bytes(), l, l);
                                     }
                                 }
                             }
@@ -655,22 +631,14 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                     stx.stx_blocks,
                                 );
                                 crate::common_ops::update_file_stats(stat_cur, logical, physical);
-                                crate::common_ops::report_file_progress(
-                                    opt,
-                                    ctx.total_files,
-                                    Some(&child),
-                                );
+                                counted.record(nm.as_bytes(), logical, physical);
                             } else if ftype == 0 {
                                 if let Ok(md) = std::fs::symlink_metadata(&child) {
                                     if md.file_type().is_file() {
                                         let l = md.len();
                                         if l >= opt.min_file_size {
                                             crate::common_ops::update_file_stats(stat_cur, l, l);
-                                            crate::common_ops::report_file_progress(
-                                                opt,
-                                                ctx.total_files,
-                                                Some(&child),
-                                            );
+                                            counted.record(nm.as_bytes(), l, l);
                                         }
                                     }
                                 }
@@ -693,11 +661,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                 let l = md.len();
                                 if l >= opt.min_file_size {
                                     crate::common_ops::update_file_stats(stat_cur, l, l);
-                                    crate::common_ops::report_file_progress(
-                                        opt,
-                                        ctx.total_files,
-                                        Some(&child),
-                                    );
+                                    counted.record(nm.as_bytes(), l, l);
                                 }
                             }
                         }
@@ -744,14 +708,10 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                 return;
             }
         };
-        let mut oflags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
-        if !opt.follow_links {
-            oflags |= libc::O_NOFOLLOW;
-        }
-        let fd2 = unsafe { libc::open(c_path.as_ptr(), oflags) };
+        let fd2 = crate::platform::linux_helpers::open_dir_readonly(&c_path, opt.follow_links);
         if fd2 >= 0 {
             // Buffer for getdents64
-            let mut guard2 = BufferGuard::borrow(buf_size());
+            let mut guard2 = BufferGuard::borrow(crate::platform::linux_helpers::getdents_buf_size());
             let buf2 = guard2.as_mut_slice();
             loop {
                 let nread2 = unsafe {
@@ -800,15 +760,12 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                         } else {
                             libc::AT_SYMLINK_NOFOLLOW
                         };
+                        flags |= libc::AT_NO_AUTOMOUNT;
                         if !matches!(
                             opt.compat_mode,
                             crate::CompatMode::GnuStrict | crate::CompatMode::PosixStrict
                         ) {
                             flags |= libc::AT_STATX_DONT_SYNC;
-                            #[cfg(target_os = "linux")]
-                            {
-                                flags |= libc::AT_NO_AUTOMOUNT;
-                            }
                         }
                         let mut mask = libc::STATX_SIZE | libc::STATX_MODE;
                         if opt.compute_physical {
@@ -848,16 +805,13 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                     }
                     if ok_file {
                         crate::common_ops::update_file_stats(stat_cur, logical, physical);
-                        crate::common_ops::report_file_progress(
-                            opt,
-                            ctx.total_files,
-                            Some(&child_path),
-                        );
+                        counted.record(name_slice, logical, physical);
                     }
                 }
             }
             unsafe { libc::close(fd2) };
         }
     }
+    counted.flush(ctx, opt, dir);
     unsafe { libc::close(fd) };
 }

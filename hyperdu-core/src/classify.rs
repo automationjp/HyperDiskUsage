@@ -114,6 +114,29 @@ fn deep_category_from_bytes(buf: &[u8]) -> &'static str {
     "other"
 }
 
+/// Open a file to read its first bytes without updating its access time.
+///
+/// `O_NOATIME` requires ownership (or CAP_FOWNER), so a rejection is expected
+/// on files belonging to other users and falls back to a plain open.
+#[cfg(target_os = "linux")]
+fn open_for_sniff(path: &Path) -> std::io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOATIME)
+        .open(path)
+        .or_else(|e| match e.raw_os_error() {
+            Some(libc::EPERM) | Some(libc::EINVAL) => fs::File::open(path),
+            _ => Err(e),
+        })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_for_sniff(path: &Path) -> std::io::Result<fs::File> {
+    fs::File::open(path)
+}
+
 pub fn classify_directory(root: &Path, opt: &Options, mode: ClassifyMode) -> TypeStatistics {
     let mut stats = TypeStatistics::default();
     fn walk(dir: &Path, depth: u32, opt: &Options, mode: ClassifyMode, stats: &mut TypeStatistics) {
@@ -142,7 +165,10 @@ pub fn classify_directory(root: &Path, opt: &Options, mode: ClassifyMode) -> Typ
                 let mut cat = basic_category_from_ext(ext);
                 if let ClassifyMode::Deep = mode {
                     if size > 0 {
-                        let mut f = match fs::File::open(&path) {
+                        // Deep classification only sniffs the head of the file;
+                        // opening with O_NOATIME keeps that from dirtying inodes
+                        // and writing back metadata for every file inspected.
+                        let mut f = match open_for_sniff(&path) {
                             Ok(f) => f,
                             Err(_) => continue,
                         };

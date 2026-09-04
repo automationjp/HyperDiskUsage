@@ -65,8 +65,39 @@ pub enum HeuristicsMode {
 /// Called with the running file count as a scan progresses.
 pub type ProgressCallback = Arc<dyn Fn(u64) + Send + Sync + 'static>;
 
-/// Called occasionally with a sample path, to show what a scan is working on.
-pub type ProgressPathCallback = Arc<dyn Fn(&Path) + Send + Sync + 'static>;
+/// A file the scan happened to be looking at when a progress tick fired.
+///
+/// The sizes come from metadata the scan already read. Callers must not stat
+/// the path again: doing so doubled the metadata I/O of every progress tick,
+/// on a path chosen essentially at random.
+pub struct ProgressSample<'a> {
+    pub path: &'a Path,
+    /// Size the filesystem reports for the file.
+    pub logical: u64,
+    /// Space actually allocated, or the logical size when physical sizes are
+    /// not being computed.
+    pub physical: u64,
+}
+
+/// Called occasionally with a sample file, to show what a scan is working on.
+pub type ProgressSampleCallback = Arc<dyn Fn(&ProgressSample<'_>) + Send + Sync + 'static>;
+
+/// How hard a scan may lean on the storage.
+///
+/// Orthogonal to [`CompatMode`], which decides what the numbers mean, and to
+/// the CLI's `--perf`, which trades accuracy for speed. This decides how much
+/// I/O the scan is willing to cause on the way to the same answer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IoProfile {
+    /// Take everything the hardware will give.
+    Throughput,
+    /// Correct answers without deliberately warming the page cache.
+    #[default]
+    Balanced,
+    /// Stay out of the way of whatever else is using the disk: no readahead,
+    /// no io_uring, few workers, and no splitting of large directories.
+    Gentle,
+}
 
 /// Called with a formatted message for every error a scan runs into.
 pub type ErrorReporter = Arc<dyn Fn(&str) + Send + Sync + 'static>;
@@ -96,7 +127,7 @@ pub struct Options {
     pub threads: usize,
     pub progress_every: u64, // 0 = disabled
     pub progress_callback: Option<ProgressCallback>,
-    pub progress_path_callback: Option<ProgressPathCallback>,
+    pub progress_sample_callback: Option<ProgressSampleCallback>,
     pub compute_physical: bool, // if false, use logical size as physical (faster)
     pub dir_yield_every: Arc<AtomicUsize>, // 0 = no yielding; split large dirs every N entries
     pub approximate_sizes: bool, // if true and compute_physical=false, estimate regular file size (e.g., 4KiB) to avoid statx
@@ -130,6 +161,15 @@ pub struct Options {
     /// against each parent, which is what GNU du means by "the starting point".
     #[doc(hidden)]
     pub root_fs_id: u64,
+    /// How much I/O the scan may cause. See [`IoProfile`].
+    pub io_profile: IoProfile,
+    /// Ask the kernel to read ahead of the scan. `None` lets the profile decide.
+    /// Readahead shortens latency but raises total bytes read, so it is off
+    /// unless asked for.
+    pub prefetch: Option<bool>,
+    /// Resolved by the scan bootstrap from `prefetch` and `io_profile`.
+    #[doc(hidden)]
+    pub io_prefetch: bool,
     // Compatibility and correctness knobs
     pub compat_mode: CompatMode,
     pub count_hardlinks: bool, // if true, count hardlinks as separate (non-GNU). Default false = dedupe hardlinks like GNU du
@@ -177,7 +217,10 @@ impl Default for Options {
             threads: threads_default,
             progress_every: 0,
             progress_callback: None,
-            progress_path_callback: None,
+            progress_sample_callback: None,
+            io_profile: IoProfile::default(),
+            prefetch: None,
+            io_prefetch: false,
             compute_physical: true,
             dir_yield_every: Arc::new(AtomicUsize::new(
                 std::env::var("HYPERDU_DIR_YIELD_EVERY")
@@ -303,6 +346,18 @@ pub(crate) fn follows_links(opt: &Options) -> bool {
     opt.follow_links && opt.visited_dirs.is_some()
 }
 
+/// Worker count for this scan: the requested number, capped by the I/O profile.
+///
+/// [`IoProfile::Gentle`] keeps at most two metadata requests in flight so the
+/// scan does not monopolise a queue that other processes are sharing.
+pub fn effective_threads(opt: &Options) -> usize {
+    let requested = opt.threads.max(1);
+    match opt.io_profile {
+        IoProfile::Gentle => requested.min(2),
+        IoProfile::Balanced | IoProfile::Throughput => requested,
+    }
+}
+
 pub fn default_threads() -> usize {
     let cpus = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -352,16 +407,23 @@ impl<'a> ScanContext<'a> {
         });
     }
 
+    /// Progress for one file. The sample carries the sizes the caller already
+    /// read, so reporting never costs another `stat`.
     #[inline]
-    pub fn report_progress(&self, opt: &Options, path: Option<&Path>) {
-        crate::common_ops::report_file_progress(opt, self.total_files, path);
+    pub fn report_progress(&self, opt: &Options, sample: Option<(&Path, u64, u64)>) {
+        crate::common_ops::report_file_progress(opt, self.total_files, sample);
     }
 
-    /// Batched progress: account for `n` files at once. `path` is only
+    /// Batched progress: account for `n` files at once. `sample` is only
     /// evaluated when a callback actually fires.
     #[inline]
-    pub fn report_progress_batch(&self, opt: &Options, n: u64, path: impl FnOnce() -> PathBuf) {
-        crate::common_ops::report_files_batch(opt, self.total_files, n, path);
+    pub fn report_progress_batch(
+        &self,
+        opt: &Options,
+        n: u64,
+        sample: impl FnOnce() -> (PathBuf, u64, u64),
+    ) {
+        crate::common_ops::report_files_batch(opt, self.total_files, n, sample);
     }
 }
 
@@ -435,6 +497,24 @@ fn prepare_scan(
     if compiled.one_file_system {
         compiled.root_fs_id = platform::filesystem_id(root);
     }
+    // Readahead is off unless asked for: it shortens latency by reading more
+    // than the scan needs, which is the opposite of what a background scan
+    // wants. Throughput opts in, an explicit setting always wins.
+    compiled.io_prefetch = compiled
+        .prefetch
+        .unwrap_or(matches!(compiled.io_profile, IoProfile::Throughput));
+    if compiled.io_profile == IoProfile::Gentle {
+        // Gentle trades wall-clock for staying out of the way: one request at a
+        // time per worker, no io_uring queue depth, and no re-opening a large
+        // directory from a second worker.
+        compiled.disable_uring = true;
+        compiled.dir_yield_every.store(0, Ordering::Relaxed);
+    }
+    // Report the worker count that actually runs, not the one that was asked
+    // for: the profile may have capped it, and the runtime throttle must not
+    // be allowed to re-raise it past that cap.
+    compiled.threads = threads;
+    compiled.active_threads = Arc::new(AtomicUsize::new(threads));
     let workers = Scheduler::make_workers(threads);
     let sched = Arc::new(Scheduler::new(&workers));
     sched.push_high(Job {
@@ -566,7 +646,7 @@ pub fn scan_directory_with(
         return Err(anyhow!("root does not exist: {}", root.display()));
     }
 
-    let threads = opt.threads.max(1);
+    let threads = effective_threads(opt);
     let total_files = Arc::new(AtomicU64::new(0));
     let (options, workers, sched) = prepare_scan(&root, opt, threads);
 
@@ -609,7 +689,7 @@ pub fn scan_directory_rayon(root: impl AsRef<Path>, opt: &Options) -> Result<Sta
     if !root.exists() {
         return Err(anyhow!("root does not exist: {}", root.display()));
     }
-    let threads = opt.threads.max(1);
+    let threads = effective_threads(opt);
     let total_files = Arc::new(AtomicU64::new(0));
     let (options, workers, sched) = prepare_scan(&root, opt, threads);
     let merged = Arc::new(std::sync::Mutex::new(HashMap::default()));

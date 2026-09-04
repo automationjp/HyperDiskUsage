@@ -152,6 +152,24 @@ enum PerfArg {
     Strict,
 }
 
+/// CLI spelling of `hyperdu_core::IoProfile`.
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum IoProfileArg {
+    Throughput,
+    Balanced,
+    Gentle,
+}
+
+impl From<IoProfileArg> for hyperdu_core::IoProfile {
+    fn from(v: IoProfileArg) -> Self {
+        match v {
+            IoProfileArg::Throughput => hyperdu_core::IoProfile::Throughput,
+            IoProfileArg::Balanced => hyperdu_core::IoProfile::Balanced,
+            IoProfileArg::Gentle => hyperdu_core::IoProfile::Gentle,
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "hyperdu",
@@ -407,6 +425,17 @@ struct Args {
     )]
     uring_depth: Option<usize>,
 
+    /// How hard the scan is allowed to hit the storage device
+    #[arg(
+        long = "io-profile",
+        value_enum,
+        long_help = "ストレージへの負荷レベルを選びます。
+        throughput: 先読みを有効にし最大スループットを狙います（他のI/Oを圧迫します）。
+        balanced (既定): 先読みなしで並列度は通常どおり。
+        gentle: スレッド数を2に抑え、先読みとio_uringを無効化します。正確さは変わりません。"
+    )]
+    io_profile: Option<IoProfileArg>,
+
     /// Disable io_uring backend (Linux) even if available
     #[arg(
         long = "no-uring",
@@ -463,13 +492,14 @@ struct Args {
     )]
     dir_yield_every: Option<usize>,
 
-    /// Linux: enable prefetch advise (posix_fadvise/readahead)
+    /// Linux: force prefetch advise (posix_fadvise/readahead) on or off
     #[arg(
         long = "prefetch",
-        action = ArgAction::SetTrue,
-        long_help = "Linuxでposix_fadvise/readaheadヒントを有効化します。"
+        num_args = 0..=1,
+        default_missing_value = "true",
+        long_help = "Linuxでposix_fadvise/readaheadヒントを強制的に有効/無効にします。--io-profile の既定を上書きします（--prefetch=false で先読みを止められます）。"
     )]
-    prefetch: bool,
+    prefetch: Option<bool>,
 
     /// Linux: pin worker threads to CPUs (sets HYPERDU_PIN_THREADS=1)
     #[arg(
@@ -762,6 +792,8 @@ fn main() -> Result<()> {
         .with_performance(hyperdu_core::PerformanceConfig {
             prefer_inner_rayon: Some(cfg.prefer_inner_rayon),
             disable_uring: Some(args.no_uring),
+            io_profile: args.io_profile.map(Into::into),
+            prefetch: args.prefetch,
             ..Default::default()
         })
         .with_windows(hyperdu_core::WindowsConfig {
@@ -828,9 +860,6 @@ fn main() -> Result<()> {
         }
         if let Some(kb) = args.getdents_buf_kb {
             std::env::set_var("HYPERDU_GETDENTS_BUF_KB", kb.to_string());
-        }
-        if args.prefetch {
-            std::env::set_var("HYPERDU_PREFETCH", "1");
         }
         if args.pin_threads {
             std::env::set_var("HYPERDU_PIN_THREADS", "1");
@@ -1365,14 +1394,15 @@ fn main() -> Result<()> {
     // Keep-alive: emit periodic status if no progress callback fired recently
     let _keepalive = KeepAlive::start(print_progress, last.clone());
     if args.progress {
-        opt.progress_path_callback = Some(std::sync::Arc::new(move |p: &std::path::Path| {
-            let size = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
-            println!(
-                "  sample: {} (size: {})",
-                short_path(p),
-                format_size(size, BINARY)
-            );
-        }));
+        opt.progress_sample_callback = Some(std::sync::Arc::new(
+            move |s: &hyperdu_core::ProgressSample<'_>| {
+                println!(
+                    "  sample: {} (size: {})",
+                    short_path(s.path),
+                    format_size(s.logical, BINARY)
+                );
+            },
+        ));
     }
 
     // Roots: if none provided, use current directory
@@ -1495,7 +1525,8 @@ fn main() -> Result<()> {
         println!("Summary:");
         println!("  Root: {}", root.display());
         println!("  Elapsed: {:.3}s", dt.as_secs_f64());
-        println!("  Threads: {threads}");
+        // The profile may cap the worker count; report what actually runs.
+        println!("  Threads: {}", hyperdu_core::effective_threads(&opt));
         println!("  Follow links: {}", args.follow_links);
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
