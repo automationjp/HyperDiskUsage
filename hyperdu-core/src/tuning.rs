@@ -49,10 +49,6 @@ pub fn start_if_enabled(
             let log_enabled = std::env::var("HYPERDU_TUNE_LOG").ok().as_deref() == Some("1");
             let mut last_t = Instant::now();
             let mut last_n = total_files.load(Ordering::Relaxed);
-            // uring counters
-            let mut last_fail = opt.uring_sqe_fail.load(Ordering::Relaxed);
-            let mut last_wait = opt.uring_submit_wait_ns.load(Ordering::Relaxed);
-            let mut last_cqe = opt.uring_cqe_comp.load(Ordering::Relaxed);
             // init yield idx from current value
             let mut idx = {
                 let cur = opt.dir_yield_every.load(Ordering::Relaxed);
@@ -66,7 +62,6 @@ pub fn start_if_enabled(
             let mut dir: isize = 1;
             let mut last_fps: f64 = 0.0;
             let mut last_yield = opt.dir_yield_every.load(Ordering::Relaxed);
-            let mut last_batch_logged = opt.uring_batch.load(Ordering::Relaxed);
             let mut last_active_logged = opt.active_threads.load(Ordering::Relaxed);
             loop {
                 if !running_c.load(Ordering::Relaxed) || opt.cancel.load(Ordering::Relaxed) {
@@ -124,44 +119,6 @@ pub fn start_if_enabled(
                     }
                 }
 
-                // io_uring tuning (Linux only, but counters exist regardless)
-                let cur_fail = opt.uring_sqe_fail.load(Ordering::Relaxed);
-                let cur_wait = opt.uring_submit_wait_ns.load(Ordering::Relaxed);
-                let cur_cqe = opt.uring_cqe_comp.load(Ordering::Relaxed);
-                let dfail = cur_fail.saturating_sub(last_fail);
-                let dwait = cur_wait.saturating_sub(last_wait);
-                let dcqe = cur_cqe.saturating_sub(last_cqe);
-                last_fail = cur_fail;
-                last_wait = cur_wait;
-                last_cqe = cur_cqe;
-                let avg_wait_ms = if dcqe > 0 {
-                    (dwait as f64) / (dcqe as f64) / 1.0e6
-                } else {
-                    0.0
-                };
-                let mut batch = opt.uring_batch.load(Ordering::Relaxed);
-                // adjust batch within [64, 4096]
-                let min_b = 64usize;
-                let max_b = 4096usize;
-                if dfail > 0 {
-                    // queue was often full: be conservative
-                    batch = batch.saturating_sub(64).max(min_b);
-                } else if avg_wait_ms > 2.0 {
-                    // high submit wait per CQE: reduce to lower latency
-                    batch = batch.saturating_sub(32).max(min_b);
-                } else {
-                    // ramp up slowly
-                    batch = (batch + 32).min(max_b);
-                }
-                opt.uring_batch.store(batch, Ordering::Relaxed);
-                if log_enabled {
-                    let cur_b = batch;
-                    if cur_b != last_batch_logged {
-                        eprintln!("[tune] uring_batch -> {cur_b}");
-                        last_batch_logged = cur_b;
-                    }
-                }
-
                 // Dynamic threads gating: adjust active_threads in [1, threads]
                 let max_threads = opt.threads.max(1);
                 let mut active = opt
@@ -174,13 +131,12 @@ pub fn start_if_enabled(
                     0.0
                 };
                 last_fps = fps;
-                if dfail > 0 || avg_wait_ms > 3.0 {
-                    // back off
-                    if active > 1 {
-                        active -= 1;
-                    }
+                // Throughput is the only signal left now that the io_uring
+                // queue counters are gone: ramp up while it clearly improves,
+                // back off when it clearly regresses.
+                if fps_improve < -0.05 && active > 1 {
+                    active -= 1;
                 } else if fps_improve > 0.05 && active < max_threads {
-                    // ramp up slowly on clear improvement
                     active += 1;
                 }
                 opt.active_threads.store(active, Ordering::Relaxed);

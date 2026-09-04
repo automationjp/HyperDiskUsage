@@ -16,7 +16,6 @@ impl FileSystemStrategy for GenericStrategy {
         // Keep defaults
         FsApplyOutcome {
             recommended_threads: None,
-            disable_uring: false,
             recommend_logical_only: false,
         }
     }
@@ -33,7 +32,6 @@ impl FileSystemStrategy for Ext4Strategy {
         report.push("getdents_buf_kb=128".into());
         FsApplyOutcome {
             recommended_threads: None,
-            disable_uring: false,
             recommend_logical_only: false,
         }
     }
@@ -49,7 +47,6 @@ impl FileSystemStrategy for XfsStrategy {
         report.push("getdents_buf_kb=128".into());
         FsApplyOutcome {
             recommended_threads: None,
-            disable_uring: false,
             recommend_logical_only: false,
         }
     }
@@ -69,7 +66,6 @@ impl FileSystemStrategy for BtrfsStrategy {
         report.push("getdents_buf_kb=128".into());
         FsApplyOutcome {
             recommended_threads: None,
-            disable_uring: false,
             recommend_logical_only: true,
         }
     }
@@ -85,7 +81,6 @@ impl FileSystemStrategy for ZfsStrategy {
         report.push("getdents_buf_kb=128".into());
         FsApplyOutcome {
             recommended_threads: None,
-            disable_uring: false,
             recommend_logical_only: false,
         }
     }
@@ -103,10 +98,9 @@ impl FileSystemStrategy for DrvfsStrategy {
         // Slightly smaller buffer (context switch heavy)
         opt.getdents_buf_bytes = 64 * 1024;
         report.push("getdents_buf_kb=64".into());
-        // Suggest fewer threads and disable uring
+        // Suggest fewer threads
         FsApplyOutcome {
             recommended_threads: Some(4),
-            disable_uring: true,
             recommend_logical_only: false,
         }
     }
@@ -126,7 +120,6 @@ impl FileSystemStrategy for NetworkStrategy {
         // Optionally reduce threads in caller if needed (not adjusted here)
         FsApplyOutcome {
             recommended_threads: Some(4),
-            disable_uring: true,
             recommend_logical_only: false,
         }
     }
@@ -239,13 +232,11 @@ pub struct FsApplyReport {
     pub reason: String,
     pub changes: Vec<String>,
     pub recommended_threads: Option<usize>,
-    pub disable_uring: bool,
     pub recommend_logical_only: bool,
 }
 
 pub struct FsApplyOutcome {
     pub recommended_threads: Option<usize>,
-    pub disable_uring: bool,
     pub recommend_logical_only: bool,
 }
 
@@ -277,7 +268,6 @@ pub fn detect_and_apply(path: &Path, opt: &mut Options) -> Option<FsApplyReport>
         reason,
         changes,
         recommended_threads: outcome.recommended_threads,
-        disable_uring: outcome.disable_uring,
         recommend_logical_only: outcome.recommend_logical_only,
     })
 }

@@ -413,17 +413,17 @@ struct Args {
     )]
     verbose: bool,
 
-    /// Initial io_uring STATX batch size (Linux only; overrides env HYPERDU_STATX_BATCH)
+    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
     #[arg(
         long = "uring-batch",
-        long_help = "io_uringのSTATXバッチサイズ初期値（Linuxのみ）。環境変数HYPERDU_STATX_BATCHを上書きします。"
+        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
     )]
     uring_batch: Option<usize>,
 
-    /// io_uring SQ/CQ depth (Linux only; overrides env HYPERDU_URING_SQ_DEPTH)
+    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
     #[arg(
         long = "uring-depth",
-        long_help = "io_uringのSQ/CQ深さ（Linuxのみ）。環境変数HYPERDU_URING_SQ_DEPTHを上書きします。"
+        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
     )]
     uring_depth: Option<usize>,
 
@@ -434,47 +434,45 @@ struct Args {
         long_help = "ストレージへの負荷レベルを選びます。
         throughput: 先読みを有効にし最大スループットを狙います（他のI/Oを圧迫します）。
         balanced (既定): 先読みなしで並列度は通常どおり。
-        gentle: スレッド数を2に抑え、先読みとio_uringを無効化します。正確さは変わりません。"
+        gentle: スレッド数を2に抑え、先読みを無効化します。正確さは変わりません。"
     )]
     io_profile: Option<IoProfileArg>,
 
-    /// Disable io_uring backend (Linux) even if available
+    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
     #[arg(
         long = "no-uring",
         action = ArgAction::SetTrue,
-        long_help = "Linuxでio_uringバックエンドを無効化します（WSL/ネットワークFSでの安全策）。環境変数HYPERDU_DISABLE_URING=1でも無効化できます。"
+        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
     )]
     no_uring: bool,
 
-    /// Enable io_uring SQPOLL (kernel polling) (Linux only)
+    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
     #[arg(
         long = "uring-sqpoll",
         action = ArgAction::SetTrue,
-        long_help = "io_uringのSQPOLL（カーネル側ポーリング）を有効化します（Linuxのみ）。HYPERDU_URING_SQPOLL=1 相当。"
+        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
     )]
     uring_sqpoll: bool,
 
-    /// SQPOLL idle in milliseconds (Linux only)
+    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
     #[arg(
         long = "uring-sqpoll-idle-ms",
-        value_name = "MS",
-        long_help = "SQPOLLスレッドのアイドル時間(ms)。HYPERDU_URING_SQPOLL_IDLE_MS 相当。"
+        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
     )]
     uring_sqpoll_idle_ms: Option<u32>,
 
-    /// Pin SQPOLL thread to CPU (Linux only)
+    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
     #[arg(
         long = "uring-sqpoll-cpu",
-        value_name = "CPU",
-        long_help = "SQPOLLスレッドを固定するCPU番号。HYPERDU_URING_SQPOLL_CPU 相当。"
+        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
     )]
     uring_sqpoll_cpu: Option<u32>,
 
-    /// Enable io_uring cooperative taskrun (Linux only)
+    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
     #[arg(
         long = "uring-coop",
         action = ArgAction::SetTrue,
-        long_help = "io_uringのCOOP_TASKRUNを有効化します（Linuxのみ）。HYPERDU_URING_COOP_TASKRUN=1 相当。"
+        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
     )]
     uring_coop: bool,
 
@@ -795,7 +793,6 @@ fn main() -> Result<()> {
         })
         .with_performance(hyperdu_core::PerformanceConfig {
             prefer_inner_rayon: Some(cfg.prefer_inner_rayon),
-            disable_uring: Some(args.no_uring),
             io_profile: args.io_profile.map(Into::into),
             prefetch: args.prefetch,
             ..Default::default()
@@ -833,15 +830,6 @@ fn main() -> Result<()> {
                                         // 必要なら --uring-sqpoll で明示的に有効化する。
                                         // 初期バッチ/深さを強めに（ライブチューナが追従）
                                         // 簡易ヒューリスティクス（環境変数で上書き可）
-            let (b_default, d_default) =
-                match std::env::var("HYPERDU_DEVICE_ROTATIONAL").ok().as_deref() {
-                    Some("1") => (128usize, 512usize), // HDD
-                    _ => (512usize, 2048usize),        // SSD/NVMe既定
-                };
-            opt.uring_batch
-                .store(b_default, std::sync::atomic::Ordering::Relaxed);
-            opt.uring_sq_depth
-                .store(d_default, std::sync::atomic::Ordering::Relaxed);
         }
         PerfArg::Balanced => {
             // keep defaults (current behavior)
@@ -856,29 +844,27 @@ fn main() -> Result<()> {
             opt.count_hardlinks = false; // dedupe
         }
     }
-    // io_uring flags from CLI (Linux only; set envs expected by backend builder)
+    // The io_uring backend was removed; its flags are still accepted so
+    // existing scripts keep working, but they no longer do anything.
+    if args.no_uring
+        || args.uring_sqpoll
+        || args.uring_coop
+        || args.uring_batch.is_some()
+        || args.uring_depth.is_some()
+        || args.uring_sqpoll_idle_ms.is_some()
+        || args.uring_sqpoll_cpu.is_some()
+    {
+        eprintln!(
+            "warning: io_uring バックエンドは削除されました。--uring-* / --no-uring は無視されます。"
+        );
+    }
     #[cfg(target_os = "linux")]
     {
-        if args.no_uring {
-            std::env::set_var("HYPERDU_DISABLE_URING", "1");
-        }
         if let Some(kb) = args.getdents_buf_kb {
             std::env::set_var("HYPERDU_GETDENTS_BUF_KB", kb.to_string());
         }
         if args.pin_threads {
             std::env::set_var("HYPERDU_PIN_THREADS", "1");
-        }
-        if args.uring_sqpoll {
-            std::env::set_var("HYPERDU_URING_SQPOLL", "1");
-        }
-        if let Some(ms) = args.uring_sqpoll_idle_ms {
-            std::env::set_var("HYPERDU_URING_SQPOLL_IDLE_MS", ms.to_string());
-        }
-        if let Some(cpu) = args.uring_sqpoll_cpu {
-            std::env::set_var("HYPERDU_URING_SQPOLL_CPU", cpu.to_string());
-        }
-        if args.uring_coop {
-            std::env::set_var("HYPERDU_URING_COOP_TASKRUN", "1");
         }
     }
     #[cfg(target_os = "macos")]
@@ -933,14 +919,6 @@ fn main() -> Result<()> {
     if args.follow_links && !matches!(opt.compat_mode, hyperdu_core::CompatMode::HyperDU) {
         opt.visited_bloom = Some(std::sync::Arc::new(hyperdu_core::Bloom::with_bits(1 << 20)));
         opt.visited_dirs = Some(std::sync::Arc::new(dashmap::DashMap::with_capacity(1024)));
-    }
-    if let Some(b) = args.uring_batch {
-        opt.uring_batch
-            .store(b.max(1), std::sync::atomic::Ordering::Relaxed);
-    }
-    if let Some(d) = args.uring_depth {
-        opt.uring_sq_depth
-            .store(d.max(1), std::sync::atomic::Ordering::Relaxed);
     }
 
     // Tuning-only mode: probe several candidates quickly and exit
@@ -1217,24 +1195,6 @@ fn main() -> Result<()> {
     let tuner_state = std::sync::Arc::new(std::sync::Mutex::new((2usize, 1isize, 0.0f64))); // (idx, dir, last_rate)
     let yield_candidates: [usize; 5] = [8192, 16384, 32768, 65536, 131072];
     let y_atomic = opt.dir_yield_every.clone();
-    // io_uring batch tuner (Linux only; safe to set even if unused)
-    let batch_state = std::sync::Arc::new(std::sync::Mutex::new((1usize, 1isize))); // start idx=1 -> 128, dir
-    let batch_candidates_fast: [usize; 3] = [128, 256, 512];
-    let batch_candidates_slow: [usize; 3] = [64, 128, 256];
-    let b_atomic = opt.uring_batch.clone();
-    // uring depth tuner (Linux only)
-    let depth_state = std::sync::Arc::new(std::sync::Mutex::new((1usize, 1isize, 0u32))); // idx, dir, zero_fail_intervals
-    let depth_candidates_fast: [u32; 4] = [256, 512, 1024, 2048];
-    let depth_candidates_slow: [u32; 4] = [128, 256, 512, 1024];
-    let d_atomic = opt.uring_sq_depth.clone();
-    // metrics snapshot
-    let m_prev = std::sync::Arc::new(std::sync::Mutex::new((0u64, 0u64, 0u64, 0u64))); // fail, wait_ns, enq, cqe
-    let m_fail = opt.uring_sqe_fail.clone();
-    let m_wait = opt.uring_submit_wait_ns.clone();
-    let m_enq = opt.uring_sqe_enq.clone();
-    let m_cqe = opt.uring_cqe_comp.clone();
-    let _m_err = opt.uring_cqe_err.clone();
-    let ema_state = std::sync::Arc::new(std::sync::Mutex::new((0.0f64, 0.0f64, 0.0f64))); // (ema_rate, ema_fail, ema_wait_ms)
     opt.progress_callback = Some(std::sync::Arc::new(move |n| {
         let now = std::time::Instant::now();
         let total_dt = now.duration_since(t_start).as_secs_f64().max(1e-6);
@@ -1273,127 +1233,6 @@ fn main() -> Result<()> {
             }
         }
         *last_rate = recent_rate;
-        // Read metrics delta
-        let (dfail, dwait_ns, denq, dcqe) = {
-            let prev = &mut *m_prev.lock().unwrap();
-            let cur_fail = m_fail.load(std::sync::atomic::Ordering::Relaxed);
-            let cur_wait = m_wait.load(std::sync::atomic::Ordering::Relaxed);
-            let cur_enq = m_enq.load(std::sync::atomic::Ordering::Relaxed);
-            let cur_cqe = m_cqe.load(std::sync::atomic::Ordering::Relaxed);
-            let df = cur_fail.saturating_sub(prev.0);
-            let dw = cur_wait.saturating_sub(prev.1);
-            let de = cur_enq.saturating_sub(prev.2);
-            let dc = cur_cqe.saturating_sub(prev.3);
-            *prev = (cur_fail, cur_wait, cur_enq, cur_cqe);
-            (df, dw, de, dc)
-        };
-        // Update EMA metrics
-        {
-            let mut ema = ema_state.lock().unwrap();
-            let alpha = 0.2f64;
-            // files/s EMA
-            ema.0 = if ema.0 == 0.0 {
-                recent_rate
-            } else {
-                alpha * recent_rate + (1.0 - alpha) * ema.0
-            };
-            // fail ratio EMA
-            let fr = if denq > 0 {
-                (dfail as f64) / (denq as f64)
-            } else {
-                0.0
-            };
-            ema.1 = if ema.1 == 0.0 {
-                fr
-            } else {
-                alpha * fr + (1.0 - alpha) * ema.1
-            };
-            // wait per enq (ms) EMA
-            let w_ms = if denq > 0 {
-                (dwait_ns as f64) / 1.0e6 / (denq as f64)
-            } else {
-                0.0
-            };
-            ema.2 = if ema.2 == 0.0 {
-                w_ms
-            } else {
-                alpha * w_ms + (1.0 - alpha) * ema.2
-            };
-        }
-        let (ema_rate, ema_fail, ema_wait_ms) = {
-            let e = ema_state.lock().unwrap();
-            (e.0, e.1, e.2)
-        };
-        // Choose candidate sets heuristically（NVMe vs HDD）
-        let fast_device = ema_wait_ms < 0.02 && ema_rate > 20000.0;
-        let batch_candidates = if fast_device {
-            &batch_candidates_fast[..]
-        } else {
-            &batch_candidates_slow[..]
-        };
-        let depth_candidates = if fast_device {
-            &depth_candidates_fast[..]
-        } else {
-            &depth_candidates_slow[..]
-        };
-        // Tune io_uring batch similarly
-        {
-            let mut bst = batch_state.lock().unwrap();
-            let (ref mut bidx, ref mut bdir) = *bst;
-            if degrade {
-                *bdir = -*bdir;
-            }
-            if degrade || improve {
-                let new_bidx = (*bidx as isize + *bdir)
-                    .clamp(0, (batch_candidates.len() - 1) as isize)
-                    as usize;
-                if new_bidx != *bidx {
-                    *bidx = new_bidx;
-                    let new_b = batch_candidates[*bidx];
-                    b_atomic.store(new_b, std::sync::atomic::Ordering::Relaxed);
-                    if print_tune {
-                        eprintln!("[live-tune] uring_batch -> {new_b}");
-                    }
-                }
-            }
-        }
-        // Tune io_uring depth (increase on queue saturation, decrease slowly)
-        {
-            let mut dst = depth_state.lock().unwrap();
-            let (ref mut didx, ref mut _ddir, ref mut zero_fail) = *dst;
-            let saturated = dfail > 0 || (denq > 0 && dcqe * 2 < denq) || ema_fail > 0.05;
-            if saturated {
-                // push deeper
-                let new_didx =
-                    (*didx as isize + 1).clamp(0, (depth_candidates.len() - 1) as isize) as usize;
-                if new_didx != *didx {
-                    *didx = new_didx;
-                    let new_d = depth_candidates[*didx] as usize;
-                    d_atomic.store(new_d, std::sync::atomic::Ordering::Relaxed);
-                    if print_tune {
-                        eprintln!("[live-tune] uring_depth -> {new_d}");
-                    }
-                }
-                *zero_fail = 0;
-            } else {
-                *zero_fail = zero_fail.saturating_add(1);
-                if *zero_fail >= 3 && !degrade {
-                    // ease off one step if stable and no saturation
-                    let new_didx = (*didx as isize - 1)
-                        .clamp(0, (depth_candidates.len() - 1) as isize)
-                        as usize;
-                    if new_didx != *didx {
-                        *didx = new_didx;
-                        let new_d = depth_candidates[*didx] as usize;
-                        d_atomic.store(new_d, std::sync::atomic::Ordering::Relaxed);
-                        if print_tune {
-                            eprintln!("[live-tune] uring_depth -> {new_d}");
-                        }
-                    }
-                    *zero_fail = 0;
-                }
-            }
-        }
     }));
     // Keep-alive: emit periodic status if no progress callback fired recently
     let _keepalive = KeepAlive::start(print_progress, last.clone());
@@ -1423,10 +1262,6 @@ fn main() -> Result<()> {
             if let Some(root0) = roots.first() {
                 if let Some(rep) = hyperdu_core::fs_strategy::detect_and_apply(root0, &mut opt) {
                     // Apply optional suggestions at CLI level (respect user overrides)
-                    if rep.disable_uring {
-                        std::env::set_var("HYPERDU_DISABLE_URING", "1");
-                        opt.disable_uring = true;
-                    }
                     if args.threads.is_none() {
                         if let Some(t) = rep.recommended_threads {
                             // clamp to [1, cpu]
@@ -1445,9 +1280,6 @@ fn main() -> Result<()> {
                     ];
                     if let Some(t) = rep.recommended_threads {
                         meta.push(format!("threads_reco={t}"));
-                    }
-                    if rep.disable_uring {
-                        meta.push("disable_uring=1".into());
                     }
                     if rep.recommend_logical_only {
                         meta.push("hint=logical-only".into());
@@ -1578,37 +1410,6 @@ fn main() -> Result<()> {
             println!("  Excludes: {}", parts.join(" "));
         }
         println!("  Follow links: {}", args.follow_links);
-        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-        {
-            println!(
-                "  Uring: depth={} | batch={}",
-                opt.uring_sq_depth
-                    .load(std::sync::atomic::Ordering::Relaxed),
-                opt.uring_batch.load(std::sync::atomic::Ordering::Relaxed)
-            );
-            let fail = opt
-                .uring_sqe_fail
-                .load(std::sync::atomic::Ordering::Relaxed);
-            let wait_ns = opt
-                .uring_submit_wait_ns
-                .load(std::sync::atomic::Ordering::Relaxed);
-            let enq = opt.uring_sqe_enq.load(std::sync::atomic::Ordering::Relaxed);
-            let cqe = opt
-                .uring_cqe_comp
-                .load(std::sync::atomic::Ordering::Relaxed);
-            println!(
-                "  Uring-metrics: sqe_fail={} | submit_wait={:.2}ms | enq={} | cqe={}",
-                fail,
-                (wait_ns as f64) / 1.0e6,
-                enq,
-                cqe
-            );
-        }
-        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-        {
-            println!("  Uring: n/a | batch=n/a");
-            println!("  Uring-metrics: n/a");
-        }
         println!(
             "  Total: files={} | phys={} | log={} | dirs={}",
             total_stat.files,

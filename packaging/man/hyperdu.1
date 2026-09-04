@@ -48,7 +48,7 @@ Performance profile: turbo, balanced (default), strict.
 .TP
 .B turbo
 Fastest profile. Uses logical sizes only (no physical size calc), enables approximate sizes,
-and does not deduplicate hardlinks. On Linux, expects io_uring SQPOLL/COOP and applies
+and does not deduplicate hardlinks. On Linux, applies
 stronger initial batch/depth (auto-tuned at runtime).
 .TP
 .B balanced
@@ -63,20 +63,6 @@ Print progress lines during scan to standard output.
 .BR --progress-every=NUM
 Emit progress every NUM files (default 8192). A final line is printed on completion.
 .TP
-.BR --no-uring
-Disable io_uring backend on Linux even if available.
-.TP
-.BR --uring-sqpoll
-Enable io_uring SQPOLL (kernel polling) on Linux.
-.TP
-.BR --uring-sqpoll-idle-ms=MS
-Set SQPOLL idle time in milliseconds.
-.TP
-.BR --uring-sqpoll-cpu=CPU
-Pin SQPOLL thread to a CPU.
-.TP
-.BR --uring-coop
-Enable io_uring cooperative taskrun.
 .TP
 .BR --getdents-buf-kb=KiB
 Linux: set getdents64 buffer size in KiB.

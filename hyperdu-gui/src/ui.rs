@@ -33,13 +33,6 @@ pub struct App {
     last_count: u64,
     last_at: Option<Instant>,
     yield_current: Option<Arc<AtomicUsize>>,
-    uring_batch: Option<Arc<AtomicUsize>>,
-    uring_depth: Option<Arc<AtomicUsize>>,
-    uring_fail: Option<Arc<std::sync::atomic::AtomicU64>>,
-    uring_wait_ns: Option<Arc<std::sync::atomic::AtomicU64>>,
-    uring_enq: Option<Arc<std::sync::atomic::AtomicU64>>,
-    uring_cqe: Option<Arc<std::sync::atomic::AtomicU64>>,
-    uring_err: Option<Arc<std::sync::atomic::AtomicU64>>,
 }
 
 // Default is derived above
@@ -83,20 +76,6 @@ impl App {
         self.last_at = self.start_at;
         let dir_yield = Arc::new(AtomicUsize::new(0));
         self.yield_current = Some(dir_yield.clone());
-        let uring_batch = Arc::new(AtomicUsize::new(128));
-        let uring_depth = Arc::new(AtomicUsize::new(256));
-        let uring_fail = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let uring_wait_ns = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let uring_enq = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let uring_cqe = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let uring_err = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        self.uring_batch = Some(uring_batch.clone());
-        self.uring_depth = Some(uring_depth.clone());
-        self.uring_fail = Some(uring_fail.clone());
-        self.uring_wait_ns = Some(uring_wait_ns.clone());
-        self.uring_enq = Some(uring_enq.clone());
-        self.uring_cqe = Some(uring_cqe.clone());
-        self.uring_err = Some(uring_err.clone());
         std::thread::spawn(move || {
             let mut opt = core::Options {
                 exclude_contains: exclude
@@ -116,13 +95,6 @@ impl App {
                 compute_physical: true,
                 approximate_sizes: false,
                 dir_yield_every: dir_yield.clone(),
-                uring_batch,
-                uring_sq_depth: uring_depth,
-                uring_sqe_fail: uring_fail,
-                uring_submit_wait_ns: uring_wait_ns,
-                uring_sqe_enq: uring_enq,
-                uring_cqe_comp: uring_cqe,
-                uring_cqe_err: uring_err,
                 ..core::Options::default()
             };
             // Install progress callback with live tuning (quiet)
@@ -218,27 +190,6 @@ impl eframe::App for App {
                         ui.monospace(format!(
                             "files/s: {total_rate:.0} (recent {recent:.0})  yield: {y}"
                         ));
-                        if let (Some(b), Some(d)) = (&self.uring_batch, &self.uring_depth) {
-                            let depth = d.load(Ordering::Relaxed);
-                            let batch = b.load(Ordering::Relaxed);
-                            ui.monospace(format!("uring: depth={depth} batch={batch}"));
-                        }
-                        if let (Some(f), Some(w), Some(e), Some(c), Some(er)) = (
-                            &self.uring_fail,
-                            &self.uring_wait_ns,
-                            &self.uring_enq,
-                            &self.uring_cqe,
-                            &self.uring_err,
-                        ) {
-                            let fail = f.load(Ordering::Relaxed);
-                            let wait_ms = (w.load(Ordering::Relaxed) as f64) / 1.0e6;
-                            let enq = e.load(Ordering::Relaxed);
-                            let cqe = c.load(Ordering::Relaxed);
-                            let err = er.load(Ordering::Relaxed);
-                            ui.monospace(format!(
-                                "uring-metrics: fail={fail} wait={wait_ms:.2}ms enq={enq} cqe={cqe} err={err}"
-                            ));
-                        }
                     }
                 }
                 if let Some(root) = &self.root {
