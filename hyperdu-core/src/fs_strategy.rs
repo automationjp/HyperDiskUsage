@@ -27,9 +27,9 @@ impl FileSystemStrategy for Ext4Strategy {
     fn name(&self) -> &'static str {
         "ext4"
     }
-    fn apply(&self, _opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
+    fn apply(&self, opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
         // Favor larger dirent buffer on fast storage
-        std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
+        opt.getdents_buf_bytes = 128 * 1024;
         report.push("getdents_buf_kb=128".into());
         FsApplyOutcome {
             recommended_threads: None,
@@ -44,8 +44,8 @@ impl FileSystemStrategy for XfsStrategy {
     fn name(&self) -> &'static str {
         "xfs"
     }
-    fn apply(&self, _opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
-        std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
+    fn apply(&self, opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
+        opt.getdents_buf_bytes = 128 * 1024;
         report.push("getdents_buf_kb=128".into());
         FsApplyOutcome {
             recommended_threads: None,
@@ -65,9 +65,8 @@ impl FileSystemStrategy for BtrfsStrategy {
         // Switch to logical-only by default for better responsiveness
         opt.compute_physical = false;
         report.push("compute_physical=false".into());
-        std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
+        opt.getdents_buf_bytes = 128 * 1024;
         report.push("getdents_buf_kb=128".into());
-        let _ = opt; // placeholder for future
         FsApplyOutcome {
             recommended_threads: None,
             disable_uring: false,
@@ -81,8 +80,8 @@ impl FileSystemStrategy for ZfsStrategy {
     fn name(&self) -> &'static str {
         "zfs"
     }
-    fn apply(&self, _opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
-        std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "128");
+    fn apply(&self, opt: &mut Options, report: &mut Vec<String>) -> FsApplyOutcome {
+        opt.getdents_buf_bytes = 128 * 1024;
         report.push("getdents_buf_kb=128".into());
         FsApplyOutcome {
             recommended_threads: None,
@@ -102,7 +101,7 @@ impl FileSystemStrategy for DrvfsStrategy {
         opt.compute_physical = false;
         report.push("compute_physical=false".into());
         // Slightly smaller buffer (context switch heavy)
-        std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "64");
+        opt.getdents_buf_bytes = 64 * 1024;
         report.push("getdents_buf_kb=64".into());
         // Suggest fewer threads and disable uring
         FsApplyOutcome {
@@ -122,7 +121,7 @@ impl FileSystemStrategy for NetworkStrategy {
         // Network FS: prefer logical sizes, limit pressure
         opt.compute_physical = false;
         report.push("compute_physical=false".into());
-        std::env::set_var("HYPERDU_GETDENTS_BUF_KB", "64");
+        opt.getdents_buf_bytes = 64 * 1024;
         report.push("getdents_buf_kb=64".into());
         // Optionally reduce threads in caller if needed (not adjusted here)
         FsApplyOutcome {

@@ -291,20 +291,6 @@ pub fn get_entry_stats(
     })
 }
 
-/// getdents64 buffer size, resolved once per process rather than per directory.
-/// Shared by both Linux backends so they enumerate with the same buffer.
-pub fn getdents_buf_size() -> usize {
-    use std::sync::OnceLock;
-    static SIZE: OnceLock<usize> = OnceLock::new();
-    *SIZE.get_or_init(|| {
-        std::env::var("HYPERDU_GETDENTS_BUF_KB")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .map(|kb| kb.max(4) * 1024)
-            .unwrap_or(128 * 1024) // NVMe/SSD friendly default
-    })
-}
-
 /// Open a directory for reading without updating its access time.
 ///
 /// Walking a tree touches every directory, and on a `relatime` mount that is

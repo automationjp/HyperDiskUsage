@@ -170,6 +170,11 @@ pub struct Options {
     /// Resolved by the scan bootstrap from `prefetch` and `io_profile`.
     #[doc(hidden)]
     pub io_prefetch: bool,
+    /// getdents64 buffer size in bytes (Linux). Set per scan by
+    /// [`fs_strategy`], because the best size depends on the filesystem. Held
+    /// here rather than in an environment variable so two scans of different
+    /// filesystems in one process do not fight over a single global.
+    pub getdents_buf_bytes: usize,
     // Compatibility and correctness knobs
     pub compat_mode: CompatMode,
     pub count_hardlinks: bool, // if true, count hardlinks as separate (non-GNU). Default false = dedupe hardlinks like GNU du
@@ -221,6 +226,7 @@ impl Default for Options {
             io_profile: IoProfile::default(),
             prefetch: None,
             io_prefetch: false,
+            getdents_buf_bytes: default_getdents_buf_bytes(),
             compute_physical: true,
             dir_yield_every: Arc::new(AtomicUsize::new(
                 std::env::var("HYPERDU_DIR_YIELD_EVERY")
@@ -356,6 +362,16 @@ pub fn effective_threads(opt: &Options) -> usize {
         IoProfile::Gentle => requested.min(2),
         IoProfile::Balanced | IoProfile::Throughput => requested,
     }
+}
+
+/// Process-wide default getdents64 buffer size, overridable with
+/// `HYPERDU_GETDENTS_BUF_KB`. A filesystem strategy may override it per scan.
+pub fn default_getdents_buf_bytes() -> usize {
+    std::env::var("HYPERDU_GETDENTS_BUF_KB")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .map(|kb| kb.max(4) * 1024)
+        .unwrap_or(128 * 1024) // NVMe/SSD friendly default
 }
 
 pub fn default_threads() -> usize {

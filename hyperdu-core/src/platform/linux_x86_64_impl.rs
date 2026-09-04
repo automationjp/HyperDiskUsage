@@ -69,7 +69,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
         }
     }
 
-    let mut guard = BufferGuard::borrow(crate::platform::linux_helpers::getdents_buf_size());
+    let mut guard = BufferGuard::borrow(opt.getdents_buf_bytes);
     let buf = guard.as_mut_slice();
     let stat_cur = map.entry(dir.to_path_buf()).or_default();
     // Progress is accounted once per directory. Touching the shared counter and

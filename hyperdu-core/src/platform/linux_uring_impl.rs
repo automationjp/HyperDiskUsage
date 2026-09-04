@@ -119,7 +119,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
     // counter update per directory rather than one per file.
     let mut counted = crate::platform::linux_helpers::FileCounter::new(opt);
     // getdents64 buffer via RAII thread-local pool to avoid reallocs
-    let mut guard = BufferGuard::borrow(crate::platform::linux_helpers::getdents_buf_size());
+    let mut guard = BufferGuard::borrow(opt.getdents_buf_bytes);
     let buf = guard.as_mut_slice();
 
     // Window size and slot arrays
@@ -711,7 +711,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
         let fd2 = crate::platform::linux_helpers::open_dir_readonly(&c_path, opt.follow_links);
         if fd2 >= 0 {
             // Buffer for getdents64
-            let mut guard2 = BufferGuard::borrow(crate::platform::linux_helpers::getdents_buf_size());
+            let mut guard2 = BufferGuard::borrow(opt.getdents_buf_bytes);
             let buf2 = guard2.as_mut_slice();
             loop {
                 let nread2 = unsafe {
