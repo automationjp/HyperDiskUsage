@@ -18,7 +18,6 @@ pub struct PerformanceConfig {
     pub one_file_system: Option<bool>,
     pub follow_links: Option<bool>,
     pub prefer_inner_rayon: Option<bool>,
-    pub disable_uring: Option<bool>,
     /// How aggressively the scan is allowed to load the storage device.
     pub io_profile: Option<IoProfile>,
     /// Force readahead on or off, overriding whatever `io_profile` implies.
@@ -67,7 +66,6 @@ pub struct OptionsBuilder {
     pub tune_enabled: Option<bool>,
     pub tune_interval_ms: Option<u64>,
     pub prefer_inner_rayon: Option<bool>,
-    pub disable_uring: Option<bool>,
     pub io_profile: Option<IoProfile>,
     pub prefetch: Option<bool>,
     pub win_allow_handle: Option<bool>,
@@ -140,7 +138,6 @@ impl OptionsBuilder {
         self.one_file_system = cfg.one_file_system.or(self.one_file_system);
         self.follow_links = cfg.follow_links.or(self.follow_links);
         self.prefer_inner_rayon = cfg.prefer_inner_rayon.or(self.prefer_inner_rayon);
-        self.disable_uring = cfg.disable_uring.or(self.disable_uring);
         self.io_profile = cfg.io_profile.or(self.io_profile);
         self.prefetch = cfg.prefetch.or(self.prefetch);
         self
@@ -226,9 +223,6 @@ impl OptionsBuilder {
         }
         if let Some(v) = self.prefer_inner_rayon {
             opt.prefer_inner_rayon = v;
-        }
-        if let Some(v) = self.disable_uring {
-            opt.disable_uring = v;
         }
         if let Some(v) = self.io_profile {
             opt.io_profile = v;

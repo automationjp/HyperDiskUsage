@@ -35,15 +35,6 @@ jobs:
         run: cargo build --workspace --release
       - name: Test core
         run: cargo test -p hyperdu-core -- --nocapture
-      # The io_uring backend sits behind a non-default feature, so none of the
-      # steps above compile it and it can rot unnoticed. Not `--all-features`:
-      # that also pulls in the Tracy profiler, whose build needs a C++ toolchain
-      # the runner does not have.
-      - name: Lint and test the io_uring backend
-        run: |
-          cargo clippy -p hyperdu-core --features uring --all-targets -- -D warnings
-          cargo test -p hyperdu-core --features uring
-          cargo build -p hyperdu-cli --features uring
 
   # The Windows enumeration backend and its tests are cfg(windows), so the Linux
   # job compiles neither. Run them where they apply.

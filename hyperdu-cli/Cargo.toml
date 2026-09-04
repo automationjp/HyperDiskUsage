@@ -39,11 +39,6 @@ debug-eyre = ["dep:color-eyre"]
 prof-tracy = ["dep:profiling", "hyperdu-core/prof-tracy"]
 prof-puffin = ["dep:profiling", "hyperdu-core/prof-puffin"]
 rayon-par = ["hyperdu-core/rayon-par"]
-# Linux io_uring statx backend. Off by default because it measures slower than
-# getdents64+statx on kernel 6.1; see hyperdu-core/Cargo.toml. Without this
-# passthrough the backend cannot be selected from the CLI at all, which made the
-# "turbo-uring" benchmark case silently measure the same binary as "turbo-off".
-uring = ["hyperdu-core/uring"]
 
 # Enable mimalloc for non-MinGW targets to avoid cross issues on windows-gnu
 [target.'cfg(not(all(target_os = "windows", target_env = "gnu")))'.dependencies]

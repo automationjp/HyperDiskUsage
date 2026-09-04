@@ -2,13 +2,6 @@ use crate::{DirContext, ScanContext, StatMap};
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub mod linux_helpers;
-#[cfg(all(
-    target_os = "linux",
-    target_arch = "x86_64",
-    feature = "uring",
-    not(target_env = "musl")
-))]
-mod linux_uring_impl;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod linux_x86_64_impl;
 #[cfg(target_os = "macos")]
@@ -58,30 +51,7 @@ pub fn process_dir_wrapped(ctx: &ScanContext, dir_ctx: &DirContext, map: &mut St
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub fn process_dir_wrapped(ctx: &ScanContext, dir_ctx: &DirContext, map: &mut StatMap) {
-    // Prefer io_uring by default when compiled and supported; otherwise fallback to getdents64
-    #[cfg(all(feature = "uring", not(target_env = "musl")))]
-    {
-        // Runtime guard: allow disabling uring via options or env.
-        // The io_uring backend discovers subdirectories from d_type alone, so it
-        // has no inode to test for symlink cycles; the getdents64 backend does.
-        // Following links therefore has to use the latter.
-        let disable = ctx.options.disable_uring
-            || ctx.options.follow_links
-            || std::env::var("HYPERDU_DISABLE_URING").ok().as_deref() == Some("1")
-            || std::env::var("HYPERDU_DISABLE_URING")
-                .ok()
-                .map(|v| v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
-        if disable {
-            linux_x86_64_impl::process_dir(ctx, dir_ctx, map);
-        } else {
-            linux_uring_impl::process_dir(ctx, dir_ctx, map);
-        }
-    }
-    #[cfg(any(not(feature = "uring"), target_env = "musl"))]
-    {
-        linux_x86_64_impl::process_dir(ctx, dir_ctx, map);
-    }
+    linux_x86_64_impl::process_dir(ctx, dir_ctx, map);
 }
 
 #[cfg(all(

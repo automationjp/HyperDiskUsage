@@ -95,7 +95,7 @@ pub enum IoProfile {
     #[default]
     Balanced,
     /// Stay out of the way of whatever else is using the disk: no readahead,
-    /// no io_uring, few workers, and no splitting of large directories.
+    /// few workers, and no splitting of large directories.
     Gentle,
 }
 
@@ -131,16 +131,8 @@ pub struct Options {
     pub compute_physical: bool, // if false, use logical size as physical (faster)
     pub dir_yield_every: Arc<AtomicUsize>, // 0 = no yielding; split large dirs every N entries
     pub approximate_sizes: bool, // if true and compute_physical=false, estimate regular file size (e.g., 4KiB) to avoid statx
-    pub disable_uring: bool,     // if true, force-disable io_uring backend even if compiled
     pub active_threads: Arc<AtomicUsize>, // runtime-tunable active worker threads (<= threads)
-    pub uring_batch: Arc<AtomicUsize>, // dynamic batch size for io_uring statx (Linux only); default 128
-    pub uring_sq_depth: Arc<AtomicUsize>, // io_uring SQ/CQ depth (Linux only); default 256
-    pub uring_sqe_fail: Arc<AtomicU64>, // number of SQE push failures (queue full)
-    pub uring_submit_wait_ns: Arc<AtomicU64>, // accumulated submit_and_wait time (ns)
-    pub uring_sqe_enq: Arc<AtomicU64>, // enqueued SQEs
-    pub uring_cqe_comp: Arc<AtomicU64>, // completed CQEs
-    pub uring_cqe_err: Arc<AtomicU64>, // CQE errors (<0 result)
-    pub cancel: Arc<AtomicBool>,       // cooperative cancellation
+    pub cancel: Arc<AtomicBool>, // cooperative cancellation
     pub exclude_ac: Option<AhoCorasick>,
     pub exclude_regex: Vec<String>,
     pub exclude_glob: Vec<String>,
@@ -239,28 +231,7 @@ impl Default for Options {
                     .unwrap_or(0),
             )),
             approximate_sizes: false,
-            disable_uring: std::env::var("HYPERDU_DISABLE_URING")
-                .ok()
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false),
             active_threads: Arc::new(AtomicUsize::new(threads_default.max(1))),
-            uring_batch: Arc::new(AtomicUsize::new(
-                std::env::var("HYPERDU_STATX_BATCH")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(128),
-            )),
-            uring_sq_depth: Arc::new(AtomicUsize::new(
-                std::env::var("HYPERDU_URING_SQ_DEPTH")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(256),
-            )),
-            uring_sqe_fail: Arc::new(AtomicU64::new(0)),
-            uring_submit_wait_ns: Arc::new(AtomicU64::new(0)),
-            uring_sqe_enq: Arc::new(AtomicU64::new(0)),
-            uring_cqe_comp: Arc::new(AtomicU64::new(0)),
-            uring_cqe_err: Arc::new(AtomicU64::new(0)),
             exclude_ac: None,
             exclude_regex: Vec::new(),
             exclude_glob: Vec::new(),
@@ -596,10 +567,8 @@ fn prepare_scan(
         .prefetch
         .unwrap_or(matches!(compiled.io_profile, IoProfile::Throughput));
     if compiled.io_profile == IoProfile::Gentle {
-        // Gentle trades wall-clock for staying out of the way: one request at a
-        // time per worker, no io_uring queue depth, and no re-opening a large
-        // directory from a second worker.
-        compiled.disable_uring = true;
+        // Gentle trades wall-clock for staying out of the way: few workers, and
+        // no re-opening a large directory from a second worker.
         compiled.dir_yield_every.store(0, Ordering::Relaxed);
     }
     // Report the worker count that actually runs, not the one that was asked

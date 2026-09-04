@@ -337,7 +337,6 @@ pub fn open_dir_readonly(path: &std::ffi::CStr, follow_links: bool) -> libc::c_i
 /// directory instead of once per file, and remembers the last accounted file so
 /// a sample can be built only when a callback actually fires.
 ///
-/// Shared by the getdents64 and io_uring backends.
 pub struct FileCounter {
     files: u64,
     sample: Option<SampleSlot>,

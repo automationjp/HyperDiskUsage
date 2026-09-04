@@ -15,7 +15,7 @@
 - **マルチプラットフォーム対応予定**: Windows (動作確認済み), Linux (未確認), macOS (未確認)
 - **並列処理**: ワークスティーリングアルゴリズムによる効率的な並列化
 - **プラットフォーム最適化**:
-  - Linux: `getdents64` システムコール、io_uring（実験的）
+  - Linux: `getdents64` システムコール + `statx`
   - Windows: `NtQueryDirectoryFile` による一括列挙（物理サイズ・ファイルIDを列挙結果から直接取得。`FindFirstFileExW` はフォールバック）
   - macOS: `getattrlistbulk` による一括取得
 - **リアルタイムチューニング**: 実行中にパフォーマンスパラメータを自動調整
@@ -29,7 +29,7 @@
 ### パフォーマンスの秘密
 
 1. **プラットフォーム最適化**
-   - Linux: `getdents64` システムコール + `statx`（io_uring は現状実験的で未統合）
+   - Linux: `getdents64` システムコール + `statx`
    - Windows: `NtQueryDirectoryFile`（`FileIdFullDirectoryInformation`）で 128KiB 単位に一括取得。割り当てサイズとファイル ID も同時に得られるため、物理サイズ計算やハードリンク重複排除でファイル毎のシステムコールが発生しません（MSVC ビルド既定。`HYPERDU_WIN_USE_NTQUERY=0` で `FindFirstFileExW` 経路に切替、`HYPERDU_WIN_DIR_BUF_KB` で列挙バッファサイズを変更）
    - macOS: `getattrlistbulk` による名称・型・サイズのバルク取得
 
@@ -82,7 +82,7 @@ cargo install --path hyperdu-gui  # GUI版（オプション）
 
 - Rust 1.75 以降
 - **Windows**: Visual Studio 2019 以降または MinGW-w64 (動作確認済み)
-- **Linux**: 未確認（io_uring 機能を使用する場合はカーネル 5.6+ が必要）
+- **Linux**: 未確認
 - **macOS**: 未確認
 
 ## 🎯 使い方
@@ -140,11 +140,6 @@ OPTIONS:
         --json <PATH>            JSON形式で出力
         --progress               スキャン進捗を標準出力に表示
             --progress-every N   進捗をNファイルごとに表示（既定: 8192）
-        --no-uring               Linuxでio_uringを無効化（WSL/ネットワークFS向け）
-        --uring-sqpoll           io_uringのSQPOLLを有効化
-        --uring-sqpoll-idle-ms   SQPOLLスレッドのアイドル時間（ms）
-        --uring-sqpoll-cpu       SQPOLLスレッドのCPU固定
-        --uring-coop             cooperative taskrun を有効化
         --classify MODE          種別分類: basic|deep
         --class-report PATH      分類結果をJSONへ出力
         --class-report-csv PATH  分類結果をCSVへ出力
@@ -234,20 +229,17 @@ hyperdu-cli --compat gnu -sh /path/to/directory
 
 ### プラットフォーム別最適化
 
-- Linux: `getdents64` + `statx`。io_uring は安定化済みの高速経路（WSL/ネットワークFSでは自動抑制/フォールバック）
+- Linux: `getdents64` + `statx`
 
 #### FS戦略の振る舞い（Linux）
 
 - Ext4/XFS/ZFS
   - getdents_buf_kb=128、prefetch=1（posix_fadvise+readahead/madvise）
-  - io_uring: 有効（環境・オプションに依存）
 - Btrfs
   - compute_physical=false（論理サイズ優先）
   - getdents_buf_kb=128、prefetch=0
-  - io_uring: 有効（環境・オプションに依存）
 - DrvFS（WSL）/Network（NFS/SMB/SSHFS/9p/fuse）
   - compute_physical=false、getdents_buf_kb=64、prefetch=0
-  - io_uring: 自動抑制（disable_uring=1）
   - 推奨 threads: 4（必要に応じてランタイムチューニングが増減）
 
 適用時は stderr に詳細ログを 1 行出力: 例
@@ -283,8 +275,6 @@ cargo build --release --features prof-tracy
 # Puffin プロファイラサポート
 cargo build --release --features prof-puffin
 
-# io_uring サポート（Linux、実験的）
-cargo build --release --features uring
 
 # SIMD プリフェッチ（実験的）
 cargo build --release --features simd-prefetch
@@ -344,19 +334,16 @@ scripts/bench.sh --root /path/to/dir
 # rayon-par（自動並列）ビルドも測定
 WITH_RAYON=1 scripts/bench.sh --root /path/to/dir
 
-# 期待：NVMe/ext4 等では turbo-uring(+rayon-par) が turbo-off より高速
 
 # 分類・インクリメンタルの測定
 scripts/bench.sh --root /path/to/dir   # classify-basic / classify-deep / incr-update / incr-delta を含む
 ```
 
 回帰基準（目安）
-- NVMe/ext4: turbo-uring が turbo-off 比で +10% 以上
-- WSL/DrvFS, ネットワークFS: turbo-off（--no-uring）が最速。io_uringは自動抑制または `--no-uring` を推奨
 
 ### ランタイムチューニング（任意・上級者）
 
-- `hyperdu-cli … --tune` でアダプティブチューナを有効化（dir_yield/uringバッチ/実行スレッド数を動的調整）
+- `hyperdu-cli … --tune` でアダプティブチューナを有効化（dir_yield/実行スレッド数を動的調整）
 - スレッドは `active_threads` を動的に制御（[1, threads] 範囲）
   - I/O待ちやSQE失敗が多い→縮退
   - throughput改善が続く→段階的に増加
@@ -400,7 +387,6 @@ scripts/bench.sh --root /path/to/dir   # classify-basic / classify-deep / incr-u
 ### その他の問題
 - WSL環境: `/mnt/*` (NTFS) でビルド時に一時ディレクトリ削除エラーが出る場合があります。Linux側にリポジトリを配置するか、`CARGO_TARGET_DIR` を設定してください
 - シンボリックリンク: デフォルトでは追跡しません。`--follow-links`で有効化できますが、循環参照に注意してください
-- io_uring (Linux): 実装済みですがテストされていません
 
 ---
 

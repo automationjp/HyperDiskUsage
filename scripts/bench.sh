@@ -14,7 +14,7 @@ set -euo pipefail
 #   -h, --help    Show this help
 #
 # Notes:
-#   - Runs cases: turbo without uring, turbo with uring, and optional rayon-par build.
+#   - Runs cases: turbo, and an optional rayon-par build.
 #   - Suppresses command output; prints per-run milliseconds and average.
 
 usage() {
@@ -25,7 +25,6 @@ ROOT="."
 RUNS=${RUNS:-3}
 BIN="${BIN:-}"
 WITH_RAYON=${WITH_RAYON:-1}
-WITH_URING=${WITH_URING:-0}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -75,20 +74,6 @@ if [[ -z "$BIN" ]]; then
 fi
 
 bench_one "turbo-getdents" "$BIN" "$ROOT" --perf turbo
-
-# The io_uring backend is a compile-time feature, not an environment switch, so
-# it needs its own binary. Building into a separate target dir keeps the two
-# variants from overwriting each other, which previously made both cases measure
-# whichever binary happened to be built last.
-if [[ "$WITH_URING" == "1" ]]; then
-  echo "==> building io_uring variant"
-  if cargo build -p hyperdu-cli --release --features uring \
-      --target-dir target/bench-uring >/dev/null; then
-    bench_one "turbo-uring" target/bench-uring/release/hyperdu-cli "$ROOT" --perf turbo
-  else
-    echo "  (skipped: io_uring variant failed to build)" >&2
-  fi
-fi
 
 if [[ "$WITH_RAYON" == "1" ]]; then
   echo "==> building rayon-par variant"
