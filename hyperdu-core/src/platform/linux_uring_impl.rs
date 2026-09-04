@@ -30,6 +30,17 @@ fn child_device(dirfd: i32, name: &[u8]) -> Option<u64> {
     Some(((stx.stx_dev_major as u64) << 32) | (stx.stx_dev_minor as u64))
 }
 
+/// Physical size for the `symlink_metadata` fallback path.
+///
+/// The ring's statx can fail for every entry on some kernels, which sends all
+/// accounting through here. Billing the logical size as physical then reports a
+/// sparse file at its declared size, so the block count has to be used, exactly
+/// as the statx path does.
+fn fallback_physical(opt: &crate::Options, md: &std::fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    crate::common_ops::calculate_physical_size(opt, md.len(), md.blocks())
+}
+
 pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let opt = ctx.options;
     // Try io_uring ring (once per thread)
@@ -289,10 +300,11 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                         if md.file_type().is_file() {
                                             let l = md.len();
                                             if l >= opt.min_file_size {
+                                                let phys = fallback_physical(opt, &md);
                                                 crate::common_ops::update_file_stats(
-                                                    stat_cur, l, l,
+                                                    stat_cur, l, phys,
                                                 );
-                                                counted.record(nm.as_bytes(), l, l);
+                                                counted.record(nm.as_bytes(), l, phys);
                                             }
                                         }
                                     }
@@ -315,8 +327,9 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                 if md.file_type().is_file() {
                                     let l = md.len();
                                     if l >= opt.min_file_size {
-                                        crate::common_ops::update_file_stats(stat_cur, l, l);
-                                        counted.record(nm.as_bytes(), l, l);
+                                        let phys = fallback_physical(opt, &md);
+                                        crate::common_ops::update_file_stats(stat_cur, l, phys);
+                                        counted.record(nm.as_bytes(), l, phys);
                                     }
                                 }
                             }
@@ -637,8 +650,9 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                     if md.file_type().is_file() {
                                         let l = md.len();
                                         if l >= opt.min_file_size {
-                                            crate::common_ops::update_file_stats(stat_cur, l, l);
-                                            counted.record(nm.as_bytes(), l, l);
+                                            let phys = fallback_physical(opt, &md);
+                                            crate::common_ops::update_file_stats(stat_cur, l, phys);
+                                            counted.record(nm.as_bytes(), l, phys);
                                         }
                                     }
                                 }
@@ -660,8 +674,9 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                             if md.file_type().is_file() {
                                 let l = md.len();
                                 if l >= opt.min_file_size {
-                                    crate::common_ops::update_file_stats(stat_cur, l, l);
-                                    counted.record(nm.as_bytes(), l, l);
+                                    let phys = fallback_physical(opt, &md);
+                                    crate::common_ops::update_file_stats(stat_cur, l, phys);
+                                    counted.record(nm.as_bytes(), l, phys);
                                 }
                             }
                         }
