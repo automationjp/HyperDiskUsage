@@ -218,6 +218,8 @@ struct Args {
     #[arg(
         long,
         long_help = "カンマ区切りの部分一致フィルタ。名前に指定文字列を含むファイル/ディレクトリを除外します。\n\
+    既定では何も除外しません（du と同じ集計になります）。\n\
+    部分一致である点に注意してください。--exclude .git は .github にも一致します。\n\
     例: --exclude .git,node_modules,target"
     )]
     exclude: Option<String>,
@@ -749,7 +751,7 @@ fn main() -> Result<()> {
     let mut exclude_contains: Vec<String> = args
         .exclude
         .as_deref()
-        .unwrap_or(".git,node_modules,target")
+        .unwrap_or("")
         .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -1527,6 +1529,24 @@ fn main() -> Result<()> {
         println!("  Elapsed: {:.3}s", dt.as_secs_f64());
         // The profile may cap the worker count; report what actually runs.
         println!("  Threads: {}", hyperdu_core::effective_threads(&opt));
+        // Print the active exclusions. They change the totals, so a comparison
+        // against du that does not account for them is not a fair one.
+        if opt.exclude_contains.is_empty() && opt.exclude_regex.is_empty() && opt.exclude_glob.is_empty()
+        {
+            println!("  Excludes: (none)");
+        } else {
+            let mut parts: Vec<String> = Vec::new();
+            if !opt.exclude_contains.is_empty() {
+                parts.push(format!("contains[{}]", opt.exclude_contains.join(",")));
+            }
+            if !opt.exclude_regex.is_empty() {
+                parts.push(format!("regex[{}]", opt.exclude_regex.join(",")));
+            }
+            if !opt.exclude_glob.is_empty() {
+                parts.push(format!("glob[{}]", opt.exclude_glob.join(",")));
+            }
+            println!("  Excludes: {}", parts.join(" "));
+        }
         println!("  Follow links: {}", args.follow_links);
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {

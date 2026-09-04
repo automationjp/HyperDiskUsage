@@ -90,12 +90,16 @@ fn glob_and_regex_filters_apply_to_files() {
 #[test]
 fn name_filter_excludes_subdir_but_not_root() {
     let tmp = tempfile::tempdir().unwrap();
-    // Root name contains the default exclude pattern "target".
+    // The root's own name matches the filter; a scan root is never filtered
+    // out by a name rule, only its contents are. Nothing is excluded by
+    // default, so the filter is set explicitly.
     let root = tmp.path().join("my_target_root");
     build_tree(&root);
     fs::create_dir_all(root.join("targets")).unwrap();
     write_bytes(&root.join("targets").join("t.bin"), 50);
-    let map = scan_directory(&root, &quiet_opts()).unwrap();
+    let mut opt = quiet_opts();
+    opt.exclude_contains = vec!["target".into()];
+    let map = scan_directory(&root, &opt).unwrap();
     let s = stat_of(&map, &root);
     assert_eq!(
         s.files, 4,

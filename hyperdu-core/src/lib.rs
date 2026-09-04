@@ -215,7 +215,11 @@ impl Default for Options {
     fn default() -> Self {
         let threads_default = default_threads();
         Self {
-            exclude_contains: vec![".git".into(), "node_modules".into(), "target".into()],
+            // Nothing is excluded by default. A disk-usage tool that silently
+            // drops directories misreports where the space went, and the old
+            // defaults matched by substring: ".git" also swallowed ".github".
+            // Pass --exclude .git,node_modules,target for the previous behaviour.
+            exclude_contains: Vec::new(),
             max_depth: 0,
             min_file_size: 0,
             follow_links: false,
