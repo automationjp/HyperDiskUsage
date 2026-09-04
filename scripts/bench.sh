@@ -75,8 +75,6 @@ fi
 
 bench_one "turbo-getdents" "$BIN" "$ROOT" --perf turbo
 
-fi
-
 if [[ "$WITH_RAYON" == "1" ]]; then
   echo "==> building rayon-par variant"
   if cargo build -p hyperdu-cli --release --features rayon-par \
