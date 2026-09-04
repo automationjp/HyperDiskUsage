@@ -679,52 +679,54 @@ fn exe_dir() -> Option<PathBuf> {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
 }
 
-fn load_or_init_config() -> AppConfig {
-    let dir = exe_dir().unwrap_or_else(|| PathBuf::from("."));
-    let path = dir.join("hyperdu-config.json");
-    if path.exists() {
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                let get_bool =
-                    |k: &str, def: bool| v.get(k).and_then(|x| x.as_bool()).unwrap_or(def);
-                let get_u64 = |k: &str, def: u64| v.get(k).and_then(|x| x.as_u64()).unwrap_or(def);
-                let get_str = |k: &str, def: &str| {
-                    v.get(k).and_then(|x| x.as_str()).unwrap_or(def).to_string()
-                };
-                return AppConfig {
-                    auto_parallel: get_bool("auto_parallel", false),
-                    heuristics_mode: get_str("heuristics_mode", "auto"),
-                    prefer_inner_rayon: get_bool("prefer_inner_rayon", false),
-                    tune_enabled: get_bool("tune_enabled", false),
-                    tune_interval_ms: get_u64("tune_interval_ms", 800),
-                    win_allow_handle: get_bool("win_allow_handle", false),
-                    win_handle_sample_every: get_u64("win_handle_sample_every", 64),
-                };
-            }
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            auto_parallel: false,
+            heuristics_mode: "auto".into(),
+            prefer_inner_rayon: false,
+            tune_enabled: false,
+            tune_interval_ms: 800,
+            win_allow_handle: false,
+            win_handle_sample_every: 64,
         }
     }
-    let cfg = AppConfig {
-        auto_parallel: false,
-        heuristics_mode: "auto".into(),
-        prefer_inner_rayon: false,
-        tune_enabled: false,
-        tune_interval_ms: 800,
-        win_allow_handle: false,
-        win_handle_sample_every: 64,
+}
+
+/// Read the optional config file next to the executable.
+///
+/// Absent or unreadable means "use the defaults", silently. Every run used to
+/// `exists()` the path and then, when it was missing, write the defaults back
+/// out and print a line about it. Beside a system-installed binary that
+/// directory is not writable, so the attempt failed on every single run — and
+/// still printed. The read alone is enough; `read_to_string` already reports a
+/// missing file, so the extra `exists()` stat is gone too.
+fn load_config() -> AppConfig {
+    let dir = exe_dir().unwrap_or_else(|| PathBuf::from("."));
+    let path = dir.join("hyperdu-config.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return AppConfig::default();
     };
-    let s = serde_json::to_string_pretty(&serde_json::json!({
-        "auto_parallel": cfg.auto_parallel,
-        "heuristics_mode": cfg.heuristics_mode,
-        "prefer_inner_rayon": cfg.prefer_inner_rayon,
-        "tune_enabled": cfg.tune_enabled,
-        "tune_interval_ms": cfg.tune_interval_ms,
-        "win_allow_handle": cfg.win_allow_handle,
-        "win_handle_sample_every": cfg.win_handle_sample_every,
-    }))
-    .unwrap();
-    let _ = std::fs::write(&path, s);
-    eprintln!("initialized config: {}", path.display());
-    cfg
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        eprintln!("config は不正な JSON のため無視します: {}", path.display());
+        return AppConfig::default();
+    };
+    let d = AppConfig::default();
+    let get_bool = |k: &str, def: bool| v.get(k).and_then(|x| x.as_bool()).unwrap_or(def);
+    let get_u64 = |k: &str, def: u64| v.get(k).and_then(|x| x.as_u64()).unwrap_or(def);
+    AppConfig {
+        auto_parallel: get_bool("auto_parallel", d.auto_parallel),
+        heuristics_mode: v
+            .get("heuristics_mode")
+            .and_then(|x| x.as_str())
+            .map(str::to_owned)
+            .unwrap_or(d.heuristics_mode),
+        prefer_inner_rayon: get_bool("prefer_inner_rayon", d.prefer_inner_rayon),
+        tune_enabled: get_bool("tune_enabled", d.tune_enabled),
+        tune_interval_ms: get_u64("tune_interval_ms", d.tune_interval_ms),
+        win_allow_handle: get_bool("win_allow_handle", d.win_allow_handle),
+        win_handle_sample_every: get_u64("win_handle_sample_every", d.win_handle_sample_every),
+    }
 }
 
 fn main() -> Result<()> {
@@ -746,7 +748,7 @@ fn main() -> Result<()> {
     if args.bytes {
         args.apparent_size = true;
     }
-    let cfg = load_or_init_config();
+    let cfg = load_config();
 
     let mut exclude_contains: Vec<String> = args
         .exclude

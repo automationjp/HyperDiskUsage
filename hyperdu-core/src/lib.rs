@@ -634,15 +634,32 @@ fn merge_into(acc: &mut StatMap, part: StatMap) {
     }
 }
 
+/// CPU count for thread pinning, or 0 when pinning is off.
+///
+/// Resolved once per process. `env::var` takes a global lock and walks the
+/// environment, and this used to run on every worker as it started, which is
+/// pure startup cost on a scan that never pins.
+#[cfg(target_os = "linux")]
+fn pin_cpu_count() -> i64 {
+    use std::sync::OnceLock;
+    static N: OnceLock<i64> = OnceLock::new();
+    *N.get_or_init(|| {
+        if std::env::var("HYPERDU_PIN_THREADS").ok().as_deref() != Some("1") {
+            return 0;
+        }
+        unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) }.max(0)
+    })
+}
+
 #[cfg(target_os = "linux")]
 fn pin_thread_if_requested(i: usize) {
-    if std::env::var("HYPERDU_PIN_THREADS").ok().as_deref() != Some("1") {
+    let ncpu = pin_cpu_count();
+    if ncpu == 0 {
         return;
     }
     // Pin this worker to a CPU id based on index
     unsafe {
         let mut set: libc::cpu_set_t = std::mem::zeroed();
-        let ncpu = libc::sysconf(libc::_SC_NPROCESSORS_ONLN);
         let cpu = if ncpu > 0 {
             (i as i64 % ncpu) as usize
         } else {
