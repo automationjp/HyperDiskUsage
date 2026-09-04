@@ -32,6 +32,7 @@ pub fn check_hardlink_duplicate(opt: &Options, dev: u64, ino: u64) -> bool {
 /// `nlink == 0` means the filesystem did not report a link count (the `statx`
 /// mask came back without `STATX_NLINK`); those still go through the map, since
 /// guessing would silently double-count hardlinks.
+#[cfg(unix)]
 #[inline]
 pub fn hardlink_candidate(opt: &Options, nlink: u32) -> bool {
     !opt.count_hardlinks && opt.inode_cache.is_some() && nlink != 1

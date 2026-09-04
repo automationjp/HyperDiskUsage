@@ -186,7 +186,11 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                         dirfd,
                         c_name.as_ptr(),
                         flags,
-                        libc::STATX_SIZE | libc::STATX_BLOCKS | libc::STATX_INO | libc::STATX_MODE,
+                        libc::STATX_SIZE
+                            | libc::STATX_BLOCKS
+                            | libc::STATX_INO
+                            | libc::STATX_NLINK
+                            | libc::STATX_MODE,
                         &mut stx,
                     )
                 };
@@ -194,11 +198,10 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                     // Dedupe for regular files only
                     let logical = stx.stx_size;
                     if logical >= opt.min_file_size {
-                        if !opt.count_hardlinks {
+                        if crate::common_ops::hardlink_candidate(opt, stx.stx_nlink) {
                             let dev =
                                 ((stx.stx_dev_major as u64) << 32) | (stx.stx_dev_minor as u64);
-                            let ino = stx.stx_ino;
-                            if check_hardlink_duplicate(opt, dev, ino) {
+                            if check_hardlink_duplicate(opt, dev, stx.stx_ino) {
                                 continue;
                             }
                         }

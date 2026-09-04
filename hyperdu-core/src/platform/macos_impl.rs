@@ -208,13 +208,12 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                     if let Ok(c_child) = CString::new(child.as_os_str().as_bytes()) {
                         let mut st: libc::stat = std::mem::zeroed();
                         let rc = libc::lstat(c_child.as_ptr(), &mut st);
-                        if rc == 0 {
-                            let dev = st.st_dev as u64;
-                            let ino = st.st_ino;
-                            if check_hardlink_duplicate(opt, dev, ino) {
-                                offset += reclen;
-                                continue;
-                            }
+                        if rc == 0
+                            && crate::common_ops::hardlink_candidate(opt, st.st_nlink as u32)
+                            && check_hardlink_duplicate(opt, st.st_dev as u64, st.st_ino)
+                        {
+                            offset += reclen;
+                            continue;
                         }
                     }
                     let logical = totalsize as u64;
