@@ -36,6 +36,18 @@ fn child_device(dirfd: i32, name: &[u8]) -> Option<u64> {
 /// accounting through here. Billing the logical size as physical then reports a
 /// sparse file at its declared size, so the block count has to be used, exactly
 /// as the statx path does.
+/// Whether this file was already counted through another of its hardlinks.
+///
+/// The `symlink_metadata` fallback skipped dedupe entirely, so a hardlinked file
+/// was counted once per link. On a kernel where the ring's statx always fails
+/// this is every file, which is how a two-link fixture reported two files where
+/// `du` reports one.
+fn fallback_is_duplicate(opt: &crate::Options, md: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    crate::common_ops::hardlink_candidate(opt, md.nlink() as u32)
+        && crate::common_ops::check_hardlink_duplicate(opt, md.dev(), md.ino())
+}
+
 fn fallback_physical(opt: &crate::Options, md: &std::fs::Metadata) -> u64 {
     use std::os::unix::fs::MetadataExt;
     crate::common_ops::calculate_physical_size(opt, md.len(), md.blocks())
@@ -297,7 +309,9 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                 } else if ftype == 0 {
                                     // immediate fallback when type info is missing
                                     if let Ok(md) = std::fs::symlink_metadata(&child) {
-                                        if md.file_type().is_file() {
+                                        if md.file_type().is_file()
+                                            && !fallback_is_duplicate(opt, &md)
+                                        {
                                             let l = md.len();
                                             if l >= opt.min_file_size {
                                                 let phys = fallback_physical(opt, &md);
@@ -324,7 +338,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                     ctx.enqueue_dir(child, depth + 1);
                                 }
                             } else if let Ok(md) = std::fs::symlink_metadata(&child) {
-                                if md.file_type().is_file() {
+                                if md.file_type().is_file() && !fallback_is_duplicate(opt, &md) {
                                     let l = md.len();
                                     if l >= opt.min_file_size {
                                         let phys = fallback_physical(opt, &md);
@@ -647,7 +661,8 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                 counted.record(nm.as_bytes(), logical, physical);
                             } else if ftype == 0 {
                                 if let Ok(md) = std::fs::symlink_metadata(&child) {
-                                    if md.file_type().is_file() {
+                                    if md.file_type().is_file() && !fallback_is_duplicate(opt, &md)
+                                    {
                                         let l = md.len();
                                         if l >= opt.min_file_size {
                                             let phys = fallback_physical(opt, &md);
@@ -671,7 +686,7 @@ fn process_with_ring(ring: &mut IoUring, ctx: &ScanContext, dctx: &DirContext, m
                                 ctx.enqueue_dir(child, depth + 1);
                             }
                         } else if let Ok(md) = std::fs::symlink_metadata(&child) {
-                            if md.file_type().is_file() {
+                            if md.file_type().is_file() && !fallback_is_duplicate(opt, &md) {
                                 let l = md.len();
                                 if l >= opt.min_file_size {
                                     let phys = fallback_physical(opt, &md);
