@@ -62,6 +62,15 @@ pub enum HeuristicsMode {
     InnerOnly,
 }
 
+/// Called with the running file count as a scan progresses.
+pub type ProgressCallback = Arc<dyn Fn(u64) + Send + Sync + 'static>;
+
+/// Called occasionally with a sample path, to show what a scan is working on.
+pub type ProgressPathCallback = Arc<dyn Fn(&Path) + Send + Sync + 'static>;
+
+/// Called with a formatted message for every error a scan runs into.
+pub type ErrorReporter = Arc<dyn Fn(&str) + Send + Sync + 'static>;
+
 #[derive(Default, Clone, Copy, Serialize, Debug)]
 pub struct Stat {
     pub logical: u64,
@@ -86,8 +95,8 @@ pub struct Options {
     pub follow_links: bool,
     pub threads: usize,
     pub progress_every: u64, // 0 = disabled
-    pub progress_callback: Option<Arc<dyn Fn(u64) + Send + Sync + 'static>>, // called with file count
-    pub progress_path_callback: Option<Arc<dyn Fn(&Path) + Send + Sync + 'static>>, // occasionally called with a sample file path
+    pub progress_callback: Option<ProgressCallback>,
+    pub progress_path_callback: Option<ProgressPathCallback>,
     pub compute_physical: bool, // if false, use logical size as physical (faster)
     pub dir_yield_every: Arc<AtomicUsize>, // 0 = no yielding; split large dirs every N entries
     pub approximate_sizes: bool, // if true and compute_physical=false, estimate regular file size (e.g., 4KiB) to avoid statx
@@ -120,7 +129,7 @@ pub struct Options {
     pub count_hardlinks: bool, // if true, count hardlinks as separate (non-GNU). Default false = dedupe hardlinks like GNU du
     pub inode_cache: Option<Arc<DashMap<(u64, u64), ()>>>, // (dev, ino)
     pub error_count: Arc<AtomicU64>,
-    pub error_report: Option<Arc<dyn Fn(&str) + Send + Sync + 'static>>, // optional error reporter
+    pub error_report: Option<ErrorReporter>,
     pub one_file_system: bool,
     pub visited_bloom: Option<Arc<Bloom>>, // fast pre-check
     pub visited_dirs: Option<Arc<DashMap<(u64, u64), ()>>>, // loop detection when following links
@@ -153,9 +162,7 @@ impl std::fmt::Debug for Options {
 
 impl Default for Options {
     fn default() -> Self {
-        let threads_default = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4);
+        let threads_default = default_threads();
         Self {
             exclude_contains: vec![".git".into(), "node_modules".into(), "target".into()],
             max_depth: 0,
@@ -262,6 +269,33 @@ impl Bloom {
 }
 
 pub type StatMap = HashMap<PathBuf, Stat>;
+
+/// Default number of worker threads.
+///
+/// Walking a tree is dominated by blocking metadata syscalls rather than by
+/// computation, and a thread waiting inside `statx` holds no CPU. Running more
+/// workers than cores therefore raises the number of requests the storage sees
+/// at once, which is exactly what a cold scan is limited by.
+///
+/// Measured on 2 vCPU / gp3 against a Linux kernel checkout (95,953 files),
+/// best of two cold runs and five warm runs:
+///
+/// | threads      | cold    | warm  |
+/// |--------------|---------|-------|
+/// | 1            | 4483 ms | 273 ms|
+/// | 2 (one/core) | 2321 ms | 212 ms|
+/// | 8 (this)     |  855 ms | 217 ms|
+/// | 32           |  862 ms | 236 ms|
+///
+/// A warm scan gives up a few percent to the extra threads, and a very small
+/// tree pays the spawn cost of roughly 0.3 ms per thread, so the multiplier is
+/// capped. Set `Options::threads` when a specific count is wanted.
+pub fn default_threads() -> usize {
+    let cpus = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    (cpus * 4).clamp(4, 32)
+}
 
 /// Per-worker view of the scan. Constructed on the worker thread and handed to
 /// backends by reference; expected to be fully inlined.

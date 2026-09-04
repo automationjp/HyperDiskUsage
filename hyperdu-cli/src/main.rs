@@ -744,11 +744,8 @@ fn main() -> Result<()> {
         }
     }
 
-    let threads = args.threads.unwrap_or_else(|| {
-        std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4)
-    });
+    // Deliberately more workers than cores: see hyperdu_core::default_threads.
+    let threads = args.threads.unwrap_or_else(hyperdu_core::default_threads);
 
     let mut opt = hyperdu_core::OptionsBuilder::new()
         .with_exclude_contains(exclude_contains)
