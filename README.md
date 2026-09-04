@@ -6,13 +6,13 @@
 
 **HyperDU** は、高速なディスク使用量分析を目指した Rust 製ツールです。並列処理とOS固有APIの最適化により、従来のツールより高速に動作する可能性があります。
 
-> **⚠️ 動作確認について**: 現在 Windows 環境でのみ動作確認済みです。Linux/macOS での動作は未確認のため、これらの環境では動作しない可能性があります。
+> **⚠️ 動作確認について**: Windows と Linux は実機で検証済みです（CI でも両方をテストしています）。macOS はビルドのみで実機検証していません。
 
 ## 🚀 特徴
 
 - **高速スキャン**: 並列処理とプラットフォーム最適化による高速化を目指しています
 - **du 互換モード**: `--compat gnu` オプションで GNU du 風の出力形式に対応
-- **マルチプラットフォーム対応予定**: Windows (動作確認済み), Linux (未確認), macOS (未確認)
+- **マルチプラットフォーム対応**: Windows (検証済み), Linux (検証済み), macOS (実機未検証)
 - **並列処理**: ワークスティーリングアルゴリズムによる効率的な並列化
 - **プラットフォーム最適化**:
   - Linux: `getdents64` システムコール + `statx`
@@ -82,8 +82,8 @@ cargo install --path hyperdu-gui  # GUI版（オプション）
 
 - Rust 1.75 以降
 - **Windows**: Visual Studio 2019 以降または MinGW-w64 (動作確認済み)
-- **Linux**: 未確認
-- **macOS**: 未確認
+- **Linux**: 検証済み（Amazon Linux 2023 / xfs、WSL2 / ext4）
+- **macOS**: 実機未検証
 
 ## 🎯 使い方
 
@@ -201,19 +201,35 @@ hyperdu-gui ~/Documents
 - ディレクトリのドリルダウン
 - 結果のエクスポート
 
-## 🔥 パフォーマンス目標
+## 🔥 パフォーマンス
 
-### 期待される性能向上
+数値はすべて `scripts/bench_du.sh` による実測です。同スクリプトは、古いバイナリを測ろうとした場合と、両ツールが同じファイル集合を走査していない場合に**エラーで停止**します。
 
-高速化を目指していますが、実際の性能はストレージ種類、ファイルシステム、ファイル構成に大きく依存します。
+### GNU du 8.32 との比較（EC2 t3.large / xfs / kernel 6.1）
 
-| 想定環境 | 期待される改善 |
-|---------|---------------|
-| NVMe SSD (多数の小ファイル) | 大幅な高速化の可能性 |
-| HDD (大規模ディレクトリ) | 中程度の高速化 |
-| ネットワークドライブ | 環境依存 |
+| ツリー | files | dirs | warm | cold |
+|---|---|---|---|---|
+| Linux カーネル | 95,953 | 6,299 | 1.32x | **4.93x** |
+| rust リポジトリ | 62,621 | 4,734 | 1.36x | **5.56x** |
+| git リポジトリ | 4,874 | 242 | 1.00x | 2.02x |
 
-> **注**: 上記は理論値であり、実環境での性能は異なる場合があります。Windows 環境でのみ動作確認済みです。
+warm は 5 回の最小値、cold は 3 回の burn-in 後に両ツールを交互実行した 5 組の中央値です。ファイル数は 3 つとも `find` と完全一致しています。
+
+### warm の比は物理コア数の関数です
+
+**du は単一スレッド**なので、比は走査対象よりも物理コア数で決まります。上表の t3.large は **2 vCPU = 物理 1 コア + SMT** で、並列化の余地がほぼありません。参考までに WSL2（物理 8 コア / 16 スレッド、ext4）では同じ rust ツリーで **7.18x** です。
+
+**cold こそが実用上の主戦場**です。ディスク使用量の調査は通常 1 回きりで、ページキャッシュは温まっていません。
+
+### Windows
+
+`NtQueryDirectoryFile` + `FileIdFullDirectoryInformation` への変更により、旧実装比 **4.7x**。1 回の列挙でサイズ・割り当てサイズ・ファイル ID が同時に得られるため、ファイルごとのハンドル open が不要です。
+
+### なぜ Linux は Windows より差が小さいのか
+
+構造的な理由があります。`struct dirent64` は `d_ino` / `d_off` / `d_reclen` / `d_type` / `d_name` の 5 フィールド固定で、**サイズを入れる場所がありません**。さらに VFS の `dir_emit()` / `filldir64()` のコールバック署名が `(name, namelen, ino, dtype)` しか受け取らないため、どのファイルシステムであれ列挙時にサイズを返せません。
+
+したがって Linux では**ファイル 1 個につき `statx` が 1 回**必要で、syscall 数はファイル数に比例します（Windows はディレクトリ数に比例）。GNU du も同じ制約下にあるため、warm では両者が同じ壁に当たります。
 
 ### du 互換モードでの動作確認
 
@@ -325,18 +341,31 @@ cargo clippy --workspace -- -D warnings
 
 ### ベンチと回帰基準
 
-高速化/回帰検知のために簡易ベンチスクリプトを用意しています。
+**GNU du との比較には `scripts/bench_du.sh` を使ってください。** 公平性の条件をスクリプト側で強制します。
 
 ```
-# 代表ディレクトリで比較（デフォルト3回平均）
+# warm のみ
+scripts/bench_du.sh /path/to/tree
+
+# cold も測る（drop_caches のため root/sudo が必要）
+scripts/bench_du.sh --cold /path/to/tree1 /path/to/tree2
+```
+
+このスクリプトは以下を**自動で検出して停止**します。いずれも過去に実際にやらかした失敗です。
+
+| 検出 | 背景 |
+|---|---|
+| **古いバイナリ** | `cargo build --features X` が `target/release` を上書きし、後の計測が古いバイナリを測っていた |
+| **走査対象の不一致** | 既定除外の `.git` が `.github` に部分一致し、HyperDU だけ 437 ディレクトリ少なく走査していた。`find` のファイル数と突き合わせる |
+| **cold の最小値** | EBS gp3 のバースト枯渇で同一条件が 0.495s → 0.88s と 1.8 倍ぶれる。最小値はバースト状態だけを拾うため、burn-in → 交互実行 → **中央値**とする |
+
+ヘッダには commit、未コミット変更の有無、物理コア数、ファイルシステム種別、カーネルを出力します。後から「どの条件の数字か」を復元できるようにするためです。
+
+HyperDU の変種間（rayon-par など）の比較には `scripts/bench.sh` を使います。
+
+```
 scripts/bench.sh --root /path/to/dir
-
-# rayon-par（自動並列）ビルドも測定
 WITH_RAYON=1 scripts/bench.sh --root /path/to/dir
-
-
-# 分類・インクリメンタルの測定
-scripts/bench.sh --root /path/to/dir   # classify-basic / classify-deep / incr-update / incr-delta を含む
 ```
 
 回帰基準（目安）
@@ -380,9 +409,9 @@ scripts/bench.sh --root /path/to/dir   # classify-basic / classify-deep / incr-u
 ## ⚠️ 既知の問題と制限事項
 
 ### 動作環境
-- **Windows**: 動作確認済み
-- **Linux**: 未確認（ビルドは可能だが動作未検証）
-- **macOS**: 未確認（ビルドは可能だが動作未検証）
+- **Windows**: 検証済み（NTFS、CI あり）
+- **Linux**: 検証済み（Amazon Linux 2023 / xfs、WSL2 / ext4、CI あり）
+- **macOS**: 実機未検証（ビルドは可能）
 
 ### その他の問題
 - WSL環境: `/mnt/*` (NTFS) でビルド時に一時ディレクトリ削除エラーが出る場合があります。Linux側にリポジトリを配置するか、`CARGO_TARGET_DIR` を設定してください
