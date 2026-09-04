@@ -7,8 +7,8 @@
 //! because it omits the 8.3 short name, making each record 24 bytes smaller so
 //! more entries fit per syscall.
 //!
-//! Buffer size defaults to 64 KiB (measured best on NTFS; larger buffers gave
-//! no gain); override with `HYPERDU_WIN_DIR_BUF_KB`.
+//! Buffer size defaults to 128 KiB (see `DEFAULT_DIR_BUFFER_KB` for the
+//! measurements); override with `HYPERDU_WIN_DIR_BUF_KB`.
 
 use std::{cell::RefCell, sync::atomic::Ordering};
 
@@ -40,7 +40,12 @@ use crate::{
     DirContext, ScanContext, Stat, StatMap,
 };
 
-const DEFAULT_DIR_BUFFER_KB: usize = 64;
+/// Measured on NTFS across three shapes: a single directory of 20,000 files,
+/// `C:\Windows\WinSxS` (many directories, few entries each) and a 6.9M-file
+/// tree of 1.1M directories. 128 KiB won or tied everywhere. 256 KiB was 14%
+/// *worse* on the many-small-directories tree, where the larger buffer gets
+/// touched once per directory and never filled.
+const DEFAULT_DIR_BUFFER_KB: usize = 128;
 const FILE_LIST_DIRECTORY: u32 = 0x0001;
 const SYNCHRONIZE: u32 = 0x0010_0000;
 const STATUS_NO_MORE_FILES: i32 = 0x8000_0006_u32 as i32;
