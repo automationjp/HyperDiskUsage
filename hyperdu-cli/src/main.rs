@@ -283,6 +283,19 @@ struct Args {
     )]
     approximate: bool,
 
+    /// Read the NTFS $MFT directly (Windows, volume root, administrator)
+    #[arg(
+        long = "mft",
+        action = ArgAction::SetTrue,
+        long_help = "NTFS の $MFT を直接読んでボリューム全体を走査します（Windows のみ）。\n\
+    以下のいずれかに当てはまる場合は自動的に通常の列挙へ切り替わります。\n\
+      - 管理者権限で実行していない\n\
+      - 走査対象がボリュームのルート（例: C:\\）でない\n\
+      - NTFS でない、または $MFT の解析に失敗した\n\
+    切り替わっても結果は正しく、遅くなるだけです。"
+    )]
+    mft: bool,
+
     /// Run tuning only (no scan); prints recommended dir_yield_every and exits
     #[arg(
         long = "tune-only",
@@ -915,6 +928,7 @@ fn main() -> Result<()> {
     if args.approximate {
         opt.approximate_sizes = true;
     }
+    opt.use_mft = args.mft;
     opt.one_file_system = args.one_file_system;
     if args.follow_links && !matches!(opt.compat_mode, hyperdu_core::CompatMode::HyperDU) {
         opt.visited_bloom = Some(std::sync::Arc::new(hyperdu_core::Bloom::with_bits(1 << 20)));
@@ -1248,12 +1262,44 @@ fn main() -> Result<()> {
         ));
     }
 
+    // Whether `--mft` could apply to this path at all. Elevation and the
+    // filesystem type are checked in the core, which is where the fallback
+    // lives; this only catches the case the user can see and fix themselves.
+    fn looks_like_volume_root(p: &std::path::Path) -> bool {
+        #[cfg(windows)]
+        {
+            use std::path::{Component, Prefix};
+            let mut c = p.components();
+            let is_disk = matches!(
+                c.next(),
+                Some(Component::Prefix(pre))
+                    if matches!(pre.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
+            );
+            is_disk && matches!(c.next(), Some(Component::RootDir)) && c.next().is_none()
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = p;
+            false
+        }
+    }
+
     // Roots: if none provided, use current directory
     let roots: Vec<PathBuf> = if args.roots.is_empty() {
         vec![PathBuf::from(".")]
     } else {
         args.roots.clone()
     };
+
+    // Falling back silently would let someone believe they had measured the
+    // volume the fast way when they had not. The scan is still correct, so this
+    // is a warning rather than an error.
+    if args.mft && !roots.iter().any(|r| looks_like_volume_root(r)) {
+        eprintln!(
+            "warning: --mft はボリュームのルート（例: C:\\）にのみ適用されます。\n\
+             \x20        指定された対象では通常の列挙で走査します。"
+        );
+    }
 
     // Quick Win: Minimal FS detection to improve defaults on DrvFS/Network FS
     #[cfg(target_os = "linux")]

@@ -52,6 +52,81 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     win32::process_dir(ctx, dctx, map)
 }
 
+/// Scan a whole volume by reading its `$MFT`. See
+/// [`crate::platform::scan_volume_via_mft`].
+///
+/// Every `None` here is a reason to use the enumeration backend instead, and
+/// none of them is an error worth reporting: not asked for, not elevated, not a
+/// volume root, not NTFS, or the parse did not hold together.
+#[cfg(target_env = "msvc")]
+pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Option<crate::StatMap> {
+    if !opt.use_mft {
+        return None;
+    }
+    // The MFT covers a whole volume. Scanning a subdirectory this way would
+    // mean reading every record and discarding most of them, which is slower
+    // than walking the subdirectory -- and the point of this backend is that it
+    // does not walk.
+    let drive = volume_root_letter(root)?;
+    if !mft_reader::is_elevated() {
+        return None;
+    }
+
+    let mut volume = mft_reader::WindowsVolume::open(drive)?;
+    // Narrow the read alignment now that the geometry is known, so records stop
+    // pulling in more sectors than they need.
+    let mut reader = mft_reader::MftReader::open(&mut volume)?;
+    let geometry = reader.geometry();
+    let entries = reader.entries();
+    drop(reader);
+    volume.set_sector_size(geometry.bytes_per_sector);
+
+    let paths = mft_reader::paths_for(&entries);
+    let prefix = format!("{}:\\", drive.to_ascii_uppercase());
+    Some(mft_reader::to_stat_map(
+        &entries,
+        &paths,
+        &prefix,
+        opt.count_hardlinks,
+        opt.compute_physical,
+    ))
+}
+
+#[cfg(not(target_env = "msvc"))]
+pub fn scan_volume_via_mft(
+    _root: &std::path::Path,
+    _opt: &crate::Options,
+) -> Option<crate::StatMap> {
+    None
+}
+
+/// Drive letter when `root` is the root of a volume (`C:\`), else `None`.
+///
+/// A subdirectory returns `None` on purpose: see `scan_volume_via_mft`.
+#[cfg(target_env = "msvc")]
+fn volume_root_letter(root: &std::path::Path) -> Option<char> {
+    use std::path::{Component, Prefix};
+
+    let mut components = root.components();
+    let letter = match components.next()? {
+        Component::Prefix(p) => match p.kind() {
+            Prefix::Disk(d) | Prefix::VerbatimDisk(d) => d as char,
+            // UNC shares and device paths have no MFT we can open this way.
+            _ => return None,
+        },
+        _ => return None,
+    };
+    // After the prefix there must be a root and nothing else.
+    match components.next() {
+        Some(Component::RootDir) => {}
+        _ => return None,
+    }
+    if components.next().is_some() {
+        return None;
+    }
+    Some(letter)
+}
+
 /// Prefix identifying the volume of `dir` (`C:`, `\\?\C:`, `\\server\share`).
 /// Relative paths have none and are simply never cached.
 #[cfg(target_env = "msvc")]

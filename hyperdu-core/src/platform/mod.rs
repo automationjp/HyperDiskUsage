@@ -49,6 +49,24 @@ pub fn process_dir_wrapped(ctx: &ScanContext, dir_ctx: &DirContext, map: &mut St
     windows_impl::process_dir(ctx, dir_ctx, map)
 }
 
+/// Scan a whole volume by reading its `$MFT`, or `None` when that is not
+/// possible here.
+///
+/// Unlike the enumeration backends this is not per-directory: the MFT is read
+/// once for the whole volume. `None` covers every reason it might not apply --
+/// not Windows, not elevated, not NTFS, not a volume root -- and the caller
+/// falls back to enumeration. Reporting a partial answer would be worse than
+/// being slower.
+#[cfg(windows)]
+pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Option<StatMap> {
+    windows_impl::scan_volume_via_mft(root, opt)
+}
+
+#[cfg(not(windows))]
+pub fn scan_volume_via_mft(_root: &std::path::Path, _opt: &crate::Options) -> Option<StatMap> {
+    None
+}
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub fn process_dir_wrapped(ctx: &ScanContext, dir_ctx: &DirContext, map: &mut StatMap) {
     linux_x86_64_impl::process_dir(ctx, dir_ctx, map);
