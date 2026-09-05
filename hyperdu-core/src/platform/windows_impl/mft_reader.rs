@@ -154,7 +154,8 @@ impl<S: VolumeSource> MftReader<S> {
         for attr in Attributes::new(&rec, &header) {
             match attr.type_code {
                 attr_type::FILE_NAME if !attr.non_resident => {
-                    let value = rec.get(attr.value_offset..attr.value_offset + attr.value_length)?;
+                    let value =
+                        rec.get(attr.value_offset..attr.value_offset + attr.value_length)?;
                     if let Some(f) = parse_file_name(value) {
                         names.push(f);
                     }
@@ -438,8 +439,10 @@ mod tests {
 
     #[test]
     fn reads_a_file_record_end_to_end() {
-        let records =
-            with_metadata_records(vec![file_record(ROOT_RECORD, "notes.txt", 8192, 5000, 1)], 8);
+        let records = with_metadata_records(
+            vec![file_record(ROOT_RECORD, "notes.txt", 8192, 5000, 1)],
+            8,
+        );
         let mut reader = MftReader::open(volume(records)).expect("open");
         let e = reader.entry(16).expect("record 16 is the file");
         assert_eq!(e.name, "notes.txt");
