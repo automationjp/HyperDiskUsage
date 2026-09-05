@@ -388,6 +388,244 @@ pub(crate) fn parse_data_sizes(rec: &[u8], attr: &AttrHeader) -> Option<DataSize
     })
 }
 
+// --- run lists ---------------------------------------------------------------
+
+/// One extent of a non-resident attribute: where it starts on the volume and
+/// how many clusters it covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Run {
+    /// Starting cluster on the volume. `None` for a sparse run, which occupies
+    /// no space -- counting it as allocated would inflate every sparse file.
+    pub(crate) lcn: Option<u64>,
+    pub(crate) length: u64,
+}
+
+/// Decode the run list of a non-resident attribute.
+///
+/// `$MFT` is itself a file, and it is not necessarily contiguous. Without this
+/// the MFT can only be read as far as its first extent, which on a fragmented
+/// volume silently truncates the scan -- the worst kind of wrong, because the
+/// total still looks plausible.
+///
+/// Encoding: each run starts with a header byte whose low nibble is the byte
+/// count of the length field and whose high nibble is the byte count of the
+/// LCN offset. The offset is a *signed* delta from the previous run's LCN, so
+/// runs can go backwards on the volume. A header of zero ends the list.
+///
+/// Returns `None` on a malformed list rather than a partial one: a truncated
+/// run list would under-report sizes while looking like a complete answer.
+pub(crate) fn parse_run_list(bytes: &[u8]) -> Option<Vec<Run>> {
+    let mut runs = Vec::new();
+    let mut pos = 0usize;
+    let mut prev_lcn: i64 = 0;
+
+    loop {
+        let header = *bytes.get(pos)?;
+        if header == 0 {
+            return Some(runs);
+        }
+        let len_bytes = (header & 0x0F) as usize;
+        let off_bytes = (header >> 4) as usize;
+        // A zero-length field cannot describe a run, and either field wider
+        // than 8 bytes cannot be held in the integers below.
+        if len_bytes == 0 || len_bytes > 8 || off_bytes > 8 {
+            return None;
+        }
+        pos += 1;
+
+        let length = read_le_unsigned(bytes, pos, len_bytes)?;
+        pos += len_bytes;
+
+        let lcn = if off_bytes == 0 {
+            // No offset field: a sparse run, which holds no clusters.
+            None
+        } else {
+            let delta = read_le_signed(bytes, pos, off_bytes)?;
+            pos += off_bytes;
+            prev_lcn = prev_lcn.checked_add(delta)?;
+            if prev_lcn < 0 {
+                return None;
+            }
+            Some(prev_lcn as u64)
+        };
+
+        runs.push(Run { lcn, length });
+
+        // A run list is bounded by the attribute that holds it; this guards a
+        // list with no terminator.
+        if pos >= bytes.len() {
+            return Some(runs);
+        }
+    }
+}
+
+fn read_le_unsigned(b: &[u8], off: usize, n: usize) -> Option<u64> {
+    let s = b.get(off..off + n)?;
+    let mut v = 0u64;
+    for (i, byte) in s.iter().enumerate() {
+        v |= (*byte as u64) << (i * 8);
+    }
+    Some(v)
+}
+
+/// Little-endian, sign-extended from `n` bytes. The LCN offset is a signed
+/// delta, so a run can sit before the previous one on the volume.
+fn read_le_signed(b: &[u8], off: usize, n: usize) -> Option<i64> {
+    let s = b.get(off..off + n)?;
+    let mut v = 0u64;
+    for (i, byte) in s.iter().enumerate() {
+        v |= (*byte as u64) << (i * 8);
+    }
+    let sign_bit = 1u64 << (n * 8 - 1);
+    if v & sign_bit != 0 {
+        // Fill the unused high bytes with ones.
+        let mask = !0u64 << (n * 8);
+        v |= mask;
+    }
+    Some(v as i64)
+}
+
+/// Total clusters a run list actually occupies, ignoring sparse runs.
+///
+/// This is the number that matters for "space used": a sparse file's apparent
+/// size counts holes, its allocated size does not.
+pub(crate) fn allocated_clusters(runs: &[Run]) -> u64 {
+    runs.iter()
+        .filter(|r| r.lcn.is_some())
+        .map(|r| r.length)
+        .sum()
+}
+
+/// Byte offset of the run holding `vcn`, given the cluster size.
+///
+/// Needed to read record N of the MFT: the record's virtual offset has to be
+/// mapped through the run list to a physical one.
+pub(crate) fn vcn_to_offset(runs: &[Run], vcn: u64, cluster_size: u64) -> Option<u64> {
+    let mut base = 0u64;
+    for run in runs {
+        if vcn < base + run.length {
+            // A read inside a sparse run has no backing bytes.
+            let lcn = run.lcn?;
+            return (lcn + (vcn - base)).checked_mul(cluster_size);
+        }
+        base += run.length;
+    }
+    None
+}
+
+// --- $ATTRIBUTE_LIST ---------------------------------------------------------
+
+/// One entry of an `$ATTRIBUTE_LIST`: which attribute lives in which record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AttrListEntry {
+    pub(crate) type_code: u32,
+    /// Record holding the attribute. Equal to the base record for attributes
+    /// that did not need to move out.
+    pub(crate) record: u64,
+}
+
+/// Parse an `$ATTRIBUTE_LIST` value.
+///
+/// A heavily fragmented file outgrows its MFT record, and NTFS moves some of
+/// its attributes into extension records. Ignoring this list means missing the
+/// `$DATA` of exactly the largest files -- the ones a disk-usage tool exists to
+/// find.
+pub(crate) fn parse_attribute_list(value: &[u8]) -> Vec<AttrListEntry> {
+    let mut out = Vec::new();
+    let mut pos = 0usize;
+    while pos + 26 <= value.len() {
+        let Some(type_code) = u32_at(value, pos) else {
+            break;
+        };
+        let Some(entry_len) = u16_at(value, pos + 4).map(usize::from) else {
+            break;
+        };
+        // Zero or backwards length would spin; anything past the value is corrupt.
+        if entry_len < 26 || pos + entry_len > value.len() {
+            break;
+        }
+        let Some(reference) = u64_at(value, pos + 16) else {
+            break;
+        };
+        out.push(AttrListEntry {
+            type_code,
+            // Low 48 bits again; the high 16 are the reuse sequence.
+            record: reference & 0x0000_FFFF_FFFF_FFFF,
+        });
+        pos += entry_len;
+    }
+    out
+}
+
+// --- hardlinks ---------------------------------------------------------------
+
+/// The `$FILE_NAME` entries that represent distinct links, from all the entries
+/// on a record.
+///
+/// A record carries one `$FILE_NAME` per link, plus a second entry for any link
+/// that also has a DOS 8.3 alias. Counting entries would double-count every
+/// file with a short name -- which on a system volume is most of them.
+///
+/// Namespace 3 (`WIN32_AND_DOS`) is a single name serving both, so it counts
+/// once; only namespace 2 (`DOS`) is a separate alias entry to drop.
+pub(crate) fn distinct_links(names: &[FileName]) -> Vec<&FileName> {
+    names.iter().filter(|f| !f.is_dos_alias()).collect()
+}
+
+/// Whether a record's bytes should be counted for this link, given how many
+/// links it has and whether this one has been seen.
+///
+/// GNU `du` charges a hardlinked file once, to whichever link it meets first.
+/// Doing the same here keeps the MFT backend's totals comparable with the
+/// enumeration backend's, which is the check that decides whether this backend
+/// is correct at all.
+pub(crate) fn should_count_link(hard_link_count: u16, already_seen: bool) -> bool {
+    if hard_link_count <= 1 {
+        // Not linked: nothing to dedupe, and the map lookup is skipped.
+        return true;
+    }
+    !already_seen
+}
+
+// --- path reconstruction -----------------------------------------------------
+
+/// Record number of the root directory. Fixed by the format.
+pub(crate) const ROOT_RECORD: u64 = 5;
+
+/// Build a path from a record number by walking parent references.
+///
+/// `name_of` returns `(name, parent)` for a record, or `None` when the record
+/// is unknown. Returns `None` when the chain does not reach the root, which
+/// happens for orphaned records on a damaged volume -- attributing their bytes
+/// to a guessed parent would silently move space between directories.
+///
+/// A cycle would otherwise hang the scan, so the walk is bounded: NTFS paths
+/// cannot nest deeper than this in practice, and a longer chain means the
+/// references are corrupt.
+pub(crate) fn build_path<F>(record: u64, name_of: F) -> Option<String>
+where
+    F: Fn(u64) -> Option<(String, u64)>,
+{
+    const MAX_DEPTH: usize = 256;
+    let mut parts: Vec<String> = Vec::new();
+    let mut current = record;
+
+    for _ in 0..MAX_DEPTH {
+        if current == ROOT_RECORD {
+            parts.reverse();
+            return Some(parts.join("\\"));
+        }
+        let (name, parent) = name_of(current)?;
+        // A record that is its own parent is corrupt, and would loop.
+        if parent == current {
+            return None;
+        }
+        parts.push(name);
+        current = parent;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -741,6 +979,317 @@ mod tests {
             sizes.allocated_size, 8192,
             "allocated is what the volume spends, and is where a sparse or \
              compressed file differs from its apparent size"
+        );
+    }
+
+    // --- $ATTRIBUTE_LIST -----------------------------------------------------
+
+    fn attr_list_entry(type_code: u32, record: u64, name_len: u8) -> Vec<u8> {
+        let entry_len = 26 + (name_len as usize) * 2;
+        let total = entry_len.next_multiple_of(8);
+        let mut v = vec![0u8; total];
+        v[0..4].copy_from_slice(&type_code.to_le_bytes());
+        v[4..6].copy_from_slice(&(total as u16).to_le_bytes());
+        v[6] = name_len;
+        v[16..24].copy_from_slice(&record.to_le_bytes());
+        v
+    }
+
+    #[test]
+    fn parses_an_attribute_list_pointing_at_extension_records() {
+        let mut v = attr_list_entry(attr_type::DATA, 100, 0);
+        v.extend(attr_list_entry(attr_type::DATA, 101, 0));
+        let entries = parse_attribute_list(&v);
+        assert_eq!(
+            entries,
+            vec![
+                AttrListEntry {
+                    type_code: attr_type::DATA,
+                    record: 100
+                },
+                AttrListEntry {
+                    type_code: attr_type::DATA,
+                    record: 101
+                },
+            ],
+            "a fragmented file's $DATA lives across several records"
+        );
+    }
+
+    #[test]
+    fn an_attribute_list_reference_drops_the_sequence_number() {
+        let v = attr_list_entry(attr_type::DATA, 0x0003_0000_0000_0064, 0);
+        assert_eq!(parse_attribute_list(&v)[0].record, 100);
+    }
+
+    #[test]
+    fn a_zero_length_attribute_list_entry_does_not_loop_forever() {
+        let mut v = attr_list_entry(attr_type::DATA, 100, 0);
+        v[4..6].copy_from_slice(&0u16.to_le_bytes());
+        assert!(parse_attribute_list(&v).is_empty(), "must stop, not spin");
+    }
+
+    #[test]
+    fn an_attribute_list_entry_past_the_value_is_dropped() {
+        let mut v = attr_list_entry(attr_type::DATA, 100, 0);
+        v[4..6].copy_from_slice(&9999u16.to_le_bytes());
+        assert!(parse_attribute_list(&v).is_empty());
+    }
+
+    #[test]
+    fn a_truncated_attribute_list_yields_the_entries_it_could_read() {
+        let mut v = attr_list_entry(attr_type::DATA, 100, 0);
+        v.extend_from_slice(&[0u8; 8]); // not enough for a second entry
+        assert_eq!(parse_attribute_list(&v).len(), 1);
+    }
+
+    // --- hardlinks -----------------------------------------------------------
+
+    fn fname(ns: u8, name: &str) -> FileName {
+        FileName {
+            parent: 5,
+            allocated_size: 0,
+            real_size: 0,
+            namespace: ns,
+            name: name.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_dos_alias_is_not_a_separate_link() {
+        let names = vec![
+            fname(namespace::WIN32, "LongFileName.txt"),
+            fname(namespace::DOS, "LONGFI~1.TXT"),
+        ];
+        assert_eq!(
+            distinct_links(&names).len(),
+            1,
+            "counting the 8.3 alias would double every file that has one"
+        );
+    }
+
+    #[test]
+    fn two_real_links_count_twice() {
+        let names = vec![
+            fname(namespace::WIN32, "original.txt"),
+            fname(namespace::WIN32, "hardlink.txt"),
+        ];
+        assert_eq!(distinct_links(&names).len(), 2);
+    }
+
+    #[test]
+    fn a_win32_and_dos_name_counts_once() {
+        let names = vec![fname(namespace::WIN32_AND_DOS, "readme")];
+        assert_eq!(
+            distinct_links(&names).len(),
+            1,
+            "namespace 3 is one name serving both, not two links"
+        );
+    }
+
+    #[test]
+    fn a_posix_name_is_a_link() {
+        let names = vec![fname(namespace::POSIX, "case.txt")];
+        assert_eq!(distinct_links(&names).len(), 1);
+    }
+
+    #[test]
+    fn an_unlinked_file_is_counted_without_consulting_the_map() {
+        // hard_link_count 1: the "already seen" answer must not matter, so the
+        // caller can skip the lookup entirely.
+        assert!(should_count_link(1, false));
+        assert!(should_count_link(1, true));
+    }
+
+    #[test]
+    fn a_hardlinked_file_is_counted_once() {
+        assert!(should_count_link(3, false), "first link seen: count it");
+        assert!(!should_count_link(3, true), "second link: already counted");
+    }
+
+    // --- path reconstruction -------------------------------------------------
+
+    /// `records[n] = (name, parent)`
+    fn lookup(records: Vec<(u64, &'static str, u64)>) -> impl Fn(u64) -> Option<(String, u64)> {
+        move |n| {
+            records
+                .iter()
+                .find(|(rec, _, _)| *rec == n)
+                .map(|(_, name, parent)| ((*name).to_string(), *parent))
+        }
+    }
+
+    #[test]
+    fn builds_a_path_by_walking_parent_references() {
+        // 5 = root, 10 = Users, 11 = alice, 12 = notes.txt
+        let f = lookup(vec![
+            (10, "Users", ROOT_RECORD),
+            (11, "alice", 10),
+            (12, "notes.txt", 11),
+        ]);
+        assert_eq!(
+            build_path(12, f).as_deref(),
+            Some("Users\\alice\\notes.txt")
+        );
+    }
+
+    #[test]
+    fn the_root_record_is_the_empty_path() {
+        let f = lookup(vec![]);
+        assert_eq!(build_path(ROOT_RECORD, f).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn an_orphaned_record_has_no_path() {
+        // 12's parent 99 is not in the table, so the chain never reaches root.
+        let f = lookup(vec![(12, "orphan.txt", 99)]);
+        assert_eq!(
+            build_path(12, f),
+            None,
+            "guessing a parent would move bytes between directories"
+        );
+    }
+
+    #[test]
+    fn a_self_referencing_record_does_not_hang() {
+        let f = lookup(vec![(12, "loop", 12)]);
+        assert_eq!(build_path(12, f), None);
+    }
+
+    #[test]
+    fn a_reference_cycle_does_not_hang() {
+        let f = lookup(vec![(12, "a", 13), (13, "b", 12)]);
+        assert_eq!(build_path(12, f), None, "bounded walk, not an infinite one");
+    }
+
+    // --- run lists -----------------------------------------------------------
+
+    #[test]
+    fn decodes_a_single_run() {
+        // 0x21: 1 length byte, 2 offset bytes. Length 0x34, LCN 0x1234.
+        let runs = parse_run_list(&[0x21, 0x34, 0x34, 0x12, 0x00]).expect("should parse");
+        assert_eq!(
+            runs,
+            vec![Run {
+                lcn: Some(0x1234),
+                length: 0x34
+            }]
+        );
+    }
+
+    #[test]
+    fn a_fragmented_mft_decodes_to_several_runs() {
+        // Two runs; the second offset is a delta from the first, not absolute.
+        // 0x11 len=0x30 off=0x60  -> lcn 0x60
+        // 0x11 len=0x20 off=0x10  -> lcn 0x70
+        let runs = parse_run_list(&[0x11, 0x30, 0x60, 0x11, 0x20, 0x10, 0x00]).expect("parse");
+        assert_eq!(
+            runs,
+            vec![
+                Run {
+                    lcn: Some(0x60),
+                    length: 0x30
+                },
+                Run {
+                    lcn: Some(0x70),
+                    length: 0x20
+                },
+            ],
+            "the second LCN is the first plus the delta"
+        );
+    }
+
+    #[test]
+    fn a_negative_delta_moves_backwards_on_the_volume() {
+        // 0x11 len=0x10 off=0x40        -> lcn 0x40
+        // 0x11 len=0x10 off=0xF0 (= -16) -> lcn 0x30
+        let runs = parse_run_list(&[0x11, 0x10, 0x40, 0x11, 0x10, 0xF0, 0x00]).expect("parse");
+        assert_eq!(
+            runs[1].lcn,
+            Some(0x30),
+            "the offset is signed; treating it as unsigned would land far away"
+        );
+    }
+
+    #[test]
+    fn a_sparse_run_has_no_starting_cluster() {
+        // 0x01: 1 length byte, no offset field -> sparse.
+        let runs = parse_run_list(&[0x11, 0x10, 0x40, 0x01, 0x20, 0x00]).expect("parse");
+        assert_eq!(runs[1].lcn, None, "a hole occupies nothing");
+        assert_eq!(runs[1].length, 0x20);
+    }
+
+    #[test]
+    fn sparse_runs_do_not_count_towards_allocated_space() {
+        let runs = parse_run_list(&[0x11, 0x10, 0x40, 0x01, 0xF0, 0x00]).expect("parse");
+        assert_eq!(
+            allocated_clusters(&runs),
+            0x10,
+            "a 0xF0-cluster hole must not be charged to the file"
+        );
+    }
+
+    #[test]
+    fn an_empty_run_list_is_an_empty_list_not_an_error() {
+        assert_eq!(parse_run_list(&[0x00]), Some(vec![]));
+    }
+
+    #[test]
+    fn a_truncated_run_list_is_rejected_rather_than_partially_returned() {
+        // Header claims 2 length bytes and 2 offset bytes, but the data stops.
+        assert_eq!(
+            parse_run_list(&[0x22, 0x34]),
+            None,
+            "a partial list would under-report the size while looking complete"
+        );
+    }
+
+    #[test]
+    fn a_zero_length_field_is_rejected() {
+        // Low nibble 0 cannot describe a run length.
+        assert_eq!(parse_run_list(&[0x10, 0x40, 0x00]), None);
+    }
+
+    #[test]
+    fn a_run_list_without_a_terminator_still_returns_what_it_read() {
+        // The attribute bounds the list, so running out of bytes is not an error.
+        let runs = parse_run_list(&[0x11, 0x30, 0x60]).expect("parse");
+        assert_eq!(runs.len(), 1);
+    }
+
+    #[test]
+    fn a_delta_that_would_make_the_lcn_negative_is_rejected() {
+        // 0x11 len=0x10 off=0x80 (= -128) from a starting LCN of 0.
+        assert_eq!(parse_run_list(&[0x11, 0x10, 0x80, 0x00]), None);
+    }
+
+    #[test]
+    fn maps_a_virtual_cluster_to_its_place_on_the_volume() {
+        let runs = parse_run_list(&[0x11, 0x10, 0x40, 0x11, 0x10, 0x40, 0x00]).expect("parse");
+        // First run covers VCN 0..0x10 at LCN 0x40; second covers 0x10..0x20 at 0x80.
+        assert_eq!(vcn_to_offset(&runs, 0, 4096), Some(0x40 * 4096));
+        assert_eq!(vcn_to_offset(&runs, 5, 4096), Some(0x45 * 4096));
+        assert_eq!(
+            vcn_to_offset(&runs, 0x10, 4096),
+            Some(0x80 * 4096),
+            "the second extent must be found through the run list, not assumed \
+             to follow the first"
+        );
+    }
+
+    #[test]
+    fn a_virtual_cluster_past_the_end_has_no_offset() {
+        let runs = parse_run_list(&[0x11, 0x10, 0x40, 0x00]).expect("parse");
+        assert_eq!(vcn_to_offset(&runs, 0x99, 4096), None);
+    }
+
+    #[test]
+    fn a_virtual_cluster_inside_a_hole_has_no_offset() {
+        let runs = parse_run_list(&[0x01, 0x10, 0x11, 0x10, 0x40, 0x00]).expect("parse");
+        assert_eq!(
+            vcn_to_offset(&runs, 5, 4096),
+            None,
+            "a hole has no bytes to read"
         );
     }
 
