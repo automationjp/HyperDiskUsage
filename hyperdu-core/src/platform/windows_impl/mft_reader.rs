@@ -304,6 +304,13 @@ pub(crate) fn to_stat_map(
     let mut map: crate::StatMap = crate::StatMap::default();
     let mut counted_links: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
+    // The volume root, which no record supplies: `entries` starts at the first
+    // user record and the root is record 5, below it. The walking backends
+    // insert each directory before reading it, so their root is always present;
+    // without this the rolled-up totals have nowhere to accumulate and the
+    // whole-volume figure reads as zero.
+    map.entry(join_path(root_prefix, "")).or_default();
+
     // Directories come first so an empty one still appears in the map. The
     // enumeration backend lists it, and a directory that exists in one map but
     // not the other shows up as a spurious difference.
@@ -990,7 +997,32 @@ mod tests {
         // Same choice `paths_for` makes for orphans, for the same reason.
         let entries = vec![entry(17, 999, "orphan.txt", false, 1000, 4096)];
         let map = to_stat_map(&entries, &paths(&[]), r"C:\", false, true);
-        assert!(map.is_empty());
+        let root = map.get(std::path::Path::new(r"C:\")).expect("root");
+        assert_eq!(root.files, 0, "the orphan is dropped");
+        assert_eq!(map.len(), 1, "only the root remains");
+    }
+
+    // No record supplies the volume root: `entries` starts at the first user
+    // record and the root is record 5. Without an explicit entry the rolled-up
+    // totals have nowhere to accumulate and the whole-volume figure reads as
+    // zero -- which is exactly what a real volume did. See #37.
+    #[test]
+    fn the_volume_root_is_always_in_the_map() {
+        let empty = to_stat_map(&[], &paths(&[]), r"C:\", false, true);
+        assert!(
+            empty.contains_key(std::path::Path::new(r"C:\")),
+            "even an empty volume must have a root entry to roll up into"
+        );
+
+        // And with real entries whose paths never mention the root.
+        let entries = vec![
+            entry(16, ROOT_RECORD, "Windows", true, 0, 0),
+            entry(17, 16, "notepad.exe", false, 1000, 4096),
+        ];
+        let p = paths(&[(16, "Windows"), (17, r"Windows\notepad.exe")]);
+        let map = to_stat_map(&entries, &p, r"C:\", false, true);
+        assert!(map.contains_key(std::path::Path::new(r"C:\")));
+        assert!(map.contains_key(std::path::Path::new(r"C:\Windows")));
     }
 
     #[test]
