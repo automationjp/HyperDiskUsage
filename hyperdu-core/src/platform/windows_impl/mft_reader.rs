@@ -211,6 +211,74 @@ impl<S: VolumeSource> MftReader<S> {
     }
 }
 
+// --- turning records into a StatMap ------------------------------------------
+
+/// Fold MFT entries into the per-directory map the rest of the scan expects.
+///
+/// `root_prefix` is prepended to every path (`C:\` for a whole-volume scan), so
+/// the result is addressed the same way the enumeration backend addresses it.
+/// Without that the two backends' maps cannot be compared, and comparing them
+/// is how this backend gets shown to be correct.
+///
+/// Hardlink handling matches GNU `du`: a file with several links is charged
+/// once, to whichever link is met first. `count_hardlinks` turns that off, as
+/// it does elsewhere.
+pub(crate) fn to_stat_map(
+    entries: &[Entry],
+    paths: &HashMap<u64, String>,
+    root_prefix: &str,
+    count_hardlinks: bool,
+    compute_physical: bool,
+) -> crate::StatMap {
+    let mut map: crate::StatMap = crate::StatMap::default();
+    let mut counted_links: std::collections::HashSet<u64> = std::collections::HashSet::new();
+
+    // Directories come first so an empty one still appears in the map. The
+    // enumeration backend lists it, and a directory that exists in one map but
+    // not the other shows up as a spurious difference.
+    for e in entries.iter().filter(|e| e.is_directory) {
+        if let Some(p) = paths.get(&e.record) {
+            map.entry(join_path(root_prefix, p)).or_default();
+        }
+    }
+
+    for e in entries.iter().filter(|e| !e.is_directory) {
+        // A file's bytes belong to the directory holding it, not to itself.
+        let Some(parent_path) = paths.get(&e.parent) else {
+            // Parent outside the scanned set: dropping the file is the same
+            // choice `paths_for` makes for orphans, and for the same reason.
+            continue;
+        };
+        if !count_hardlinks && e.hard_link_count > 1 && !counted_links.insert(e.record) {
+            continue;
+        }
+
+        let stat = map.entry(join_path(root_prefix, parent_path)).or_default();
+        stat.files += 1;
+        stat.logical += e.sizes.real_size;
+        stat.physical += if compute_physical {
+            e.sizes.allocated_size
+        } else {
+            e.sizes.real_size
+        };
+    }
+
+    map
+}
+
+fn join_path(prefix: &str, rest: &str) -> std::path::PathBuf {
+    if rest.is_empty() {
+        return std::path::PathBuf::from(prefix);
+    }
+    let mut s = String::with_capacity(prefix.len() + 1 + rest.len());
+    s.push_str(prefix);
+    if !prefix.ends_with('\\') && !prefix.ends_with('/') {
+        s.push('\\');
+    }
+    s.push_str(rest);
+    std::path::PathBuf::from(s)
+}
+
 // --- the real volume ---------------------------------------------------------
 
 /// A volume opened for reading, as `\\.\C:`.
@@ -716,6 +784,124 @@ mod tests {
             reader.entry(16).expect("entry").hard_link_count,
             3,
             "dedupe needs this, and it is free here"
+        );
+    }
+
+    // --- StatMap conversion --------------------------------------------------
+
+    fn entry(record: u64, parent: u64, name: &str, is_dir: bool, real: u64, alloc: u64) -> Entry {
+        Entry {
+            record,
+            parent,
+            name: name.to_string(),
+            is_directory: is_dir,
+            sizes: DataSizes {
+                real_size: real,
+                allocated_size: alloc,
+            },
+            hard_link_count: 1,
+        }
+    }
+
+    fn paths(pairs: &[(u64, &str)]) -> HashMap<u64, String> {
+        pairs.iter().map(|(r, p)| (*r, p.to_string())).collect()
+    }
+
+    #[test]
+    fn a_files_bytes_land_in_its_parent_directory() {
+        let entries = vec![
+            entry(16, ROOT_RECORD, "Users", true, 0, 0),
+            entry(17, 16, "a.txt", false, 1000, 4096),
+        ];
+        let p = paths(&[(16, "Users")]);
+        let map = to_stat_map(&entries, &p, r"C:\", false, true);
+        let users = map
+            .get(std::path::Path::new(r"C:\Users"))
+            .expect("Users is in the map");
+        assert_eq!(users.files, 1);
+        assert_eq!(users.logical, 1000);
+        assert_eq!(users.physical, 4096, "allocated, not apparent");
+    }
+
+    #[test]
+    fn an_empty_directory_still_appears() {
+        let entries = vec![entry(16, ROOT_RECORD, "Empty", true, 0, 0)];
+        let p = paths(&[(16, "Empty")]);
+        let map = to_stat_map(&entries, &p, r"C:\", false, true);
+        assert!(
+            map.contains_key(std::path::Path::new(r"C:\Empty")),
+            "the enumeration backend lists it, so this one must too"
+        );
+    }
+
+    #[test]
+    fn logical_only_charges_the_apparent_size() {
+        let entries = vec![
+            entry(16, ROOT_RECORD, "d", true, 0, 0),
+            entry(17, 16, "sparse.img", false, 1_000_000, 4096),
+        ];
+        let p = paths(&[(16, "d")]);
+        let map = to_stat_map(&entries, &p, r"C:\", false, false);
+        let d = map.get(std::path::Path::new(r"C:\d")).expect("d");
+        assert_eq!(
+            d.physical, 1_000_000,
+            "compute_physical=false means logical"
+        );
+    }
+
+    #[test]
+    fn a_hardlinked_file_is_charged_once() {
+        let mut a = entry(17, 16, "link-a.txt", false, 1000, 4096);
+        a.hard_link_count = 2;
+        let entries = vec![entry(16, ROOT_RECORD, "d", true, 0, 0), a.clone(), a];
+        let p = paths(&[(16, "d")]);
+        let map = to_stat_map(&entries, &p, r"C:\", false, true);
+        assert_eq!(
+            map.get(std::path::Path::new(r"C:\d")).expect("d").files,
+            1,
+            "GNU du charges a hardlinked file to the first link only"
+        );
+    }
+
+    #[test]
+    fn count_hardlinks_charges_every_link() {
+        let mut a = entry(17, 16, "link-a.txt", false, 1000, 4096);
+        a.hard_link_count = 2;
+        let entries = vec![entry(16, ROOT_RECORD, "d", true, 0, 0), a.clone(), a];
+        let p = paths(&[(16, "d")]);
+        let map = to_stat_map(&entries, &p, r"C:\", true, true);
+        assert_eq!(map.get(std::path::Path::new(r"C:\d")).expect("d").files, 2);
+    }
+
+    #[test]
+    fn a_file_whose_parent_is_unknown_is_dropped() {
+        // Same choice `paths_for` makes for orphans, for the same reason.
+        let entries = vec![entry(17, 999, "orphan.txt", false, 1000, 4096)];
+        let map = to_stat_map(&entries, &paths(&[]), r"C:\", false, true);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn a_file_directly_under_the_root_lands_at_the_root() {
+        let entries = vec![entry(16, ROOT_RECORD, "top.txt", false, 500, 4096)];
+        // The root's own path is the empty string.
+        let p = paths(&[(ROOT_RECORD, "")]);
+        let map = to_stat_map(&entries, &p, r"C:\", false, true);
+        assert_eq!(
+            map.get(std::path::Path::new(r"C:\")).expect("root").files,
+            1
+        );
+    }
+
+    #[test]
+    fn the_prefix_is_not_doubled_when_it_already_ends_in_a_separator() {
+        assert_eq!(
+            join_path(r"C:\", "Users"),
+            std::path::PathBuf::from(r"C:\Users")
+        );
+        assert_eq!(
+            join_path(r"C:", "Users"),
+            std::path::PathBuf::from(r"C:\Users")
         );
     }
 
