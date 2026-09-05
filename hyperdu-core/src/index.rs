@@ -1,4 +1,4 @@
-//! Directory-level aggregates for the persistent index (#16), stage 2.
+//! Directory-level aggregates for the persistent index (#16).
 //!
 //! The point of an index is to answer "how big is this tree" *without walking
 //! it*. The previous attempt (`incremental.rs`) stored one record per file and
@@ -15,9 +15,12 @@
 //!   * Freshness is carried explicitly, because the worst outcome is a caller
 //!     believing a stale total.
 //!
-//! This stage has no persistence and no inotify: the aggregates and their
-//! propagation are settled first. Whether a resident process is acceptable is a
-//! product decision the design document deliberately leaves open.
+//! The aggregates, their propagation and their storage are settled here. What
+//! is not here is inotify: keeping an index fresh without walking needs a
+//! resident process, and whether that is acceptable is a product decision the
+//! design document deliberately leaves open. Until then the index is loaded,
+//! updated by an explicit scan, and saved -- which is useful on its own and
+//! commits to nothing.
 
 use ahash::AHashMap as HashMap;
 
