@@ -90,8 +90,25 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
     let (ml, mp, mf) = totals(&from_mft);
 
     eprintln!("root:        {}", root.display());
-    eprintln!("enumeration: logical={wl} physical={wp} files={wf}");
-    eprintln!("mft:         logical={ml} physical={mp} files={mf}");
+    eprintln!(
+        "enumeration: logical={wl} physical={wp} files={wf} dirs={}",
+        walked.len()
+    );
+    eprintln!(
+        "mft:         logical={ml} physical={mp} files={mf} dirs={}",
+        from_mft.len()
+    );
+
+    // Which side is wrong is not obvious from the file counts alone. If both
+    // sides see the same directories but wildly different file counts, the
+    // difference is inside directories -- hardlinks, alternate streams. If the
+    // directory counts differ too, one side is walking a different tree.
+    let dir_drift = if walked.is_empty() {
+        0.0
+    } else {
+        ((from_mft.len() as f64 - walked.len() as f64) / walked.len() as f64 * 100.0).abs()
+    };
+    eprintln!("dir drift:   {dir_drift:.2}%");
 
     // A live volume changes under the scan, so an exact match is not the bar.
     // A backend that is structurally wrong -- missing extension records,
