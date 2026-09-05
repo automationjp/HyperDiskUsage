@@ -25,6 +25,9 @@ mod common_ops;
 mod error_handling;
 mod filters; // centralize filter helpers
 pub mod fs_strategy;
+/// Directory-level aggregates for the persistent index (#16). Not yet wired to
+/// a scan or to storage; see `docs/design/persistent-index.md`.
+pub mod index;
 pub mod memory_pool;
 mod options; // for OptionsBuilder
 mod platform;
