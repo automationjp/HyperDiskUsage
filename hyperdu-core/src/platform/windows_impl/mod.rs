@@ -17,6 +17,11 @@ mod entry;
 /// the parser is landed and unit-tested first.
 #[cfg(target_env = "msvc")]
 mod mft;
+/// Reading MFT records off a volume, on top of `mft`. The volume is behind a
+/// trait so the whole path is testable against a synthetic volume without the
+/// administrator rights a real one needs.
+#[cfg(target_env = "msvc")]
+mod mft_reader;
 #[cfg(target_env = "msvc")]
 mod nt;
 mod path;
