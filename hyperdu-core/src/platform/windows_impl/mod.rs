@@ -71,6 +71,10 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
         .source_mut()
         .set_sector_size(geometry.bytes_per_sector);
 
+    // Captured before the reader is dropped: the first diagnostic printed
+    // record_count twice, which hid the very number that mattered.
+    let diag_runs = reader.run_count();
+    let diag_clusters = reader.mft_clusters();
     let entries = reader.entries();
     let record_count = reader.record_count();
     drop(reader);
@@ -92,25 +96,15 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
         let files: u64 = map.values().map(|s| s.files).sum();
         let dirs = entries.iter().filter(|e| e.is_directory).count();
         eprintln!(
-            "mft-diag: mft_clusters={} record_count={} entries={} (dirs={}) paths={} map_dirs={} files={}",
-            reader_clusters(&entries, record_count),
-            record_count,
+            "mft-diag: runs={diag_runs} mft_clusters={diag_clusters} record_count={record_count} \
+             entries={} (dirs={dirs}) paths={} map_dirs={} files={files}",
             entries.len(),
-            dirs,
             paths.len(),
             map.len(),
-            files
         );
     }
 
     Some(map)
-}
-
-/// Placeholder so the diagnostic line reads uniformly; the reader is gone by
-/// the time it prints.
-#[cfg(target_env = "msvc")]
-fn reader_clusters(_entries: &[mft_reader::Entry], record_count: u64) -> u64 {
-    record_count
 }
 
 #[cfg(not(target_env = "msvc"))]

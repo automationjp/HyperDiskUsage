@@ -171,6 +171,13 @@ impl<S: VolumeSource> MftReader<S> {
         allocated_clusters(&self.runs)
     }
 
+    /// How many extents the MFT's run list describes. A truncated list is the
+    /// difference between reading the whole MFT and reading part of it while
+    /// reporting a plausible total.
+    pub(crate) fn run_count(&self) -> usize {
+        self.runs.len()
+    }
+
     /// How many records the MFT can hold. Reading past this is not an error to
     /// report, just the end.
     pub(crate) fn record_count(&self) -> u64 {
