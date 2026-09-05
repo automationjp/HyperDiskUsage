@@ -88,9 +88,3 @@ fi
 # Classification bench (basic / deep)
 bench_one "classify-basic" "$BIN" "$ROOT" --classify basic --class-report /dev/null
 bench_one "classify-deep" "$BIN" "$ROOT" --classify deep --class-report /dev/null
-
-# Incremental bench: first snapshot update, then compute delta
-DB="/tmp/hyperdu_bench_sled.db"
-rm -rf "$DB"
-bench_one "incr-update" "$BIN" "$ROOT" --incremental-db "$DB" --update-snapshot
-bench_one "incr-delta" "$BIN" "$ROOT" --incremental-db "$DB" --compute-delta
