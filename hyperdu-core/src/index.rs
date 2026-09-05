@@ -242,6 +242,159 @@ impl Index {
     }
 }
 
+// --- persistence -------------------------------------------------------------
+
+/// Identifies the file and its layout. A future format bumps the version rather
+/// than reusing this, so an old index is refused instead of misread.
+const MAGIC: &[u8; 8] = b"HDUIDX01";
+const FORMAT_VERSION: u32 = 1;
+
+/// Bytes per entry on disk, excluding the parent key that follows it: seven u64
+/// fields, then the state byte padded out to keep the next field 8-byte
+/// aligned. The parent adds 16 more, so an entry occupies 80 bytes in total.
+const ENTRY_BYTES: usize = 8 * 7 + 8;
+
+impl Freshness {
+    fn to_byte(self) -> u8 {
+        match self {
+            Freshness::Fresh => 0,
+            Freshness::Stale => 1,
+            Freshness::Unknown => 2,
+        }
+    }
+
+    fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            0 => Some(Freshness::Fresh),
+            1 => Some(Freshness::Stale),
+            2 => Some(Freshness::Unknown),
+            _ => None,
+        }
+    }
+}
+
+impl Index {
+    /// Write the index to `path`.
+    ///
+    /// Written to a temporary file and renamed, so a crash midway leaves the
+    /// previous index intact rather than a half-written one. A truncated index
+    /// would be read as "these directories are smaller than they are", which is
+    /// worse than having no index at all.
+    ///
+    /// Where the file belongs is a product decision the design document leaves
+    /// open, so the caller supplies the path.
+    pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
+        use std::io::Write;
+
+        let mut buf = Vec::with_capacity(20 + self.entries.len() * ENTRY_BYTES);
+        buf.extend_from_slice(MAGIC);
+        buf.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+        buf.extend_from_slice(&(self.entries.len() as u64).to_le_bytes());
+
+        for ((dev, ino), e) in &self.entries {
+            buf.extend_from_slice(&dev.to_le_bytes());
+            buf.extend_from_slice(&ino.to_le_bytes());
+            buf.extend_from_slice(&e.own_bytes.to_le_bytes());
+            buf.extend_from_slice(&e.own_files.to_le_bytes());
+            buf.extend_from_slice(&e.subtree_bytes.to_le_bytes());
+            buf.extend_from_slice(&e.subtree_files.to_le_bytes());
+            buf.extend_from_slice(&e.generation.to_le_bytes());
+            // Parent is stored alongside so the tree shape survives a reload;
+            // without it the aggregates cannot be updated after loading.
+            let (pdev, pino) = self.parents.get(&(*dev, *ino)).copied().unwrap_or((0, 0));
+            buf.push(e.state.to_byte());
+            buf.extend_from_slice(&[0u8; 7]); // padding
+            buf.extend_from_slice(&pdev.to_le_bytes());
+            buf.extend_from_slice(&pino.to_le_bytes());
+        }
+
+        let tmp = path.with_extension("tmp");
+        {
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(&buf)?;
+            // Without this the rename can land before the bytes do, leaving a
+            // named file with nothing in it.
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp, path)
+    }
+
+    /// Read an index written by [`Index::save`].
+    ///
+    /// Refuses anything it does not recognise -- wrong magic, wrong version,
+    /// truncated, or an entry count that does not match the bytes present --
+    /// rather than returning what it managed to read. A partial index reports
+    /// directories as smaller than they are while looking complete.
+    pub fn load(path: &std::path::Path) -> std::io::Result<Self> {
+        use std::io::{Error, ErrorKind};
+
+        let bytes = std::fs::read(path)?;
+        let bad = |msg: &str| Error::new(ErrorKind::InvalidData, msg.to_string());
+
+        if bytes.len() < 20 || &bytes[0..8] != MAGIC {
+            return Err(bad("not a hyperdu index"));
+        }
+        let version = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
+        if version != FORMAT_VERSION {
+            return Err(bad(&format!(
+                "index format version {version}, expected {FORMAT_VERSION}"
+            )));
+        }
+        let count = u64::from_le_bytes(bytes[12..20].try_into().unwrap()) as usize;
+
+        let want = 20usize
+            .checked_add(
+                count
+                    .checked_mul(ENTRY_BYTES + 16)
+                    .ok_or_else(|| bad("entry count overflows"))?,
+            )
+            .ok_or_else(|| bad("entry count overflows"))?;
+        if bytes.len() != want {
+            return Err(bad(&format!(
+                "index is {} bytes, expected {want} for {count} entries",
+                bytes.len()
+            )));
+        }
+
+        let mut ix = Index::new();
+        let mut max_generation = 0u64;
+        let mut pos = 20usize;
+        for _ in 0..count {
+            let u = |off: usize| -> u64 {
+                u64::from_le_bytes(bytes[pos + off..pos + off + 8].try_into().unwrap())
+            };
+            // Layout, in the order `save` writes it: dev, ino, own_bytes,
+            // own_files, subtree_bytes, subtree_files, generation (7 u64s),
+            // then the state byte with padding, then the parent's dev and ino.
+            let key = (u(0), u(8));
+            let state = Freshness::from_byte(bytes[pos + 56])
+                .ok_or_else(|| bad("unknown freshness value"))?;
+            let entry = DirEntry {
+                own_bytes: u(16),
+                own_files: u(24),
+                subtree_bytes: u(32),
+                subtree_files: u(40),
+                generation: u(48),
+                state,
+            };
+            max_generation = max_generation.max(entry.generation);
+            ix.entries.insert(key, entry);
+
+            let parent = (u(64), u(72));
+            // (0, 0) is the sentinel for "no parent recorded"; a real inode
+            // pair never has both halves zero.
+            if parent != (0, 0) {
+                ix.parents.insert(key, parent);
+            }
+            pos += ENTRY_BYTES + 16;
+        }
+        // Continue numbering above anything already stored, so an update after
+        // a reload cannot reuse a generation.
+        ix.generation = max_generation;
+        Ok(ix)
+    }
+}
+
 /// Apply a signed delta to an unsigned total, clamping at zero.
 ///
 /// A negative result means the index and the filesystem disagree -- a file
@@ -460,6 +613,152 @@ mod tests {
             ix.get((1, 1)).unwrap().subtree_bytes,
             777,
             "propagation must cover realistic nesting"
+        );
+    }
+
+    // --- persistence ---------------------------------------------------------
+
+    fn temp_index_path() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("index.bin");
+        (dir, path)
+    }
+
+    #[test]
+    fn an_index_survives_a_round_trip() {
+        let mut ix = tree();
+        ix.set_own(B, 1000, 2);
+        ix.set_own(C, 500, 1);
+        ix.mark_stale(C);
+
+        let (_dir, path) = temp_index_path();
+        ix.save(&path).expect("save");
+        let back = Index::load(&path).expect("load");
+
+        assert_eq!(back.len(), ix.len());
+        assert_eq!(
+            back.get(ROOT).unwrap().subtree_bytes,
+            1500,
+            "the total must survive, or the index is pointless"
+        );
+        assert_eq!(back.get(B).unwrap().state, Freshness::Fresh);
+        assert_eq!(back.get(C).unwrap().state, Freshness::Stale);
+    }
+
+    #[test]
+    fn the_tree_shape_survives_so_updates_still_propagate() {
+        let mut ix = tree();
+        ix.set_own(B, 1000, 2);
+
+        let (_dir, path) = temp_index_path();
+        ix.save(&path).expect("save");
+        let mut back = Index::load(&path).expect("load");
+
+        assert_eq!(back.parent_of(B), Some(A));
+        // An update after reloading must still reach the root; without the
+        // parent links the index would be a snapshot that cannot be maintained.
+        back.set_own(B, 1500, 3);
+        assert_eq!(back.get(ROOT).unwrap().subtree_bytes, 1500);
+    }
+
+    #[test]
+    fn an_empty_index_round_trips() {
+        let (_dir, path) = temp_index_path();
+        Index::new().save(&path).expect("save");
+        assert!(Index::load(&path).expect("load").is_empty());
+    }
+
+    #[test]
+    fn a_file_that_is_not_an_index_is_refused() {
+        let (_dir, path) = temp_index_path();
+        std::fs::write(&path, b"this is not an index at all").expect("write");
+        assert!(Index::load(&path).is_err());
+    }
+
+    #[test]
+    fn a_future_format_version_is_refused_rather_than_misread() {
+        let mut ix = Index::new();
+        ix.link(A, ROOT);
+        let (_dir, path) = temp_index_path();
+        ix.save(&path).expect("save");
+
+        let mut bytes = std::fs::read(&path).expect("read");
+        bytes[8..12].copy_from_slice(&99u32.to_le_bytes());
+        std::fs::write(&path, &bytes).expect("write");
+
+        let err = Index::load(&path).expect_err("must refuse");
+        assert!(err.to_string().contains("version"));
+    }
+
+    #[test]
+    fn a_truncated_index_is_refused_rather_than_partially_loaded() {
+        let mut ix = tree();
+        ix.set_own(B, 1000, 2);
+        let (_dir, path) = temp_index_path();
+        ix.save(&path).expect("save");
+
+        let mut bytes = std::fs::read(&path).expect("read");
+        bytes.truncate(bytes.len() - 20);
+        std::fs::write(&path, &bytes).expect("write");
+
+        assert!(
+            Index::load(&path).is_err(),
+            "a partial index reports directories as smaller than they are, \
+             while looking complete"
+        );
+    }
+
+    #[test]
+    fn an_unknown_freshness_value_is_refused() {
+        let mut ix = Index::new();
+        ix.link(A, ROOT);
+        ix.set_own(A, 10, 1);
+        let (_dir, path) = temp_index_path();
+        ix.save(&path).expect("save");
+
+        let mut bytes = std::fs::read(&path).expect("read");
+        // The state byte of the first entry.
+        bytes[20 + 56] = 200;
+        std::fs::write(&path, &bytes).expect("write");
+
+        assert!(Index::load(&path).is_err());
+    }
+
+    #[test]
+    fn saving_over_an_existing_index_replaces_it() {
+        let (_dir, path) = temp_index_path();
+        let mut first = tree();
+        first.set_own(B, 1000, 2);
+        first.save(&path).expect("save");
+
+        let mut second = tree();
+        second.set_own(B, 42, 1);
+        second.save(&path).expect("save again");
+
+        assert_eq!(
+            Index::load(&path)
+                .expect("load")
+                .get(ROOT)
+                .unwrap()
+                .subtree_bytes,
+            42
+        );
+    }
+
+    #[test]
+    fn generations_continue_after_a_reload() {
+        let mut ix = tree();
+        ix.set_own(B, 1000, 2);
+        let before = ix.get(B).unwrap().generation;
+
+        let (_dir, path) = temp_index_path();
+        ix.save(&path).expect("save");
+        let mut back = Index::load(&path).expect("load");
+
+        back.set_own(C, 1, 1);
+        assert!(
+            back.get(C).unwrap().generation > before,
+            "reusing a generation would make a later update look already applied"
         );
     }
 
