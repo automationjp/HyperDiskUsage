@@ -211,6 +211,174 @@ impl<S: VolumeSource> MftReader<S> {
     }
 }
 
+// --- the real volume ---------------------------------------------------------
+
+/// A volume opened for reading, as `\\.\C:`.
+///
+/// Opening one needs administrator rights, so [`WindowsVolume::open`] returns
+/// `None` for an unelevated process and the caller falls back to directory
+/// enumeration. That failure is expected, not exceptional: most runs will not
+/// be elevated.
+#[cfg(windows)]
+pub(crate) struct WindowsVolume {
+    handle: windows::Win32::Foundation::HANDLE,
+    /// Reads on a volume handle must be aligned to the sector size and a whole
+    /// number of sectors long. MFT records are not, so reads are widened to
+    /// the enclosing sectors and the wanted bytes copied out.
+    sector: u64,
+}
+
+#[cfg(windows)]
+impl WindowsVolume {
+    /// Open `drive` (a single letter, as in `C`) for reading.
+    ///
+    /// Returns `None` when the process is not elevated, the drive does not
+    /// exist, or the handle cannot be opened for any other reason. All three
+    /// mean the same thing to the caller: use the enumeration backend.
+    pub(crate) fn open(drive: char) -> Option<Self> {
+        use windows::{
+            core::PCWSTR,
+            Win32::{
+                Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE},
+                Storage::FileSystem::{
+                    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE,
+                    OPEN_EXISTING,
+                },
+            },
+        };
+
+        if !drive.is_ascii_alphabetic() {
+            return None;
+        }
+        // \\.\C: -- the volume itself, not a file on it.
+        let path: Vec<u16> = format!(r"\\.\{}:", drive.to_ascii_uppercase())
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let handle = unsafe {
+            CreateFileW(
+                PCWSTR(path.as_ptr()),
+                GENERIC_READ.0,
+                // The volume is mounted and in use; without sharing, the open
+                // fails on every system volume.
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                None,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                None,
+            )
+        }
+        .ok()?;
+
+        if handle == INVALID_HANDLE_VALUE {
+            return None;
+        }
+
+        // 512 covers every NTFS volume in practice; a 4K-native disk reports
+        // 4096 and the boot sector will say so. Reads are widened to whichever
+        // is larger, so starting conservative is safe.
+        Some(Self {
+            handle,
+            sector: 4096,
+        })
+    }
+
+    /// Narrow the alignment once the boot sector has been parsed, so reads stop
+    /// fetching more than they need.
+    pub(crate) fn set_sector_size(&mut self, bytes: u32) {
+        if bytes >= 512 && bytes.is_power_of_two() {
+            self.sector = bytes as u64;
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsVolume {
+    fn drop(&mut self) {
+        use windows::Win32::Foundation::CloseHandle;
+        unsafe {
+            let _ = CloseHandle(self.handle);
+        }
+    }
+}
+
+#[cfg(windows)]
+impl VolumeSource for WindowsVolume {
+    fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> bool {
+        use windows::Win32::{
+            Storage::FileSystem::{ReadFile, SetFilePointerEx, FILE_BEGIN},
+            System::IO::OVERLAPPED,
+        };
+
+        // Widen to sector boundaries: a volume handle rejects anything else.
+        let start = offset - (offset % self.sector);
+        let end = (offset + buf.len() as u64).next_multiple_of(self.sector);
+        let span = (end - start) as usize;
+
+        let mut scratch = vec![0u8; span];
+        unsafe {
+            if SetFilePointerEx(self.handle, start as i64, None, FILE_BEGIN).is_err() {
+                return false;
+            }
+            let mut read = 0u32;
+            if ReadFile(
+                self.handle,
+                Some(scratch.as_mut_slice()),
+                Some(&mut read),
+                None::<*mut OVERLAPPED>,
+            )
+            .is_err()
+            {
+                return false;
+            }
+            if (read as usize) < span {
+                return false;
+            }
+        }
+
+        let within = (offset - start) as usize;
+        let Some(slice) = scratch.get(within..within + buf.len()) else {
+            return false;
+        };
+        buf.copy_from_slice(slice);
+        true
+    }
+}
+
+/// Whether this process can open a volume handle at all.
+///
+/// Checked before attempting, so the caller can say "needs administrator
+/// rights" rather than reporting an access-denied error from deep inside the
+/// scan.
+#[cfg(windows)]
+pub(crate) fn is_elevated() -> bool {
+    use windows::Win32::{
+        Foundation::{CloseHandle, HANDLE},
+        Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY},
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+
+    unsafe {
+        let mut token = HANDLE::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+            return false;
+        }
+        let mut elevation = TOKEN_ELEVATION::default();
+        let mut size = 0u32;
+        let ok = GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(&mut elevation as *mut _ as *mut _),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut size,
+        )
+        .is_ok();
+        let _ = CloseHandle(token);
+        ok && elevation.TokenIsElevated != 0
+    }
+}
+
 /// Byte offset of a non-resident attribute's run list within the record.
 ///
 /// The offset lives at 0x20 of the attribute header and is relative to the
@@ -549,6 +717,33 @@ mod tests {
             3,
             "dedupe needs this, and it is free here"
         );
+    }
+
+    // --- the real volume -----------------------------------------------------
+    //
+    // These do not assert on the volume's contents -- that needs elevation, and
+    // a test that only runs when elevated is a test that mostly does not run.
+    // What they do pin down is the branch every unelevated run takes.
+
+    #[cfg(windows)]
+    #[test]
+    fn opening_a_volume_agrees_with_the_elevation_check() {
+        // The two must not disagree: reporting "needs administrator rights"
+        // while the open would have worked, or vice versa, sends the caller
+        // down the wrong path.
+        let elevated = is_elevated();
+        let opened = WindowsVolume::open('C').is_some();
+        assert!(
+            !opened || elevated,
+            "a volume opened without elevation means the check is wrong"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_invalid_drive_letter_is_refused_without_touching_the_disk() {
+        assert!(WindowsVolume::open('1').is_none());
+        assert!(WindowsVolume::open('/').is_none());
     }
 
     #[test]
