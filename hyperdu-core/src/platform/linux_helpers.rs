@@ -530,7 +530,10 @@ mod tests {
     fn a_directory_no_larger_than_the_primer_is_exact() {
         let mut s = sampler(64);
         for _ in 0..SAMPLER_PRIMER {
-            assert!(s.wants_stat(), "every file up to the primer must be stat'ed");
+            assert!(
+                s.wants_stat(),
+                "every file up to the primer must be stat'ed"
+            );
         }
     }
 
@@ -551,7 +554,11 @@ mod tests {
         let mut s = sampler(4);
         s.observe(1000);
         s.observe(3000);
-        assert_eq!(s.estimate(), 2000, "mean of the samples, not a global guess");
+        assert_eq!(
+            s.estimate(),
+            2000,
+            "mean of the samples, not a global guess"
+        );
     }
 
     #[test]

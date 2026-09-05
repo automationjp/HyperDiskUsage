@@ -143,7 +143,7 @@ pub struct Options {
     /// Only consulted when `approximate_sizes` is set.
     pub size_sample_rate: u32,
     pub active_threads: Arc<AtomicUsize>, // runtime-tunable active worker threads (<= threads)
-    pub cancel: Arc<AtomicBool>, // cooperative cancellation
+    pub cancel: Arc<AtomicBool>,          // cooperative cancellation
     pub exclude_ac: Option<AhoCorasick>,
     pub exclude_regex: Vec<String>,
     pub exclude_glob: Vec<String>,
