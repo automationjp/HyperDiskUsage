@@ -32,6 +32,14 @@ pub(crate) trait VolumeSource {
     fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> bool;
 }
 
+/// Lets a caller keep ownership of the volume while the reader borrows it, so
+/// the sector size can be narrowed after the geometry is known.
+impl<S: VolumeSource + ?Sized> VolumeSource for &mut S {
+    fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> bool {
+        (**self).read_at(offset, buf)
+    }
+}
+
 /// A record's identity and sizes, as the scan needs them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Entry {
