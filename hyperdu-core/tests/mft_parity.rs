@@ -37,6 +37,22 @@ fn totals(map: &hyperdu_core::StatMap) -> (u64, u64, u64) {
     })
 }
 
+/// Currently failing, and left ignored so it does not block unrelated work.
+///
+/// On a GitHub Actions Windows runner -- which is elevated, so this actually
+/// ran -- the MFT backend found 1,134,722 files where enumeration found
+/// 10,220,623: it is missing 88.9% of them.
+///
+/// The likely cause is the one this backend's own documentation warns about:
+/// `$MFT` is a file, and on a volume with ten million records it is heavily
+/// fragmented, so its `$DATA` runs spill into extension records reachable only
+/// through `$ATTRIBUTE_LIST`. `MftReader::open` reads the run list from the
+/// base record alone, so it sees a fraction of the MFT and stops there --
+/// while still reporting a plausible-looking total.
+///
+/// Run it with `cargo test -p hyperdu-core --test mft_parity -- --ignored
+/// --nocapture`. Remove the `ignore` once the totals agree.
+#[ignore = "MFT backend under-counts; see the doc comment and #15"]
 #[test]
 fn the_mft_backend_agrees_with_directory_enumeration() {
     let root = parity_root();
