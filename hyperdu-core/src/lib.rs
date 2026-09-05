@@ -546,6 +546,18 @@ pub fn scan_roots(roots: &[PathBuf], opt: &Options) -> Vec<(PathBuf, Result<Stat
         .collect()
 }
 
+/// Whether [`scan_directory`] would read the `$MFT` for this root, rather than
+/// enumerating directories.
+///
+/// The scan itself falls back silently, which is the right behaviour but makes
+/// the choice invisible. A caller comparing the two backends needs to know
+/// which one ran -- otherwise "the totals match" can mean "both enumerated".
+///
+/// Checks the preconditions only; it does not open the volume.
+pub fn mft_backend_applies(root: impl AsRef<Path>, opt: &Options) -> bool {
+    platform::mft_backend_applies(root.as_ref(), opt)
+}
+
 pub fn scan_directory(root: impl AsRef<Path>, opt: &Options) -> Result<StatMap> {
     let root = root.as_ref();
     // Reading the MFT answers the whole volume at once, so it replaces the walk

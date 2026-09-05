@@ -60,18 +60,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
 /// volume root, not NTFS, or the parse did not hold together.
 #[cfg(target_env = "msvc")]
 pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Option<crate::StatMap> {
-    if !opt.use_mft {
-        return None;
-    }
-    // The MFT covers a whole volume. Scanning a subdirectory this way would
-    // mean reading every record and discarding most of them, which is slower
-    // than walking the subdirectory -- and the point of this backend is that it
-    // does not walk.
-    let drive = volume_root_letter(root)?;
-    if !mft_reader::is_elevated() {
-        return None;
-    }
-
+    let drive = mft_drive(root, opt)?;
     let mut volume = mft_reader::WindowsVolume::open(drive)?;
     // Narrow the read alignment now that the geometry is known, so records stop
     // pulling in more sectors than they need.
@@ -98,6 +87,44 @@ pub fn scan_volume_via_mft(
     _opt: &crate::Options,
 ) -> Option<crate::StatMap> {
     None
+}
+
+/// Whether the MFT backend would be used for this root. See
+/// [`crate::mft_backend_applies`].
+///
+/// Shares its preconditions with `scan_volume_via_mft` through `mft_drive`, so
+/// the two cannot disagree -- a caller told "the MFT path will be used" and
+/// then silently given enumeration would draw the wrong conclusion from a
+/// comparison of the two.
+#[cfg(target_env = "msvc")]
+pub fn mft_backend_applies(root: &std::path::Path, opt: &crate::Options) -> bool {
+    mft_drive(root, opt).is_some()
+}
+
+#[cfg(not(target_env = "msvc"))]
+pub fn mft_backend_applies(_root: &std::path::Path, _opt: &crate::Options) -> bool {
+    false
+}
+
+/// Drive letter to read the MFT of, or `None` when the backend does not apply.
+///
+/// The single place the preconditions live: asked for, a volume root, and
+/// elevated. Opening the volume can still fail afterwards (not NTFS, or the
+/// parse does not hold), which the caller also treats as "use enumeration".
+#[cfg(target_env = "msvc")]
+fn mft_drive(root: &std::path::Path, opt: &crate::Options) -> Option<char> {
+    if !opt.use_mft {
+        return None;
+    }
+    // The MFT covers a whole volume. Scanning a subdirectory this way would
+    // mean reading every record and discarding most of them, which is slower
+    // than walking the subdirectory -- and the point of this backend is that it
+    // does not walk.
+    let drive = volume_root_letter(root)?;
+    if !mft_reader::is_elevated() {
+        return None;
+    }
+    Some(drive)
 }
 
 /// Drive letter when `root` is the root of a volume (`C:\`), else `None`.
