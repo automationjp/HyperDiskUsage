@@ -101,18 +101,6 @@ Write classification JSON report to PATH.
 .BR --class-report-csv=PATH
 Write classification CSV report to PATH.
 .TP
-.BR --incremental-db=PATH
-Use sled DB at PATH for incremental snapshot/delta.
-.TP
-.BR --compute-delta
-Compute delta (added/modified/removed) against snapshot DB.
-.TP
-.BR --update-snapshot
-Update snapshot DB from current state and prune removed keys.
-.TP
-.BR --watch
-Watch filesystem changes and print events (create/modify/remove).
-.TP
 .BR --verbose\fR, \fB-v
 Verbose mode: detailed logs and auto-save reports to default filenames
 in current directory (hyperdu-report.json, hyperdu-report.csv,

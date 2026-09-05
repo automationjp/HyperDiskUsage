@@ -25,7 +25,6 @@ mod common_ops;
 mod error_handling;
 mod filters; // centralize filter helpers
 pub mod fs_strategy;
-pub mod incremental;
 pub mod memory_pool;
 mod options; // for OptionsBuilder
 mod platform;

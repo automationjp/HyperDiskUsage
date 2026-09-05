@@ -341,38 +341,6 @@ struct Args {
     )]
     class_report_csv: Option<PathBuf>,
 
-    /// Incremental snapshot DB path (sled)
-    #[arg(
-        long = "incremental-db",
-        value_name = "PATH",
-        long_help = "インクリメンタルスキャンのスナップショットDB（sled）パス。"
-    )]
-    incr_db: Option<PathBuf>,
-
-    /// Compute delta against snapshot DB
-    #[arg(
-        long = "compute-delta",
-        action = ArgAction::SetTrue,
-        long_help = "スナップショットDBと比較して追加・変更・削除件数を表示します。--incremental-db と併用。"
-    )]
-    compute_delta: bool,
-
-    /// Update snapshot from current state
-    #[arg(
-        long = "update-snapshot",
-        action = ArgAction::SetTrue,
-        long_help = "現在の状態をスナップショットDBへ書き込みます。--incremental-db と併用。"
-    )]
-    update_snapshot: bool,
-
-    /// Watch filesystem and print changes
-    #[arg(
-        long = "watch",
-        action = ArgAction::SetTrue,
-        long_help = "ファイルシステムの変更を監視し、イベントを出力します（Linux/notify対応ビルド時）。"
-    )]
-    watch: bool,
-
     /// Print intermittent progress to stderr
     #[arg(
         long,
@@ -1494,35 +1462,6 @@ fn main() -> Result<()> {
                 }
                 wtr.flush()?;
                 println!("wrote class-report-csv: {}", p.display());
-            }
-        }
-        // Optional incremental delta/snapshot
-        if let Some(dbp) = &args.incr_db {
-            let db = hyperdu_core::incremental::open_db(dbp)?;
-            if args.compute_delta {
-                let d = hyperdu_core::incremental::compute_delta(&db, &root, &opt)?;
-                eprintln!(
-                    "delta: added={} modified={} removed={}",
-                    d.added, d.modified, d.removed
-                );
-            }
-            if args.update_snapshot {
-                hyperdu_core::incremental::snapshot_walk_and_update(&db, &root, &opt)?;
-                let pruned = hyperdu_core::incremental::snapshot_prune_removed(&db, &root)?;
-                eprintln!(
-                    "snapshot: updated DB at {} (pruned {} stale entries)",
-                    dbp.display(),
-                    pruned
-                );
-            }
-            if args.watch {
-                eprintln!("watch: monitoring {} (Ctrl-C to stop)", root.display());
-                let _w = hyperdu_core::incremental::watch(&root, |kind, p| {
-                    eprintln!("fswatch: {} {}", kind, p.display())
-                });
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(60));
-                }
             }
         }
         // progress already emitted during scan when enabled
