@@ -12,6 +12,11 @@
 //! Set `HYPERDU_WIN_USE_NTQUERY=0` to force the Win32 path.
 
 mod entry;
+/// NTFS on-disk parsing for the `$MFT` backend (#15). Pure parsing, and not yet
+/// wired into `process_dir`: reading a volume needs administrator rights, so
+/// the parser is landed and unit-tested first.
+#[cfg(target_env = "msvc")]
+mod mft;
 #[cfg(target_env = "msvc")]
 mod nt;
 mod path;
