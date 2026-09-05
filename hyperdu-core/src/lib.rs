@@ -191,6 +191,15 @@ pub struct Options {
     pub win_allow_handle: bool,
     /// Legacy Windows knob (see `win_allow_handle`). No effect.
     pub win_handle_sample_every: u64,
+    /// Read the volume's `$MFT` directly instead of enumerating directories
+    /// (Windows/NTFS only).
+    ///
+    /// Opt-in, and never a default: it needs administrator rights, and it
+    /// reports the volume's own view rather than the one a user sees through
+    /// the filesystem. When it cannot be used -- not elevated, not NTFS, not a
+    /// whole volume, or the parse fails -- the scan falls back to enumeration
+    /// rather than returning a partial answer.
+    pub use_mft: bool,
 }
 
 impl std::fmt::Debug for Options {
@@ -258,6 +267,7 @@ impl Default for Options {
             prefer_inner_rayon: false,
             win_allow_handle: false,
             win_handle_sample_every: 64,
+            use_mft: false,
         }
     }
 }
@@ -537,6 +547,14 @@ pub fn scan_roots(roots: &[PathBuf], opt: &Options) -> Vec<(PathBuf, Result<Stat
 }
 
 pub fn scan_directory(root: impl AsRef<Path>, opt: &Options) -> Result<StatMap> {
+    let root = root.as_ref();
+    // Reading the MFT answers the whole volume at once, so it replaces the walk
+    // rather than feeding it. Anything that makes it inapplicable returns None
+    // and the normal scan runs: a slower correct answer beats a fast partial
+    // one. Off unless `use_mft` is set.
+    if let Some(map) = platform::scan_volume_via_mft(root, opt) {
+        return Ok(map);
+    }
     let scanner = Arc::new(crate::scanner::platform_scanner());
     scan_directory_with(root, opt, scanner)
 }
