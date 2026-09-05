@@ -915,6 +915,19 @@ fn main() -> Result<()> {
     if args.approximate {
         opt.approximate_sizes = true;
     }
+    // Placed after every path that can set the flag, so `--perf turbo` -- which
+    // enables it without the user typing --approximate -- is caught too.
+    //
+    // Measured against `du -sxb`: +149% on /etc, -95% on /var/lib. The sign is
+    // not even consistent, so a caller cannot correct for it. Saying so costs
+    // one line on stderr and stops the totals being read as facts. See #29.
+    if opt.approximate_sizes {
+        eprintln!(
+            "warning: 概算モードが有効です。全ファイルを 4KiB とみなすため、\n\
+             \x20        合計は実測で -95%〜+149% 外れます（誤差の向きも一定しません）。\n\
+             \x20        正確な値が要る場合はこのモードを外してください。"
+        );
+    }
     opt.one_file_system = args.one_file_system;
     if args.follow_links && !matches!(opt.compat_mode, hyperdu_core::CompatMode::HyperDU) {
         opt.visited_bloom = Some(std::sync::Arc::new(hyperdu_core::Bloom::with_bits(1 << 20)));
