@@ -110,6 +110,26 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
     };
     eprintln!("dir drift:   {dir_drift:.2}%");
 
+    // The two sides disagree by 9x on files while agreeing on directories,
+    // which is not a difference either one can be assumed right about. Windows
+    // reports the MFT's own size, so ask it rather than arguing: an MFT of N
+    // bytes holds N/1024 records, and a volume cannot have more files than
+    // records.
+    if let Some(letter) = root.to_string_lossy().chars().next() {
+        if let Ok(out) = std::process::Command::new("fsutil")
+            .args(["fsinfo", "ntfsinfo", &format!("{letter}:")])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&out.stdout);
+            for line in text.lines() {
+                let l = line.to_ascii_lowercase();
+                if l.contains("mft") || l.contains("bytes per cluster") {
+                    eprintln!("fsutil:      {}", line.trim());
+                }
+            }
+        }
+    }
+
     // A live volume changes under the scan, so an exact match is not the bar.
     // A backend that is structurally wrong -- missing extension records,
     // double-counting 8.3 aliases, charging sparse holes -- is wrong by far
