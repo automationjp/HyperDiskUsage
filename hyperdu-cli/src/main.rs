@@ -283,6 +283,21 @@ struct Args {
     )]
     approximate: bool,
 
+    /// With --approximate, stat 1 file in N instead of guessing every size
+    #[arg(
+        long = "sample-rate",
+        value_name = "N",
+        default_value_t = 0,
+        long_help = "--approximate 使用時に、N 件に 1 件だけ statx で実サイズを取得します。\n\
+    0（既定）は statx を一切呼ばず全ファイルを固定値とみなす従来の挙動です。\n\
+    1 は全件取得（正確ですが通常スキャンと同速）。\n\
+    2 以上では、各ディレクトリの先頭16件は必ず取得したうえで N 件おきに取得し、\n\
+    取得しなかったファイルには「そのディレクトリの」サンプル平均を割り当てます。\n\
+    ファイルサイズは裾が重いため、大きなファイルを1つ外すと総量が大きく外れます。\n\
+    誤差が許容できるかは必ず実測してください。"
+    )]
+    sample_rate: u32,
+
     /// Run tuning only (no scan); prints recommended dir_yield_every and exits
     #[arg(
         long = "tune-only",
@@ -914,6 +929,15 @@ fn main() -> Result<()> {
     }
     if args.approximate {
         opt.approximate_sizes = true;
+    }
+    opt.size_sample_rate = args.sample_rate;
+    // Silently ignoring this would let someone believe they had traded accuracy
+    // for speed when they had done neither.
+    if args.sample_rate > 0 && !opt.approximate_sizes {
+        eprintln!(
+            "warning: --sample-rate {} has no effect without --approximate (or a --perf preset that implies it)",
+            args.sample_rate
+        );
     }
     opt.one_file_system = args.one_file_system;
     if args.follow_links && !matches!(opt.compat_mode, hyperdu_core::CompatMode::HyperDU) {

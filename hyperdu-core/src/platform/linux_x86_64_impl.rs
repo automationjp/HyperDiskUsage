@@ -78,6 +78,9 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let mut counted = crate::platform::linux_helpers::FileCounter::new(opt);
     let mut yield_every = opt.dir_yield_every.load(Ordering::Relaxed);
     let mut processed: usize = 0;
+    // Per directory on purpose: a directory of VM images must not be estimated
+    // from the mean of a directory of source files.
+    let mut sampler = crate::platform::linux_helpers::SizeSampler::new(opt);
     loop {
         #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
         profiling::scope!("getdents64_loop");
@@ -146,9 +149,15 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                     ctx.enqueue_dir(child_path, depth + 1);
                 }
             } else if dtype == libc::DT_REG {
-                // Approximate size path to avoid statx when allowed
-                if !opt.compute_physical && opt.approximate_sizes && opt.min_file_size == 0 {
-                    let logical = 4096u64; // estimate 4KiB per regular file
+                // Approximate size path to avoid statx when allowed. With a
+                // sample rate set, a share of the files still get a real statx
+                // and the rest are charged this directory's sampled mean; see
+                // SizeSampler for why the mean is per directory.
+                let approx_ok =
+                    !opt.compute_physical && opt.approximate_sizes && opt.min_file_size == 0;
+                let sample_this = approx_ok && sampler.is_sampling() && sampler.wants_stat();
+                if approx_ok && !sample_this {
+                    let logical = sampler.estimate();
                     update_file_stats(stat_cur, logical, logical);
                     counted.record(name_slice, logical, logical);
                 } else {
@@ -197,6 +206,12 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                                 }
                             }
                             let logical = stx.stx_size;
+                            // After the dedupe check: a file skipped as a
+                            // duplicate contributes no bytes, so it must not
+                            // pull the directory's mean down either.
+                            if sample_this {
+                                sampler.observe(logical);
+                            }
                             if logical >= opt.min_file_size {
                                 let physical =
                                     calculate_physical_size(opt, logical, stx.stx_blocks);

@@ -130,7 +130,18 @@ pub struct Options {
     pub progress_sample_callback: Option<ProgressSampleCallback>,
     pub compute_physical: bool, // if false, use logical size as physical (faster)
     pub dir_yield_every: Arc<AtomicUsize>, // 0 = no yielding; split large dirs every N entries
-    pub approximate_sizes: bool, // if true and compute_physical=false, estimate regular file size (e.g., 4KiB) to avoid statx
+    pub approximate_sizes: bool, // if true and compute_physical=false, estimate regular file size to avoid statx
+    /// How many files to stat in approximate mode, as 1 in N.
+    ///
+    /// 0 stats nothing and charges every file a fixed guess -- the original
+    /// behaviour, and wrong by however much the guess is wrong. 1 stats
+    /// everything, which is exact and no faster than a normal scan. Values in
+    /// between stat a sample and charge the unsampled files that directory's
+    /// sampled mean, which keeps the error local: a directory of large files
+    /// is not estimated from a directory of small ones.
+    ///
+    /// Only consulted when `approximate_sizes` is set.
+    pub size_sample_rate: u32,
     pub active_threads: Arc<AtomicUsize>, // runtime-tunable active worker threads (<= threads)
     pub cancel: Arc<AtomicBool>, // cooperative cancellation
     pub exclude_ac: Option<AhoCorasick>,
@@ -231,6 +242,7 @@ impl Default for Options {
                     .unwrap_or(0),
             )),
             approximate_sizes: false,
+            size_sample_rate: 0,
             active_threads: Arc::new(AtomicUsize::new(threads_default.max(1))),
             exclude_ac: None,
             exclude_regex: Vec::new(),

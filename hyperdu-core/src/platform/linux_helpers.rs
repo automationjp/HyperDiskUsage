@@ -402,6 +402,91 @@ pub fn packed_dev(dev: libc::dev_t) -> u64 {
     ((libc::major(dev) as u64) << 32) | (libc::minor(dev) as u64)
 }
 
+/// Decides which files in a directory get a real `statx` in approximate mode,
+/// and what to charge the ones that do not.
+///
+/// `--approximate` used to charge every regular file a flat 4KiB, which is
+/// wrong by however much the guess is wrong -- and file sizes are heavy-tailed,
+/// so a single missed large file moves the total more than every small file
+/// combined. Sampling turns that into a dial.
+///
+/// Two rules keep the error bounded:
+///
+///   - The first `SAMPLER_PRIMER` regular files of every directory are always
+///     stat'ed. A directory with no more than that many files is therefore
+///     exact, which covers most directories in a source tree.
+///   - Unsampled files are charged the mean of *this directory's* samples, not
+///     a global mean. A directory of VM images must not be estimated from a
+///     directory of source files.
+///
+/// State is per directory and lives on the stack: four counters, no allocation.
+pub(crate) struct SizeSampler {
+    /// 1 in N. 0 disables statx entirely (the original flat-guess behaviour).
+    rate: u32,
+    /// Regular files seen so far in this directory.
+    seen: u64,
+    /// Files actually stat'ed, and the total of their sizes.
+    sampled_files: u64,
+    sampled_bytes: u64,
+}
+
+/// Regular files at the head of a directory that are always stat'ed, so a small
+/// directory is exact and a large one starts from a real mean, not a guess.
+const SAMPLER_PRIMER: u64 = 16;
+
+/// Charged to a regular file when nothing in its directory has been stat'ed
+/// yet. This is what plain `--approximate` charges every file, and it is only
+/// a placeholder: one sample replaces it.
+///
+/// `src/constants.rs` declares the same value but is not reachable -- no `mod
+/// constants;` exists in lib.rs, so the file is not compiled. Defining it here
+/// keeps this module self-contained rather than reviving dead code.
+pub(crate) const APPROXIMATE_FILE_SIZE: u64 = 4096;
+
+impl SizeSampler {
+    pub(crate) fn new(opt: &crate::Options) -> Self {
+        Self {
+            rate: opt.size_sample_rate,
+            seen: 0,
+            sampled_files: 0,
+            sampled_bytes: 0,
+        }
+    }
+
+    /// True when sampling is active at all. False means the caller keeps the
+    /// old flat-guess behaviour, so `--approximate` without a rate is unchanged.
+    pub(crate) fn is_sampling(&self) -> bool {
+        self.rate > 0
+    }
+
+    /// Call once per regular file, before deciding whether to stat it.
+    /// Returns true when this file must be stat'ed.
+    pub(crate) fn wants_stat(&mut self) -> bool {
+        self.seen += 1;
+        if self.rate <= 1 {
+            // rate 1 stats everything; rate 0 never reaches here.
+            return self.rate == 1;
+        }
+        self.seen <= SAMPLER_PRIMER || self.seen % (self.rate as u64) == 0
+    }
+
+    /// Feed back the real size of a file that was stat'ed.
+    pub(crate) fn observe(&mut self, logical: u64) {
+        self.sampled_files += 1;
+        self.sampled_bytes = self.sampled_bytes.saturating_add(logical);
+    }
+
+    /// Size to charge a file that was not stat'ed: this directory's sampled
+    /// mean, or the flat estimate before any sample exists.
+    pub(crate) fn estimate(&self) -> u64 {
+        if self.sampled_files == 0 {
+            APPROXIMATE_FILE_SIZE
+        } else {
+            self.sampled_bytes / self.sampled_files
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,5 +502,88 @@ mod tests {
             packed_dev(libc::makedev(8, 1)),
             packed_dev(libc::makedev(9, 1))
         );
+    }
+
+    fn sampler(rate: u32) -> SizeSampler {
+        let mut opt = crate::Options::default();
+        opt.size_sample_rate = rate;
+        SizeSampler::new(&opt)
+    }
+
+    #[test]
+    fn rate_zero_does_not_sample_at_all() {
+        let s = sampler(0);
+        assert!(!s.is_sampling());
+        assert_eq!(s.estimate(), APPROXIMATE_FILE_SIZE);
+    }
+
+    #[test]
+    fn rate_one_stats_every_file() {
+        let mut s = sampler(1);
+        assert!(s.is_sampling());
+        for _ in 0..100 {
+            assert!(s.wants_stat());
+        }
+    }
+
+    #[test]
+    fn a_directory_no_larger_than_the_primer_is_exact() {
+        let mut s = sampler(64);
+        for _ in 0..SAMPLER_PRIMER {
+            assert!(s.wants_stat(), "every file up to the primer must be stat'ed");
+        }
+    }
+
+    #[test]
+    fn past_the_primer_only_every_nth_file_is_stated() {
+        let rate = 8u32;
+        let mut s = sampler(rate);
+        for _ in 0..SAMPLER_PRIMER {
+            s.wants_stat();
+        }
+        // Files SAMPLER_PRIMER+1 .. +rate: exactly one lands on the multiple.
+        let stated = (0..rate).filter(|_| s.wants_stat()).count();
+        assert_eq!(stated, 1, "expected 1 in {rate} past the primer");
+    }
+
+    #[test]
+    fn unsampled_files_are_charged_this_directorys_mean() {
+        let mut s = sampler(4);
+        s.observe(1000);
+        s.observe(3000);
+        assert_eq!(s.estimate(), 2000, "mean of the samples, not a global guess");
+    }
+
+    #[test]
+    fn estimate_falls_back_to_the_flat_guess_before_any_sample() {
+        let s = sampler(4);
+        assert_eq!(s.estimate(), APPROXIMATE_FILE_SIZE);
+    }
+
+    // File sizes are heavy-tailed: this is the case the flat 4KiB guess got
+    // catastrophically wrong, and the reason the mean is taken per directory.
+    #[test]
+    fn a_large_file_among_small_ones_moves_the_estimate() {
+        let mut s = sampler(4);
+        for _ in 0..9 {
+            s.observe(1024);
+        }
+        let without_large = s.estimate();
+        s.observe(10 * 1024 * 1024 * 1024);
+        assert!(
+            s.estimate() > without_large * 100,
+            "one large sample must dominate: {} -> {}",
+            without_large,
+            s.estimate()
+        );
+    }
+
+    #[test]
+    fn observe_saturates_instead_of_overflowing() {
+        let mut s = sampler(2);
+        s.observe(u64::MAX);
+        s.observe(u64::MAX);
+        // Must not panic in debug; the mean stays finite and usable.
+        assert!(s.estimate() > 0);
     }
 }
