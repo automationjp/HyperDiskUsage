@@ -86,24 +86,73 @@ impl<S: VolumeSource> MftReader<S> {
 
         // The MFT's $DATA is non-resident by construction; its run list is what
         // makes the rest of the records reachable.
-        let mut runs = None;
-        for attr in Attributes::new(&rec, &header) {
-            if attr.type_code == attr_type::DATA && attr.non_resident {
-                let off = run_list_offset(&rec, attr.pos)?;
-                runs = parse_run_list(rec.get(off..)?);
-                break;
-            }
-        }
-        let runs = runs?;
+        let mut runs = data_runs_in(&rec, &header).unwrap_or_default();
         if runs.is_empty() {
             return None;
         }
 
+        // On a volume with millions of files the MFT is itself fragmented
+        // enough that its $DATA does not fit in one record, and the rest lives
+        // in extension records named by $ATTRIBUTE_LIST. Stopping at the base
+        // record was measured missing 88.9% of a real volume's files -- while
+        // still reporting a plausible total, which is the worst way to be
+        // wrong. See #15.
+        let extensions = extension_records_for(&rec, &header, attr_type::DATA);
+        if !extensions.is_empty() {
+            let mut reader = Self {
+                source,
+                geometry,
+                runs,
+            };
+            reader.extend_runs_from(&extensions);
+            return Some(reader);
+        }
+
+        // Reborrow: `source` was only moved in the branch above.
+        runs.shrink_to_fit();
         Some(Self {
             source,
             geometry,
             runs,
         })
+    }
+
+    /// Follow `$ATTRIBUTE_LIST` entries and append the `$DATA` runs they name.
+    ///
+    /// The extension records are themselves in the MFT, so this can only reach
+    /// the ones covered by the runs found so far. That is enough in practice:
+    /// NTFS keeps the first extent large, and each round of appending brings
+    /// more of the MFT into reach. The loop stops when a pass adds nothing,
+    /// rather than assuming one pass suffices.
+    fn extend_runs_from(&mut self, extensions: &[u64]) {
+        // A pathological volume could otherwise bounce between records; the
+        // records come from a filesystem that may be damaged.
+        const MAX_PASSES: usize = 8;
+        let mut seen: std::collections::HashSet<u64> = std::collections::HashSet::new();
+
+        for _ in 0..MAX_PASSES {
+            let before = self.runs.len();
+            for &number in extensions {
+                if !seen.insert(number) {
+                    continue;
+                }
+                let Some(rec) = self.read_record(number) else {
+                    // Not reachable yet with the runs we have; a later pass may
+                    // reach it once the run list grows.
+                    seen.remove(&number);
+                    continue;
+                };
+                let Some(header) = parse_record_header(&rec) else {
+                    continue;
+                };
+                if let Some(more) = data_runs_in(&rec, &header) {
+                    self.runs.extend(more);
+                }
+            }
+            if self.runs.len() == before {
+                return;
+            }
+        }
     }
 
     pub(crate) fn geometry(&self) -> Geometry {
@@ -453,6 +502,47 @@ pub(crate) fn is_elevated() -> bool {
         let _ = CloseHandle(token);
         ok && elevation.TokenIsElevated != 0
     }
+}
+
+/// Run list of the first non-resident `$DATA` in a record, if it has one.
+fn data_runs_in(rec: &[u8], header: &super::mft::RecordHeader) -> Option<Vec<Run>> {
+    for attr in Attributes::new(rec, header) {
+        if attr.type_code == attr_type::DATA && attr.non_resident {
+            let off = run_list_offset(rec, attr.pos)?;
+            return parse_run_list(rec.get(off..)?);
+        }
+    }
+    None
+}
+
+/// Records that hold `type_code` attributes for this file, from its
+/// `$ATTRIBUTE_LIST`.
+///
+/// Entries naming the base record itself are dropped: re-reading it would add
+/// its runs a second time, doubling the MFT's apparent size.
+fn extension_records_for(
+    rec: &[u8],
+    header: &super::mft::RecordHeader,
+    type_code: u32,
+) -> Vec<u64> {
+    let mut out = Vec::new();
+    for attr in Attributes::new(rec, header) {
+        if attr.type_code != attr_type::ATTRIBUTE_LIST || attr.non_resident {
+            continue;
+        }
+        let Some(value) = rec.get(attr.value_offset..attr.value_offset + attr.value_length) else {
+            continue;
+        };
+        for entry in super::mft::parse_attribute_list(value) {
+            // Record 0 is the base for $MFT; anything else is an extension.
+            if entry.type_code == type_code && entry.record != 0 {
+                out.push(entry.record);
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 /// Byte offset of a non-resident attribute's run list within the record.
@@ -938,6 +1028,137 @@ mod tests {
     fn an_invalid_drive_letter_is_refused_without_touching_the_disk() {
         assert!(WindowsVolume::open('1').is_none());
         assert!(WindowsVolume::open('/').is_none());
+    }
+
+    /// Append an `$ATTRIBUTE_LIST` naming `records` as holding more `$DATA`.
+    fn push_attribute_list(rec: &mut [u8], pos: usize, records: &[u64]) -> usize {
+        let entry_len = 32usize; // 26 rounded up to 8
+        let value_len = records.len() * entry_len;
+        let value_off = 24usize;
+        let total = (value_off + value_len).next_multiple_of(8);
+
+        rec[pos..pos + 4].copy_from_slice(&attr_type::ATTRIBUTE_LIST.to_le_bytes());
+        rec[pos + 4..pos + 8].copy_from_slice(&(total as u32).to_le_bytes());
+        rec[pos + 8] = 0; // resident
+        rec[pos + 16..pos + 20].copy_from_slice(&(value_len as u32).to_le_bytes());
+        rec[pos + 20..pos + 22].copy_from_slice(&(value_off as u16).to_le_bytes());
+
+        for (i, r) in records.iter().enumerate() {
+            let e = pos + value_off + i * entry_len;
+            rec[e..e + 4].copy_from_slice(&attr_type::DATA.to_le_bytes());
+            rec[e + 4..e + 6].copy_from_slice(&(entry_len as u16).to_le_bytes());
+            rec[e + 16..e + 24].copy_from_slice(&r.to_le_bytes());
+        }
+        pos + total
+    }
+
+    /// A `$MFT` record whose `$DATA` covers `clusters` from `MFT_LCN`, plus an
+    /// `$ATTRIBUTE_LIST` pointing at `extensions` for the rest.
+    fn mft_record_with_extensions(clusters: u64, extensions: &[u64]) -> Vec<u8> {
+        let mut r = blank_record(0x0001, 1);
+        let mut p = 64usize;
+        p = push_attribute_list(&mut r, p, extensions);
+
+        let total = 72usize;
+        r[p..p + 4].copy_from_slice(&attr_type::DATA.to_le_bytes());
+        r[p + 4..p + 8].copy_from_slice(&(total as u32).to_le_bytes());
+        r[p + 8] = 1; // non-resident
+        let run_off = 0x40u16;
+        r[p + 0x20..p + 0x22].copy_from_slice(&run_off.to_le_bytes());
+        let ro = p + run_off as usize;
+        r[ro] = 0x11;
+        r[ro + 1] = clusters as u8;
+        r[ro + 2] = MFT_LCN as u8;
+        r[ro + 3] = 0x00;
+        set_used(&mut r, (p + total) as u32);
+        r
+    }
+
+    /// An extension record holding a further `$DATA` run for `$MFT`.
+    ///
+    /// Its run list is parsed on its own, so the offset byte is an absolute LCN
+    /// rather than a delta from a run in the base record.
+    fn extension_record(clusters: u64, lcn: i8) -> Vec<u8> {
+        let mut r = blank_record(0x0001, 1);
+        let pos = 64usize;
+        let total = 72usize;
+        r[pos..pos + 4].copy_from_slice(&attr_type::DATA.to_le_bytes());
+        r[pos + 4..pos + 8].copy_from_slice(&(total as u32).to_le_bytes());
+        r[pos + 8] = 1;
+        r[pos + 0x20..pos + 0x22].copy_from_slice(&0x40u16.to_le_bytes());
+        let ro = pos + 0x40;
+        r[ro] = 0x11;
+        r[ro + 1] = clusters as u8;
+        r[ro + 2] = lcn as u8;
+        r[ro + 3] = 0x00;
+        set_used(&mut r, (pos + total) as u32);
+        r
+    }
+
+    // The case a real volume failed on: `$MFT` is itself fragmented enough that
+    // its own $DATA spills into an extension record. Reading only the base
+    // record found 11% of a 10-million-file volume -- and reported a
+    // plausible-looking total for it. See #15.
+    #[test]
+    fn an_mft_whose_runs_spill_into_an_extension_record_is_read_in_full() {
+        // Four records fit in a cluster, so record 16 sits in the fifth. The
+        // base record's own run covers only the first cluster; the extension
+        // record supplies the next four, which is what makes 16 reachable.
+        let mut records = vec![mft_record_with_extensions(1, &[1]), extension_record(4, 5)];
+        while records.len() < 16 {
+            records.push(blank_record(0x0000, 0));
+        }
+        records.push(file_record(
+            ROOT_RECORD,
+            "in-second-extent.txt",
+            4096,
+            77,
+            1,
+        ));
+
+        let mut v = boot_sector();
+        v.resize(MFT_LCN as usize * CLUSTER, 0);
+        for r in &records {
+            v.extend_from_slice(r);
+        }
+        v.resize(MFT_LCN as usize * CLUSTER + 8 * CLUSTER, 0);
+
+        let mut reader = MftReader::open(MemVolume(v)).expect("open");
+        assert_eq!(
+            reader.mft_clusters(),
+            5,
+            "the extension record's run must be appended; without it the reader \
+             sees one cluster of MFT and stops there"
+        );
+        assert_eq!(reader.record_count(), 20);
+        assert_eq!(
+            reader.entry(16).expect("record 16").name,
+            "in-second-extent.txt",
+            "record 16 lives past the base record's own run, so reaching it \
+             proves the extension was followed"
+        );
+    }
+
+    #[test]
+    fn an_attribute_list_naming_the_base_record_does_not_double_count() {
+        // Record 0 is the base; following it again would add its runs twice.
+        let mut records = vec![mft_record_with_extensions(2, &[0])];
+        while records.len() < 16 {
+            records.push(blank_record(0x0000, 0));
+        }
+        let mut v = boot_sector();
+        v.resize(MFT_LCN as usize * CLUSTER, 0);
+        for r in &records {
+            v.extend_from_slice(r);
+        }
+        v.resize(MFT_LCN as usize * CLUSTER + 8 * CLUSTER, 0);
+
+        let reader = MftReader::open(MemVolume(v)).expect("open");
+        assert_eq!(
+            reader.mft_clusters(),
+            2,
+            "the base record's own runs must not be added a second time"
+        );
     }
 
     #[test]
