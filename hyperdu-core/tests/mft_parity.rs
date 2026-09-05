@@ -31,32 +31,37 @@ fn parity_root() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(r"C:\"))
 }
 
-fn totals(map: &hyperdu_core::StatMap) -> (u64, u64, u64) {
-    map.values().fold((0, 0, 0), |(l, p, f), s| {
-        (l + s.logical, p + s.physical, f + s.files)
-    })
+/// The scan's totals, read from the root entry.
+///
+/// NOT `map.values().sum()`. `scan_directory` rolls totals up, so every
+/// directory holds its whole subtree and summing counts each file once per
+/// ancestor -- which is exactly the mistake this test made when it first ran,
+/// producing a 9x "discrepancy" that was entirely the summing. Every other
+/// test in this crate reads the root entry; so does this one now.
+fn totals(map: &hyperdu_core::StatMap, root: &std::path::Path) -> (u64, u64, u64) {
+    map.get(root)
+        .map(|s| (s.logical, s.physical, s.files))
+        .unwrap_or((0, 0, 0))
 }
 
-/// This found a real bug, and not the one it was looking for.
+/// This found two real bugs, and neither was the one it first appeared to.
 ///
 /// On a GitHub Actions Windows runner -- which is elevated, so it actually ran
-/// -- the two backends disagreed by 9x on file counts while agreeing on
-/// directories to within 0.1%. The obvious reading was that the MFT side was
-/// missing records, and the first fix was aimed there. It changed nothing.
+/// -- the backends read 9x apart on files while agreeing on directories to
+/// within 0.1%. Two rounds of chasing that as an MFT under-count changed
+/// nothing, because neither backend was miscounting:
 ///
-/// `fsutil fsinfo ntfsinfo` settled it: Windows reports the MFT as 1.29 GB,
-/// exactly what this backend computes from the run list. At 1 KB per record
-/// that is ~1.35M records, and a volume cannot hold more files than it has
-/// records -- so enumeration's 10.2M is the impossible number, not the MFT's
-/// 1.13M.
+///   1. This test summed `map.values()`. `scan_directory` rolls totals up, so
+///      every directory holds its subtree and the sum counts each file once per
+///      ancestor. The 9x was the average tree depth. Fixed by reading the root
+///      entry, as every other test in this crate already did.
+///   2. `scan_directory` returned the MFT map without rolling it up, so the two
+///      backends really did produce different-meaning maps -- just not in a way
+///      that made either one's counts wrong. Fixed in lib.rs.
 ///
-/// Tracked as #37. Until that is resolved this test fails on a real volume,
-/// and it should: the two backends genuinely disagree.
-///
-/// It is still ignored rather than failing CI, because the bug it now points
-/// at is in the enumeration path and unrelated to whatever else is being
-/// changed. Run it with `--ignored --nocapture`.
-#[ignore = "backends disagree; the enumeration side over-counts, see #37"]
+/// The lesson worth keeping: a 9x gap that looks like a counting bug can be a
+/// units bug. `fsutil fsinfo ntfsinfo` is the tiebreaker -- an MFT of N bytes
+/// holds N/1024 records, and a volume cannot have more files than records.
 #[test]
 fn the_mft_backend_agrees_with_directory_enumeration() {
     let root = parity_root();
@@ -94,8 +99,8 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
     let from_mft = scan_directory(&root, &mft_opt).expect("mft scan");
     unsafe { std::env::remove_var("HYPERDU_MFT_DIAG") };
 
-    let (wl, wp, wf) = totals(&walked);
-    let (ml, mp, mf) = totals(&from_mft);
+    let (wl, wp, wf) = totals(&walked, &root);
+    let (ml, mp, mf) = totals(&from_mft, &root);
 
     eprintln!("root:        {}", root.display());
     eprintln!(
