@@ -479,11 +479,9 @@ impl SizeSampler {
     /// Size to charge a file that was not stat'ed: this directory's sampled
     /// mean, or the flat estimate before any sample exists.
     pub(crate) fn estimate(&self) -> u64 {
-        if self.sampled_files == 0 {
-            APPROXIMATE_FILE_SIZE
-        } else {
-            self.sampled_bytes / self.sampled_files
-        }
+        self.sampled_bytes
+            .checked_div(self.sampled_files)
+            .unwrap_or(APPROXIMATE_FILE_SIZE)
     }
 }
 
