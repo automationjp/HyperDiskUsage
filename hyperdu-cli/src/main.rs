@@ -652,8 +652,9 @@ struct Args {
         value_enum,
         default_value_t = PerfArg::Balanced,
         long_help = "性能プロファイルを選択。\n\
-    turbo: 最速。論理サイズのみ（物理計算オフ）/概算サイズ/ハードリンク重複排除なし。\n\
-            Linuxでは io_uring の SQPOLL/COOP を想定し、初期バッチ/深さを強めに設定（ライブチューナで追従）。\n\
+    turbo: 最速。論理サイズのみ（物理計算オフ）/ハードリンク重複排除なし。\n\
+            サイズは正確です。概算にする場合は --approximate を明示してください\n\
+            （合計が実測で -95%〜+149% 外れます）。\n\
     balanced: 既定（バランス重視）。\n\
     strict: 互換性最優先（du互換を厳格化/ハードリンク重複排除/エラー出力など）。"
     )]
@@ -818,9 +819,15 @@ fn main() -> Result<()> {
     // Apply performance profile (maps to existing flags)
     match args.perf {
         PerfArg::Turbo => {
-            // fastest: approximate sizes, skip dedupe, lightweight errors
+            // Fastest, but still answering the question that was asked.
+            //
+            // This used to set `approximate_sizes`, which charges every file a
+            // flat 4KiB. Measured against `du -sxb` that is wrong by -95% on
+            // /var/lib and +149% on /etc -- and the sign is not consistent, so
+            // a caller cannot correct for it. "Fast" is a request for a quicker
+            // answer, not for a different one, so the guess is opt-in via
+            // --approximate rather than implied here. See #29.
             opt.compute_physical = false;
-            opt.approximate_sizes = true;
             opt.count_hardlinks = true; // do not dedupe
                                         // keep compat in HyperDU unless明示
                                         // io_uring のチューニングはオプトインのままにする。
