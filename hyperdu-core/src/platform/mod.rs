@@ -67,6 +67,18 @@ pub fn scan_volume_via_mft(_root: &std::path::Path, _opt: &crate::Options) -> Op
     None
 }
 
+/// Whether the MFT backend would be used for this root. See
+/// [`crate::mft_backend_applies`].
+#[cfg(windows)]
+pub fn mft_backend_applies(root: &std::path::Path, opt: &crate::Options) -> bool {
+    windows_impl::mft_backend_applies(root, opt)
+}
+
+#[cfg(not(windows))]
+pub fn mft_backend_applies(_root: &std::path::Path, _opt: &crate::Options) -> bool {
+    false
+}
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub fn process_dir_wrapped(ctx: &ScanContext, dir_ctx: &DirContext, map: &mut StatMap) {
     linux_x86_64_impl::process_dir(ctx, dir_ctx, map);

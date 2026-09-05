@@ -60,6 +60,85 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
 /// volume root, not NTFS, or the parse did not hold together.
 #[cfg(target_env = "msvc")]
 pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Option<crate::StatMap> {
+    let drive = mft_drive(root, opt)?;
+    let mut volume = mft_reader::WindowsVolume::open(drive)?;
+    let mut reader = mft_reader::MftReader::open(&mut volume)?;
+    let geometry = reader.geometry();
+    // Narrow the read alignment now that the geometry is known, so records stop
+    // pulling in more sectors than they need. Must happen before the records are
+    // read, not after -- it was doing nothing where it used to be.
+    reader
+        .source_mut()
+        .set_sector_size(geometry.bytes_per_sector);
+
+    // Captured before the reader is dropped: the first diagnostic printed
+    // record_count twice, which hid the very number that mattered.
+    let diag_runs = reader.run_count();
+    let diag_clusters = reader.mft_clusters();
+    let entries = reader.entries();
+    let record_count = reader.record_count();
+    drop(reader);
+
+    let paths = mft_reader::paths_for(&entries);
+    let prefix = format!("{}:\\", drive.to_ascii_uppercase());
+    let map = mft_reader::to_stat_map(
+        &entries,
+        &paths,
+        &prefix,
+        opt.count_hardlinks,
+        opt.compute_physical,
+    );
+
+    // Where records are lost between the MFT and the final map is not something
+    // to guess at: the first fix for an under-count was aimed at the wrong
+    // stage. Off unless asked for. See #15.
+    if std::env::var_os("HYPERDU_MFT_DIAG").is_some() {
+        let files: u64 = map.values().map(|s| s.files).sum();
+        let dirs = entries.iter().filter(|e| e.is_directory).count();
+        eprintln!(
+            "mft-diag: runs={diag_runs} mft_clusters={diag_clusters} record_count={record_count} \
+             entries={} (dirs={dirs}) paths={} map_dirs={} files={files}",
+            entries.len(),
+            paths.len(),
+            map.len(),
+        );
+    }
+
+    Some(map)
+}
+
+#[cfg(not(target_env = "msvc"))]
+pub fn scan_volume_via_mft(
+    _root: &std::path::Path,
+    _opt: &crate::Options,
+) -> Option<crate::StatMap> {
+    None
+}
+
+/// Whether the MFT backend would be used for this root. See
+/// [`crate::mft_backend_applies`].
+///
+/// Shares its preconditions with `scan_volume_via_mft` through `mft_drive`, so
+/// the two cannot disagree -- a caller told "the MFT path will be used" and
+/// then silently given enumeration would draw the wrong conclusion from a
+/// comparison of the two.
+#[cfg(target_env = "msvc")]
+pub fn mft_backend_applies(root: &std::path::Path, opt: &crate::Options) -> bool {
+    mft_drive(root, opt).is_some()
+}
+
+#[cfg(not(target_env = "msvc"))]
+pub fn mft_backend_applies(_root: &std::path::Path, _opt: &crate::Options) -> bool {
+    false
+}
+
+/// Drive letter to read the MFT of, or `None` when the backend does not apply.
+///
+/// The single place the preconditions live: asked for, a volume root, and
+/// elevated. Opening the volume can still fail afterwards (not NTFS, or the
+/// parse does not hold), which the caller also treats as "use enumeration".
+#[cfg(target_env = "msvc")]
+fn mft_drive(root: &std::path::Path, opt: &crate::Options) -> Option<char> {
     if !opt.use_mft {
         return None;
     }
@@ -71,33 +150,7 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
     if !mft_reader::is_elevated() {
         return None;
     }
-
-    let mut volume = mft_reader::WindowsVolume::open(drive)?;
-    // Narrow the read alignment now that the geometry is known, so records stop
-    // pulling in more sectors than they need.
-    let mut reader = mft_reader::MftReader::open(&mut volume)?;
-    let geometry = reader.geometry();
-    let entries = reader.entries();
-    drop(reader);
-    volume.set_sector_size(geometry.bytes_per_sector);
-
-    let paths = mft_reader::paths_for(&entries);
-    let prefix = format!("{}:\\", drive.to_ascii_uppercase());
-    Some(mft_reader::to_stat_map(
-        &entries,
-        &paths,
-        &prefix,
-        opt.count_hardlinks,
-        opt.compute_physical,
-    ))
-}
-
-#[cfg(not(target_env = "msvc"))]
-pub fn scan_volume_via_mft(
-    _root: &std::path::Path,
-    _opt: &crate::Options,
-) -> Option<crate::StatMap> {
-    None
+    Some(drive)
 }
 
 /// Drive letter when `root` is the root of a volume (`C:\`), else `None`.
