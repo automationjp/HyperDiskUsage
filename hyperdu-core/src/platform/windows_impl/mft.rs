@@ -169,7 +169,8 @@ pub(crate) fn apply_fixups(rec: &mut [u8], bytes_per_sector: u32) -> bool {
     };
     for i in 0..sectors {
         let tail = (i + 1) * sector_size - 2;
-        let (Some(found), Some(orig)) = (u16_at(rec, tail), u16_at(rec, usa_off + 2 + i * 2)) else {
+        let (Some(found), Some(orig)) = (u16_at(rec, tail), u16_at(rec, usa_off + 2 + i * 2))
+        else {
             return false;
         };
         if found != seq {
