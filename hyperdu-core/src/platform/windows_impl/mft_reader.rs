@@ -159,6 +159,13 @@ impl<S: VolumeSource> MftReader<S> {
         self.geometry
     }
 
+    /// The volume, so the caller can narrow the read alignment once the
+    /// geometry is known. Doing that after the records are read achieves
+    /// nothing, which is what used to happen.
+    pub(crate) fn source_mut(&mut self) -> &mut S {
+        &mut self.source
+    }
+
     /// Total clusters the MFT occupies, which bounds how many records exist.
     pub(crate) fn mft_clusters(&self) -> u64 {
         allocated_clusters(&self.runs)

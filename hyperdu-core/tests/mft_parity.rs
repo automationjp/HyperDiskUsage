@@ -76,7 +76,15 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
         ..Options::default()
     };
     let walked = scan_directory(&root, &walked_opt).expect("enumeration scan");
+
+    // A failure here needs to say *where* the records went. The first attempt
+    // at fixing an under-count was aimed at the wrong stage because the only
+    // number available was the final one.
+    //
+    // SAFETY: single-threaded test setup, before any scan starts.
+    unsafe { std::env::set_var("HYPERDU_MFT_DIAG", "1") };
     let from_mft = scan_directory(&root, &mft_opt).expect("mft scan");
+    unsafe { std::env::remove_var("HYPERDU_MFT_DIAG") };
 
     let (wl, wp, wf) = totals(&walked);
     let (ml, mp, mf) = totals(&from_mft);

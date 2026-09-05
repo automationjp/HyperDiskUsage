@@ -62,23 +62,55 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
 pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Option<crate::StatMap> {
     let drive = mft_drive(root, opt)?;
     let mut volume = mft_reader::WindowsVolume::open(drive)?;
-    // Narrow the read alignment now that the geometry is known, so records stop
-    // pulling in more sectors than they need.
     let mut reader = mft_reader::MftReader::open(&mut volume)?;
     let geometry = reader.geometry();
+    // Narrow the read alignment now that the geometry is known, so records stop
+    // pulling in more sectors than they need. Must happen before the records are
+    // read, not after -- it was doing nothing where it used to be.
+    reader
+        .source_mut()
+        .set_sector_size(geometry.bytes_per_sector);
+
     let entries = reader.entries();
+    let record_count = reader.record_count();
     drop(reader);
-    volume.set_sector_size(geometry.bytes_per_sector);
 
     let paths = mft_reader::paths_for(&entries);
     let prefix = format!("{}:\\", drive.to_ascii_uppercase());
-    Some(mft_reader::to_stat_map(
+    let map = mft_reader::to_stat_map(
         &entries,
         &paths,
         &prefix,
         opt.count_hardlinks,
         opt.compute_physical,
-    ))
+    );
+
+    // Where records are lost between the MFT and the final map is not something
+    // to guess at: the first fix for an under-count was aimed at the wrong
+    // stage. Off unless asked for. See #15.
+    if std::env::var_os("HYPERDU_MFT_DIAG").is_some() {
+        let files: u64 = map.values().map(|s| s.files).sum();
+        let dirs = entries.iter().filter(|e| e.is_directory).count();
+        eprintln!(
+            "mft-diag: mft_clusters={} record_count={} entries={} (dirs={}) paths={} map_dirs={} files={}",
+            reader_clusters(&entries, record_count),
+            record_count,
+            entries.len(),
+            dirs,
+            paths.len(),
+            map.len(),
+            files
+        );
+    }
+
+    Some(map)
+}
+
+/// Placeholder so the diagnostic line reads uniformly; the reader is gone by
+/// the time it prints.
+#[cfg(target_env = "msvc")]
+fn reader_clusters(_entries: &[mft_reader::Entry], record_count: u64) -> u64 {
+    record_count
 }
 
 #[cfg(not(target_env = "msvc"))]
