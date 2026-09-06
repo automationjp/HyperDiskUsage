@@ -160,15 +160,17 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
     eprintln!(
         "drift:       files={file_drift:.2}% logical={byte_drift:.2}% physical={phys_drift:.2}%"
     );
-    // Physical is reported but not asserted: the two sides disagree by ~37% on
-    // a real volume and which one is right is still open (#39). Asserting it
-    // now would fail every run for a reason unrelated to the change under test.
-    if phys_drift >= 5.0 {
-        eprintln!(
-            "note:        physical differs by {phys_drift:.2}% ({wp} vs {mp}); see #39 and the \
-             mft-diag lines above for the per-category breakdown"
-        );
-    }
+    // Physical is asserted now that #39 is fixed. It was 33% out because sparse
+    // attributes were charged their whole run range -- holes included -- from
+    // offset 0x28, instead of the space actually spent at 0x40. That was 38.6 GB
+    // across 116,283 files on this very volume, so a regression here would show
+    // up immediately.
+    assert!(
+        phys_drift < 5.0,
+        "physical totals differ by {phys_drift:.2}% (enumeration {wp}, mft {mp}). \
+         Check the mft-diag breakdown above: if the sparse category dominates, \
+         `parse_data_sizes` is reading 0x28 rather than 0x40 again. See #39."
+    );
 
     assert!(
         file_drift < 5.0,

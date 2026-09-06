@@ -392,12 +392,26 @@ pub(crate) fn parse_data_sizes(rec: &[u8], attr: &AttrHeader) -> Option<DataSize
             allocated_size: attr.value_length as u64,
         });
     }
-    // Non-resident header: allocated at 0x28, real at 0x30. For compressed or
-    // sparse data the allocated size is what the volume actually spends, which
-    // is the number `du`-style tools want.
+    // Non-resident header: allocated at 0x28, real at 0x30.
+    //
+    // For sparse or compressed data 0x28 is NOT what the volume spends: it
+    // covers the whole run range including holes. The space actually consumed
+    // is at 0x40, a field present only when one of those flags is set. Reading
+    // 0x28 for them over-reported a real volume's sparse files by 38.6 GB
+    // across 116,283 files -- 33% of the total. See #39.
+    let real_size = u64_at(rec, attr.pos + 0x30)?;
+    let is_sparse_or_compressed = attr.flags & (attr_flags::COMPRESSED | attr_flags::SPARSE) != 0;
+    // The field only exists if the attribute is long enough to hold it; a
+    // header that claims the flag but stops short is corrupt, not sparse.
+    let has_actual_size = attr.total_length >= 0x48;
+    let allocated_size = if is_sparse_or_compressed && has_actual_size {
+        u64_at(rec, attr.pos + 0x40)?
+    } else {
+        u64_at(rec, attr.pos + 0x28)?
+    };
     Some(DataSizes {
-        allocated_size: u64_at(rec, attr.pos + 0x28)?,
-        real_size: u64_at(rec, attr.pos + 0x30)?,
+        allocated_size,
+        real_size,
     })
 }
 
@@ -1304,6 +1318,93 @@ mod tests {
             None,
             "a hole has no bytes to read"
         );
+    }
+
+    /// Build a non-resident `$DATA` with the flags and both size fields set.
+    fn non_resident_data(
+        rec: &mut [u8],
+        pos: usize,
+        total: usize,
+        flags: u16,
+        allocated_0x28: u64,
+        real: u64,
+        actual_0x40: u64,
+    ) {
+        rec[pos..pos + 4].copy_from_slice(&attr_type::DATA.to_le_bytes());
+        rec[pos + 4..pos + 8].copy_from_slice(&(total as u32).to_le_bytes());
+        rec[pos + 8] = 1; // non-resident
+        rec[pos + 0x0C..pos + 0x0E].copy_from_slice(&flags.to_le_bytes());
+        rec[pos + 0x28..pos + 0x30].copy_from_slice(&allocated_0x28.to_le_bytes());
+        rec[pos + 0x30..pos + 0x38].copy_from_slice(&real.to_le_bytes());
+        if total >= 0x48 {
+            rec[pos + 0x40..pos + 0x48].copy_from_slice(&actual_0x40.to_le_bytes());
+        }
+        end_marker(rec, pos + total);
+    }
+
+    fn sizes_of(rec: &[u8]) -> DataSizes {
+        let h = parse_record_header(rec).expect("header");
+        let attr = Attributes::new(rec, &h).next().expect("one attribute");
+        parse_data_sizes(rec, &attr).expect("sizes")
+    }
+
+    // The case a real volume failed on: 116,283 sparse files reported 47.5 GB
+    // at 0x28 while the volume spent far less, putting the whole scan 33% over.
+    // For sparse and compressed data 0x28 covers the runs including holes; the
+    // space actually consumed is at 0x40. See #39.
+    #[test]
+    fn a_sparse_attribute_reports_the_size_at_0x40_not_0x28() {
+        let mut r = record_header_bytes(FLAG_IN_USE, 56, 1024, 1);
+        non_resident_data(
+            &mut r,
+            56,
+            0x50,
+            attr_flags::SPARSE,
+            1 << 30, // 0x28: a gigabyte of run range
+            1 << 30, // real
+            4096,    // 0x40: one cluster actually spent
+        );
+        let s = sizes_of(&r);
+        assert_eq!(
+            s.allocated_size, 4096,
+            "a sparse file's holes cost nothing and must not be charged"
+        );
+        assert_eq!(s.real_size, 1 << 30);
+    }
+
+    #[test]
+    fn a_compressed_attribute_reports_the_size_at_0x40() {
+        let mut r = record_header_bytes(FLAG_IN_USE, 56, 1024, 1);
+        non_resident_data(
+            &mut r,
+            56,
+            0x50,
+            attr_flags::COMPRESSED,
+            100 * 4096,
+            400_000,
+            20 * 4096, // compressed down to a fifth
+        );
+        assert_eq!(sizes_of(&r).allocated_size, 20 * 4096);
+    }
+
+    #[test]
+    fn a_plain_attribute_still_reports_the_size_at_0x28() {
+        let mut r = record_header_bytes(FLAG_IN_USE, 56, 1024, 1);
+        non_resident_data(&mut r, 56, 0x50, 0, 8192, 5000, 0xDEAD_BEEF);
+        assert_eq!(
+            sizes_of(&r).allocated_size,
+            8192,
+            "without the flags, 0x40 is not a size field and must be ignored"
+        );
+    }
+
+    #[test]
+    fn an_attribute_too_short_for_0x40_falls_back_to_0x28() {
+        // A header claiming SPARSE but stopping before 0x48 is corrupt, not
+        // sparse; reading past it would pick up whatever follows.
+        let mut r = record_header_bytes(FLAG_IN_USE, 56, 1024, 1);
+        non_resident_data(&mut r, 56, 0x40, attr_flags::SPARSE, 8192, 5000, 0);
+        assert_eq!(sizes_of(&r).allocated_size, 8192);
     }
 
     #[test]
