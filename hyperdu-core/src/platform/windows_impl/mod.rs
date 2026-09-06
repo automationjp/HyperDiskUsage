@@ -143,6 +143,33 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
                 )
             });
         eprintln!("mft-diag: allocated > 2x real -- {over_n} files, {over_bytes} bytes of excess");
+
+        // The three candidate causes of the remaining 6.1 GB gap (#41), counted
+        // rather than guessed at. Whichever carries the bytes is the one to fix.
+        let mut stale = (0u64, 0u64);
+        let mut listed = (0u64, 0u64);
+        let mut named = (0u64, 0u64);
+        for e in entries.iter().filter(|e| !e.is_directory) {
+            let s = &e.size_source;
+            if !s.from_data_attribute {
+                stale.0 += 1;
+                stale.1 = stale.1.saturating_add(e.sizes.allocated_size);
+            }
+            if s.has_attribute_list {
+                listed.0 += 1;
+                listed.1 = listed.1.saturating_add(e.sizes.allocated_size);
+            }
+            if s.named_stream_bytes > 0 {
+                named.0 += 1;
+                named.1 = named.1.saturating_add(s.named_stream_bytes);
+            }
+        }
+        eprintln!(
+            "mft-diag: gap candidates -- $FILE_NAME fallback: {} files {} bytes | \
+             has $ATTRIBUTE_LIST: {} files {} bytes | \
+             named streams: {} files {} bytes (not counted)",
+            stale.0, stale.1, listed.0, listed.1, named.0, named.1
+        );
     }
 
     Some(map)
