@@ -565,7 +565,13 @@ pub fn scan_directory(root: impl AsRef<Path>, opt: &Options) -> Result<StatMap> 
     // and the normal scan runs: a slower correct answer beats a fast partial
     // one. Off unless `use_mft` is set.
     if let Some(map) = platform::scan_volume_via_mft(root, opt) {
-        return Ok(map);
+        // Roll up here too. `to_stat_map` charges each file to its own
+        // directory, which is what the walking backends produce *before*
+        // `scan_directory_with` rolls them up -- returning it as-is handed
+        // callers a map with different semantics depending on which backend
+        // ran, so a directory's reported size was its own bytes under `--mft`
+        // and its whole subtree's everywhere else.
+        return Ok(rollup::rollup_child_to_parent(map));
     }
     let scanner = Arc::new(crate::scanner::platform_scanner());
     scan_directory_with(root, opt, scanner)
