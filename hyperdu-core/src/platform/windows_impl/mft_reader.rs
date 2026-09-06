@@ -49,6 +49,12 @@ pub(crate) struct Entry {
     pub(crate) is_directory: bool,
     pub(crate) sizes: DataSizes,
     pub(crate) hard_link_count: u16,
+    /// `$DATA` attribute flags: compressed, sparse, encrypted. Kept because the
+    /// allocated size means something different for each, and the MFT and the
+    /// enumeration API disagree by 37% on a real volume (#39) -- which of those
+    /// categories the difference sits in is a question only measurement
+    /// answers.
+    pub(crate) data_flags: u16,
 }
 
 /// Reads records from the `$MFT` of a volume.
@@ -222,6 +228,7 @@ impl<S: VolumeSource> MftReader<S> {
 
         let mut names: Vec<FileName> = Vec::new();
         let mut sizes: Option<DataSizes> = None;
+        let mut data_flags: u16 = 0;
         for attr in Attributes::new(&rec, &header) {
             match attr.type_code {
                 attr_type::FILE_NAME if !attr.non_resident => {
@@ -234,7 +241,8 @@ impl<S: VolumeSource> MftReader<S> {
                 // The first $DATA is the file's contents. A later one is a
                 // named alternate stream, which `du` does not count.
                 attr_type::DATA if sizes.is_none() => {
-                    sizes = parse_data_sizes(&rec, &attr);
+                    sizes = parse_data_sizes(&rec, &attr, self.geometry.cluster_size());
+                    data_flags = attr.flags;
                 }
                 _ => {}
             }
@@ -259,6 +267,7 @@ impl<S: VolumeSource> MftReader<S> {
                 allocated_size: chosen.allocated_size,
             }),
             hard_link_count: header.hard_link_count,
+            data_flags,
         })
     }
 
@@ -919,6 +928,7 @@ mod tests {
                 allocated_size: alloc,
             },
             hard_link_count: 1,
+            data_flags: 0,
         }
     }
 

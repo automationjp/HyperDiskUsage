@@ -102,6 +102,47 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
             paths.len(),
             map.len(),
         );
+
+        // Where the physical total comes from, split by the categories whose
+        // allocated size means different things. The MFT and the enumeration
+        // API disagree by 37% on a real volume (#39); guessing which category
+        // holds the difference is how the last three attempts went wrong.
+        use mft::attr_flags;
+        // (count, physical) for plain / compressed / sparse / encrypted
+        let mut cat = [(0u64, 0u64); 4];
+        for e in entries.iter().filter(|e| !e.is_directory) {
+            let i = if e.data_flags & attr_flags::COMPRESSED != 0 {
+                1
+            } else if e.data_flags & attr_flags::SPARSE != 0 {
+                2
+            } else if e.data_flags & attr_flags::ENCRYPTED != 0 {
+                3
+            } else {
+                0
+            };
+            cat[i].0 += 1;
+            cat[i].1 = cat[i].1.saturating_add(e.sizes.allocated_size);
+        }
+        eprintln!(
+            "mft-diag: physical by $DATA flags -- plain: {} files {} bytes | \
+             compressed: {} files {} bytes | sparse: {} files {} bytes | \
+             encrypted: {} files {} bytes",
+            cat[0].0, cat[0].1, cat[1].0, cat[1].1, cat[2].0, cat[2].1, cat[3].0, cat[3].1,
+        );
+
+        // Allocated far above real is the signature of reading an uncompressed
+        // allocation for data the volume actually stores compressed.
+        let (over_n, over_bytes) = entries
+            .iter()
+            .filter(|e| !e.is_directory)
+            .filter(|e| e.sizes.allocated_size > e.sizes.real_size.saturating_mul(2))
+            .fold((0u64, 0u64), |(n, b), e| {
+                (
+                    n + 1,
+                    b.saturating_add(e.sizes.allocated_size - e.sizes.real_size),
+                )
+            });
+        eprintln!("mft-diag: allocated > 2x real -- {over_n} files, {over_bytes} bytes of excess");
     }
 
     Some(map)

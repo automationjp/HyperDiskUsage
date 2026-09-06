@@ -156,7 +156,34 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
 
     let file_drift = drift(wf, mf);
     let byte_drift = drift(wl, ml);
-    eprintln!("drift:       files={file_drift:.2}% logical={byte_drift:.2}%");
+    let phys_drift = drift(wp, mp);
+    eprintln!(
+        "drift:       files={file_drift:.2}% logical={byte_drift:.2}% physical={phys_drift:.2}%"
+    );
+    // Physical gets a looser bar than files and logical, and the reason is not
+    // that it matters less -- it is that the two sides genuinely measure
+    // different things at the margins:
+    //
+    //   * A file whose $DATA lives in an extension record reports no size from
+    //     its base record, and the $FILE_NAME copy is stale.
+    //   * A sparse file whose runs continue in an extension record is measured
+    //     only from the runs the base record holds.
+    //   * Named streams (WOF-compressed data among them) are not counted, which
+    //     matches what `du` does but not what the enumeration API reports.
+    //
+    // Measured residual on a real volume: 5.41%, the MFT under-reporting by
+    // 6.1 GB. Tracked in #39. The bar sits above that and far below the 33%
+    // this was before sparse runs were handled, so a regression to charging
+    // holes still fails here.
+    const PHYSICAL_BAR: f64 = 8.0;
+    assert!(
+        phys_drift < PHYSICAL_BAR,
+        "physical totals differ by {phys_drift:.2}% (enumeration {wp}, mft {mp}), \
+         above the {PHYSICAL_BAR}% allowed for the known extension-record and \
+         named-stream gaps. Check the mft-diag breakdown above: if the sparse \
+         category is back in the tens of gigabytes, `parse_data_sizes` is \
+         charging holes again. See #39."
+    );
 
     assert!(
         file_drift < 5.0,
