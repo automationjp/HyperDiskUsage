@@ -51,10 +51,41 @@ pub(crate) struct Entry {
     pub(crate) hard_link_count: u16,
     /// `$DATA` attribute flags: compressed, sparse, encrypted. Kept because the
     /// allocated size means something different for each, and the MFT and the
-    /// enumeration API disagree by 37% on a real volume (#39) -- which of those
-    /// categories the difference sits in is a question only measurement
-    /// answers.
+    /// enumeration API disagreed by 37% on a real volume until each was read
+    /// its own way (#39).
     pub(crate) data_flags: u16,
+    /// Why this record's sizes are what they are. The MFT still reports 6.1 GB
+    /// less than enumeration (#41) and the candidate causes are distinguishable
+    /// only by counting them: guessing which one dominates is how #39 went
+    /// wrong twice.
+    pub(crate) size_source: SizeSource,
+}
+
+/// Where a record's sizes came from, and what else it carries that could
+/// account for a discrepancy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SizeSource {
+    /// False when no `$DATA` was found in the base record and the stale copy in
+    /// `$FILE_NAME` had to stand in.
+    pub(crate) from_data_attribute: bool,
+    /// The record has an `$ATTRIBUTE_LIST`, so some of its attributes --
+    /// possibly the rest of `$DATA` -- live in extension records that this
+    /// reader does not follow for ordinary files.
+    pub(crate) has_attribute_list: bool,
+    /// Bytes in named `$DATA` streams beyond the first. `du` does not count
+    /// these; the enumeration API may. WOF-compressed files keep their real
+    /// contents here.
+    pub(crate) named_stream_bytes: u64,
+}
+
+impl Default for SizeSource {
+    fn default() -> Self {
+        Self {
+            from_data_attribute: true,
+            has_attribute_list: false,
+            named_stream_bytes: 0,
+        }
+    }
 }
 
 /// Reads records from the `$MFT` of a volume.
@@ -229,6 +260,7 @@ impl<S: VolumeSource> MftReader<S> {
         let mut names: Vec<FileName> = Vec::new();
         let mut sizes: Option<DataSizes> = None;
         let mut data_flags: u16 = 0;
+        let mut source = SizeSource::default();
         for attr in Attributes::new(&rec, &header) {
             match attr.type_code {
                 attr_type::FILE_NAME if !attr.non_resident => {
@@ -239,14 +271,24 @@ impl<S: VolumeSource> MftReader<S> {
                     }
                 }
                 // The first $DATA is the file's contents. A later one is a
-                // named alternate stream, which `du` does not count.
+                // named alternate stream, which `du` does not count -- but its
+                // bytes are measured anyway, because the enumeration API may be
+                // counting them and that would explain part of #41.
                 attr_type::DATA if sizes.is_none() => {
                     sizes = parse_data_sizes(&rec, &attr, self.geometry.cluster_size());
                     data_flags = attr.flags;
                 }
+                attr_type::DATA => {
+                    if let Some(s) = parse_data_sizes(&rec, &attr, self.geometry.cluster_size()) {
+                        source.named_stream_bytes =
+                            source.named_stream_bytes.saturating_add(s.allocated_size);
+                    }
+                }
+                attr_type::ATTRIBUTE_LIST => source.has_attribute_list = true,
                 _ => {}
             }
         }
+        source.from_data_attribute = sizes.is_some();
 
         let links = distinct_links(&names);
         // Prefer a Win32 name for display; a POSIX-only record still has one.
@@ -268,6 +310,7 @@ impl<S: VolumeSource> MftReader<S> {
             }),
             hard_link_count: header.hard_link_count,
             data_flags,
+            size_source: source,
         })
     }
 
@@ -929,6 +972,7 @@ mod tests {
             },
             hard_link_count: 1,
             data_flags: 0,
+            size_source: SizeSource::default(),
         }
     }
 
