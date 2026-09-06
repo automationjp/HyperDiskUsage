@@ -241,7 +241,7 @@ impl<S: VolumeSource> MftReader<S> {
                 // The first $DATA is the file's contents. A later one is a
                 // named alternate stream, which `du` does not count.
                 attr_type::DATA if sizes.is_none() => {
-                    sizes = parse_data_sizes(&rec, &attr);
+                    sizes = parse_data_sizes(&rec, &attr, self.geometry.cluster_size());
                     data_flags = attr.flags;
                 }
                 _ => {}
