@@ -233,6 +233,17 @@ pub(crate) struct AttrHeader {
     /// Offset of the value within the record, for resident attributes.
     pub(crate) value_offset: usize,
     pub(crate) value_length: usize,
+    /// Attribute flags (0x0C): compressed, encrypted, sparse. These decide
+    /// whether the allocated size at 0x28 is what the volume actually spends,
+    /// so a caller reporting disk usage cannot ignore them.
+    pub(crate) flags: u16,
+}
+
+/// Attribute header flags at offset 0x0C.
+pub(crate) mod attr_flags {
+    pub(crate) const COMPRESSED: u16 = 0x0001;
+    pub(crate) const ENCRYPTED: u16 = 0x4000;
+    pub(crate) const SPARSE: u16 = 0x8000;
 }
 
 /// Walks the attribute chain of a record.
@@ -298,6 +309,8 @@ impl Iterator for Attributes<'_> {
             non_resident,
             value_offset,
             value_length,
+            // Present in both resident and non-resident headers.
+            flags: u16_at(self.rec, self.pos + 0x0C).unwrap_or(0),
         };
         self.pos += total_length;
         Some(out)

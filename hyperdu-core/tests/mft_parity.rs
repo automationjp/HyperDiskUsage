@@ -156,7 +156,19 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
 
     let file_drift = drift(wf, mf);
     let byte_drift = drift(wl, ml);
-    eprintln!("drift:       files={file_drift:.2}% logical={byte_drift:.2}%");
+    let phys_drift = drift(wp, mp);
+    eprintln!(
+        "drift:       files={file_drift:.2}% logical={byte_drift:.2}% physical={phys_drift:.2}%"
+    );
+    // Physical is reported but not asserted: the two sides disagree by ~37% on
+    // a real volume and which one is right is still open (#39). Asserting it
+    // now would fail every run for a reason unrelated to the change under test.
+    if phys_drift >= 5.0 {
+        eprintln!(
+            "note:        physical differs by {phys_drift:.2}% ({wp} vs {mp}); see #39 and the \
+             mft-diag lines above for the per-category breakdown"
+        );
+    }
 
     assert!(
         file_drift < 5.0,
