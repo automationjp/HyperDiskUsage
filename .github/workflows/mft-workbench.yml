@@ -1,0 +1,30 @@
+name: mft-workbench
+on:
+  push:
+    branches: [codex/mft-verified-parity]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Read-only MFT probe (no enumeration fallback)
+        run: cargo test -p hyperdu-core --test mft_probe actual_mft_is_complete -- --nocapture 2>&1 | tee probe.log
+      - name: Source snapshot
+        if: always()
+        run: git archive --format=tar HEAD > source.tar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mft-probe-${{ github.run_id }}
+          path: |
+            source.tar
+            probe.log
+          retention-days: 1
