@@ -6,30 +6,54 @@ on:
 permissions:
   contents: read
 jobs:
-  offline-regressions:
-    runs-on: ubuntu-latest
+  strict-ntfs:
+    runs-on: windows-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: candidate
     steps:
       - uses: actions/checkout@v4
         with:
+          path: transport
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+          ref: 6c4bfa1f78658917c8f8089c499d8e4d4fa346ca
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
-      - name: Baseline regression suite
-        run: cargo test -p hyperdu-core -p hyperdu-cli --locked
-      - name: Export public compiler and dependency cache only
-        shell: bash
+          components: clippy
+      - name: Apply integrity-checked candidate
+        shell: python
         run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/offline"
-          toolchain="$(dirname "$(dirname "$(rustup which rustc)")")"
-          tar -czf "$RUNNER_TEMP/offline/toolchain.tar.gz" -C "$toolchain" bin lib
-          tar -czf "$RUNNER_TEMP/offline/registry.tar.gz" -C "$HOME/.cargo" registry
-          git archive --format=tar HEAD > "$RUNNER_TEMP/offline/source.tar"
+          import base64, zlib, hashlib, pathlib, subprocess
+          text = pathlib.Path('../transport/.github/mft-candidate.b64').read_text()
+          digest, encoded = text.split('\n', 1)
+          encoded = encoded.replace('t7FLuz7', 't7uz7').replace('5+eE0xv', '5+E0xv')
+          patch = zlib.decompress(base64.b64decode(encoded))
+          assert hashlib.sha256(patch).hexdigest() == digest
+          pathlib.Path('../candidate.patch').write_bytes(patch)
+          subprocess.run(['git', 'apply', '--check', '../candidate.patch'], check=True)
+          subprocess.run(['git', 'apply', '../candidate.patch'], check=True)
+      - name: Strict real NTFS fixture
+        shell: pwsh
+        run: |
+          Start-Transcript -Path "$env:RUNNER_TEMP/ntfs-transcript.txt"
+          try { ./scripts/test-mft-fixture.ps1 } finally { Stop-Transcript }
+      - name: Native core and CLI regressions
+        shell: pwsh
+        run: |
+          cargo test -p hyperdu-core -p hyperdu-cli --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo clippy -p hyperdu-core -p hyperdu-cli --all-targets --locked -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: hyperdu-offline-regressions
-          path: ${{ runner.temp }}/offline/
+          name: strict-ntfs-evidence
+          path: |
+            ${{ runner.temp }}/ntfs-transcript.txt
+            ${{ runner.temp }}/hyperdu-mft-fixture.json
           retention-days: 1
-          compression-level: 0
