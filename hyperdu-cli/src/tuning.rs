@@ -242,7 +242,7 @@ pub(crate) fn run_probe(args: &Args, opt: &Options) -> Result<()> {
         .ok()
         .and_then(|p| p.file_name().map(|name| name.to_string_lossy().to_string()))
         .map(|name| format!("./{name}"))
-        .unwrap_or_else(|| "./hyperdu-cli".to_string());
+        .unwrap_or_else(|| "./hyperdu".to_string());
 
     let mut pieces = Vec::with_capacity(1 + recommended_args.len() + filtered_args.len());
     pieces.push(shell_quote(&exe_display));

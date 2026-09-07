@@ -17,9 +17,9 @@
 set -eu
 
 REPO_URL="https://github.com/automationjp/HyperDiskUsage"
-# The binary is `hyperdu-cli`, not `hyperdu`: the crate declares no [[bin]], so
-# cargo names it after the package. Only the deb/rpm packaging renames it.
-CLI_BIN="hyperdu-cli"
+# The crate is `hyperdu-cli`; the command it installs is `hyperdu`, declared
+# by a [[bin]] section. That matches what the deb and rpm packages install.
+CLI_BIN="hyperdu"
 MCP_BIN="hyperdu-mcp"
 MCP_NAME="hyperdu"
 

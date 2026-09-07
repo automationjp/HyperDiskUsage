@@ -18,18 +18,19 @@ the results that are less flattering, is in
 ## Install
 
 ```bash
-cargo install hyperdu-cli --version 0.5.0-beta.1
+cargo install hyperdu-cli --version 0.5.0-beta.2
 ```
 
-The binary is named `hyperdu-cli`. The shorter `hyperdu` exists only in the deb
-and rpm packages, which rename it on install.
+The crate is `hyperdu-cli`; the command it installs is `hyperdu`. Same shape as
+ripgrep installing `rg`, and it matches what the deb and rpm packages have
+always called it.
 
 ## Use
 
 ```bash
-hyperdu-cli /path --top 20            # largest directories
-hyperdu-cli /path --json out.json     # structured output
-hyperdu-cli --compat gnu -sh /var/log # drop-in for du
+hyperdu /path --top 20            # largest directories
+hyperdu /path --json out.json     # structured output
+hyperdu --compat gnu -sh /var/log # drop-in for du
 ```
 
 Windows reads the NTFS `$MFT` directly when run elevated against a volume root,

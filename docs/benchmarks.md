@@ -111,7 +111,7 @@ Ubuntu 26.04 の `du` は **GNU coreutils ではなく uutils coreutils 0.8.0**�
 
 ```bash
 # Linux: 付属のスクリプトが公平性の条件を強制します
-scripts/bench/vs_du.sh --bin target/release/hyperdu-cli --runs 5 /usr /var
+scripts/bench/vs_du.sh --bin target/release/hyperdu --runs 5 /usr /var
 ```
 
 このスクリプトは、バイナリが古くないか、両ツールの走査対象が一致しているか、cold 計測で最小値を使っていないかを機械的に検査します。**いずれも過去に一度は破った条件**なので、文書ではなくコードで守らせています。

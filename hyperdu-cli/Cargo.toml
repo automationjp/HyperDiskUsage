@@ -1,6 +1,6 @@
 [package]
 name = "hyperdu-cli"
-version = "0.5.0-beta.1"
+version = "0.5.0-beta.2"
 edition = "2021"
 license = "MIT"
 description = "HyperDU CLI - ultra-fast disk usage analyzer"
@@ -10,6 +10,15 @@ homepage = "https://github.com/automationjp/HyperDiskUsage#readme"
 readme = "README.md"
 keywords = ["disk-usage", "du", "filesystem", "cli", "performance"]
 categories = ["command-line-utilities", "filesystem"]
+
+# The command is `hyperdu`, not `hyperdu-cli`. Without this, cargo names the
+# binary after the package, and `cargo install hyperdu-cli` left users with a
+# command nobody expects -- the deb and rpm packages already renamed it on the
+# way in, so the two install paths disagreed. A crate name that differs from its
+# command is ordinary; ripgrep installs `rg`.
+[[bin]]
+name = "hyperdu"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0"
@@ -76,7 +85,7 @@ group = "Applications/System"
 auto-req = true
 requires = []
 assets = [
-  { source = "../target/release/hyperdu-cli", dest = "/usr/bin/hyperdu", mode = "755" },
+  { source = "../target/release/hyperdu", dest = "/usr/bin/hyperdu", mode = "755" },
   { source = "../README.md", dest = "/usr/share/doc/hyperdu/README.md", mode = "644" },
   { source = "../LICENSE", dest = "/usr/share/doc/hyperdu/LICENSE", mode = "644" },
   { source = "../packaging/man/hyperdu.1", dest = "/usr/share/man/man1/hyperdu.1", mode = "644" },

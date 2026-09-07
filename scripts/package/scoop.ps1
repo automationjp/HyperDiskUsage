@@ -3,12 +3,11 @@
     Generate a Scoop manifest for the HyperDU CLI.
 
 .DESCRIPTION
-    Two things in the previous version made the resulting manifest unusable:
+    Two things in an earlier version made the resulting manifest unusable:
 
-      * `bin` was `hyperdu.exe`. Cargo names the binary after the package, so
-        what ships is `hyperdu-cli.exe`; the short name exists only inside the
-        deb and rpm packages, which rename it on install. Scoop would have
-        installed the package and left no working command behind.
+      * `bin` did not match what actually shipped, so Scoop installed the
+        package and left no working command behind. The crate now declares its
+        binary as `hyperdu`, and that is what the archive contains.
       * `homepage` pointed at `github.com/your-org/HyperDiskUsage`, which does
         not exist. Only the URL and hash were ever substituted at release time.
 
@@ -66,7 +65,7 @@ $manifest = [ordered]@{
     }
   }
   # Matches what cargo actually builds. See the note above.
-  bin          = 'hyperdu-cli.exe'
+  bin          = 'hyperdu.exe'
   checkver     = [ordered]@{
     github = $repo
   }

@@ -7,7 +7,7 @@ use std::{
 };
 
 fn run(action: &str, root: &Path, db: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_hyperdu-cli"))
+    Command::new(env!("CARGO_BIN_EXE_hyperdu"))
         .args(["index", action])
         .arg(root)
         .arg("--database")
@@ -70,7 +70,7 @@ fn regular_scan_flags_are_not_silently_accepted_by_snapshot_commands() {
     let root = temp.path().join("root");
     let db = temp.path().join("index.bin");
     fs::create_dir(&root).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_hyperdu-cli"))
+    let result = Command::new(env!("CARGO_BIN_EXE_hyperdu"))
         .args(["--apparent-size", "index", "refresh"])
         .arg(&root)
         .arg("--database")
@@ -86,7 +86,7 @@ fn a_directory_named_index_can_still_be_scanned() {
     let temp = tempfile::tempdir().unwrap();
     fs::create_dir(temp.path().join("index")).unwrap();
     for args in [vec!["./index"], vec!["--", "index"]] {
-        let result = Command::new(env!("CARGO_BIN_EXE_hyperdu-cli"))
+        let result = Command::new(env!("CARGO_BIN_EXE_hyperdu"))
             .current_dir(temp.path())
             .args(args)
             .output()
