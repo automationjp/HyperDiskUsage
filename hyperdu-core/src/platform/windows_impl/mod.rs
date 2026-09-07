@@ -149,8 +149,21 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
         let mut stale = (0u64, 0u64);
         let mut listed = (0u64, 0u64);
         let mut named = (0u64, 0u64);
+        // Named streams split by whether the unnamed $DATA is empty. Counting
+        // all 16.4 GB of named streams would overshoot a 6.1 GB gap by ten, so
+        // enumeration cannot be counting all of them. The suspected dividing
+        // line is WOF compression (Compact OS): those files park their real
+        // contents in a `WofCompressedData` stream and leave the unnamed $DATA
+        // empty, and Windows reports the compressed bytes as the file's size.
+        // An ordinary alternate data stream sits beside a non-empty $DATA and
+        // is a different case. If the first bucket lands near 6.1 GB the split
+        // is the answer; if it does not, this rules the theory out cheaply.
+        let mut wof_like = (0u64, 0u64);
+        let mut ads_like = (0u64, 0u64);
+        let mut file_bytes: u64 = 0;
         for e in entries.iter().filter(|e| !e.is_directory) {
             let s = &e.size_source;
+            file_bytes = file_bytes.saturating_add(e.sizes.allocated_size);
             if !s.from_data_attribute {
                 stale.0 += 1;
                 stale.1 = stale.1.saturating_add(e.sizes.allocated_size);
@@ -162,6 +175,16 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
             if s.named_stream_bytes > 0 {
                 named.0 += 1;
                 named.1 = named.1.saturating_add(s.named_stream_bytes);
+
+                // Only meaningful when the size really came from $DATA; a
+                // $FILE_NAME fallback says nothing about the unnamed stream.
+                let bucket = if s.from_data_attribute && e.sizes.allocated_size == 0 {
+                    &mut wof_like
+                } else {
+                    &mut ads_like
+                };
+                bucket.0 += 1;
+                bucket.1 = bucket.1.saturating_add(s.named_stream_bytes);
             }
         }
         eprintln!(
@@ -169,6 +192,19 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
              has $ATTRIBUTE_LIST: {} files {} bytes | \
              named streams: {} files {} bytes (not counted)",
             stale.0, stale.1, listed.0, listed.1, named.0, named.1
+        );
+        eprintln!(
+            "mft-diag: named streams split -- empty unnamed $DATA (WOF-like): {} files {} bytes | \
+             non-empty unnamed $DATA (ordinary ADS): {} files {} bytes",
+            wof_like.0, wof_like.1, ads_like.0, ads_like.1
+        );
+        // Printed together so one CI run answers "which total matches
+        // enumeration" without arithmetic across three log lines.
+        eprintln!(
+            "mft-diag: file bytes -- as reported: {} | plus WOF-like: {} | plus all named: {}",
+            file_bytes,
+            file_bytes.saturating_add(wof_like.1),
+            file_bytes.saturating_add(named.1)
         );
     }
 
