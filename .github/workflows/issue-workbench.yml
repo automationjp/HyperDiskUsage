@@ -12,6 +12,10 @@ concurrency:
 permissions:
   contents: write
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   regression:
     if: github.ref == 'refs/heads/codex/complete-open-issues-16-41'
@@ -37,6 +41,13 @@ jobs:
           PY
           git apply --check .github/issue-workbench.patch
           git apply .github/issue-workbench.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('hyperdu-core/src/platform/windows_impl/mft_reader.rs')
+          text = p.read_text().replace('\nmod streams;', '\n#[path = "mft_reader/streams.rs"]\nmod streams;')
+          text = text.replace('parse_boot_sector, parse_data_sizes, parse_file_name,', 'parse_boot_sector, parse_file_name,')
+          p.write_text(text)
+          PY
           rustup toolchain install nightly --profile minimal --component rustfmt
           cargo +nightly fmt --all -- --config group_imports=StdExternalCrate --config imports_granularity=Crate
           git config user.name 'github-actions[bot]'
