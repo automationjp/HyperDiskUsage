@@ -9,6 +9,6 @@ fi
 # Lightweight pre-commit (non-blocking)
 # Run best-effort auto-fix; do NOT block commits.
 echo "[pre-commit] (info) best-effort clippy auto-fix"
-bash scripts/clippy_fix.sh || true
+bash scripts/lint/clippy_fix.sh || true
 echo "[pre-commit] (info) skipping heavy lint; enforced at push"
 exit 0

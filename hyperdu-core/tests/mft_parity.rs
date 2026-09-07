@@ -219,7 +219,7 @@ fn use_mft_off_never_engages_the_backend() {
     );
 }
 
-/// Contract for scripts/test-ntfs-fixture.ps1. Both backends must independently
+/// Contract for scripts/dev/ntfs_fixture.ps1. Both backends must independently
 /// match known fixture totals, not merely agree on the same erroneous number.
 fn assert_fixture(map: &hyperdu_core::StatMap, root: &std::path::Path) {
     let fixture = root.join("hyperdu-fixture");

@@ -142,7 +142,7 @@ Issue #16 が挙げたとおり、以下は着手前に決める必要がある�
 - `hyperdu-core/src/incremental.rs`（200 行）
 - `hyperdu-cli/src/main.rs` の `--incremental-db` / `--compute-delta` / `--update-snapshot` / `--watch`
 - `sled` への依存（`watch` を残すなら `notify` は維持）
-- `scripts/bench.sh:95-96` の `incr-update` / `incr-delta` ケース
+- `scripts/bench/run.sh:95-96` の `incr-update` / `incr-delta` ケース
 - `packaging/man/hyperdu.1:104-105`
 - `README.md:146`
 

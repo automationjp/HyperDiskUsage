@@ -28,19 +28,19 @@ jobs:
           cargo install cargo-deb || true
           cargo install cargo-generate-rpm || true
       - name: Lint (fmt + clippy)
-        run: bash scripts/lint.sh
+        run: bash scripts/lint/run.sh
       - name: Package ZIP/DEB/RPM (CLI+GUI)
         run: |
           # Build Linux targets only here; Windows artifacts are built on the Windows runner to avoid duplicates
-          bash scripts/package_release.sh --targets "linux-gnu,linux-musl,linux-aarch64" \
+          bash scripts/package/release.sh --targets "linux-gnu,linux-musl,linux-aarch64" \
             --cpu-flavors "generic" --deb --rpm --verbose
       - name: Generate Snap/Flatpak manifests
         run: |
-          bash scripts/package_snap.sh --generate-only
-          bash scripts/package_flatpak.sh --generate-only
+          bash scripts/package/snap.sh --generate-only
+          bash scripts/package/flatpak.sh --generate-only
       - name: Try AppImage (GUI)
         run: |
-          bash scripts/package_appimage.sh || true
+          bash scripts/package/appimage.sh || true
       - name: Build Snap (CLI) via Snapcraft
         uses: snapcore/action-build@v1
         with:
@@ -90,16 +90,16 @@ jobs:
           brew install create-dmg || true
           cargo install cargo-bundle || true
       - name: Lint (fmt + clippy)
-        run: bash scripts/lint.sh
+        run: bash scripts/lint/run.sh
       - name: Build DMG / zip (GUI)
         run: |
-          bash scripts/package_macos_dmg.sh --release
+          bash scripts/package/macos_dmg.sh --release
       - name: Generate Homebrew formula
-        run: bash scripts/package_brew.sh
+        run: bash scripts/package/brew.sh
       - name: Insert URL/SHA into formula
         run: |
           URL_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
-          bash scripts/package_release.sh --targets homebrew --url-base "$URL_BASE" --skip-gui --cpu-flavors generic
+          bash scripts/package/release.sh --targets homebrew --url-base "$URL_BASE" --skip-gui --cpu-flavors generic
         shell: bash
       - name: Install GitHub CLI
         run: brew install gh
@@ -154,11 +154,11 @@ jobs:
           choco install gh -y
       - name: Lint (fmt + clippy)
         shell: bash
-        run: bash scripts/lint.sh
+        run: bash scripts/lint/run.sh
       - name: Package (ZIP/EXE/MSI)
         shell: powershell
         run: |
-          pwsh -File scripts/package_release.ps1
+          pwsh -File scripts/package/release.ps1
       - name: Generate Scoop & winget manifests
         shell: powershell
         run: |
@@ -186,9 +186,9 @@ jobs:
           $exe = Get-Asset 'dist\hyperdu-cli-windows-*.exe'
           $zip = Get-Asset 'dist\hyperdu-cli-windows-*.zip'
 
-          pwsh -File scripts/package_winget.ps1 -Version $ver `
+          pwsh -File scripts/package/winget.ps1 -Version $ver `
             -InstallerUrl $exe.Url -InstallerSha256 $exe.Hash
-          pwsh -File scripts/package_scoop.ps1 -Version $ver `
+          pwsh -File scripts/package/scoop.ps1 -Version $ver `
             -Url $zip.Url -Sha256 $zip.Hash
 
           Write-Host "winget manifests:"

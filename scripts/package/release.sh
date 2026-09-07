@@ -53,8 +53,8 @@ Flags:
   --url-base URL   Base URL for release assets (for local manifest URL/SHA insertion)
 
 Examples:
-  bash scripts/package_release.sh --cpu-flavors "generic,native"
-  bash scripts/package_release.sh --targets "linux-musl,windows-gnu" --skip-gui --verbose
+  bash scripts/package/release.sh --cpu-flavors "generic,native"
+  bash scripts/package/release.sh --targets "linux-musl,windows-gnu" --skip-gui --verbose
 USAGE
 }
 
@@ -93,7 +93,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/.. && pwd)"
+root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/../.. && pwd)"
 cd "$root_dir"
 
 command -v cargo >/dev/null || { echo "error: cargo not found in PATH"; exit 1; }
@@ -230,9 +230,9 @@ build_and_capture() {
   local envlog=( )
   if [[ $verbose -eq 1 ]]; then envlog+=("HYPERDU_LOG=1"); fi
   if [[ -n "$rustflags" ]]; then
-    bin=$(env "${envlog[@]}" RUSTFLAGS="$rustflags" bash "$root_dir/scripts/build_print.sh" -p "$pkg" --release | tail -n1 || true)
+    bin=$(env "${envlog[@]}" RUSTFLAGS="$rustflags" bash "$root_dir/scripts/dev/build_print.sh" -p "$pkg" --release | tail -n1 || true)
   else
-    bin=$(env "${envlog[@]}" bash "$root_dir/scripts/build_print.sh" -p "$pkg" --release | tail -n1 || true)
+    bin=$(env "${envlog[@]}" bash "$root_dir/scripts/dev/build_print.sh" -p "$pkg" --release | tail -n1 || true)
   fi
   if [[ -z "$bin" || ! -f "$bin" ]]; then
     echo "error: failed to build or locate binary for $pkg"
@@ -313,9 +313,9 @@ build_and_capture_cross() {
       cargo_args+=( --no-default-features ) ;;
   esac
   if [[ -n "$rustflags" ]]; then
-    bin=$(env RUSTFLAGS="$rustflags" "${env_cmd[@]}" bash "$root_dir/scripts/build_print.sh" "${cargo_args[@]}" | tail -n1 || true)
+    bin=$(env RUSTFLAGS="$rustflags" "${env_cmd[@]}" bash "$root_dir/scripts/dev/build_print.sh" "${cargo_args[@]}" | tail -n1 || true)
   else
-    bin=$(env "${env_cmd[@]}" bash "$root_dir/scripts/build_print.sh" "${cargo_args[@]}" | tail -n1 || true)
+    bin=$(env "${env_cmd[@]}" bash "$root_dir/scripts/dev/build_print.sh" "${cargo_args[@]}" | tail -n1 || true)
   fi
   if [[ -z "$bin" || ! -f "$bin" ]]; then
     echo "warn: failed to build or locate binary for $pkg ($triple)"
@@ -474,21 +474,21 @@ if [[ -n "$targets_csv" ]]; then
       linux-appimage)
         if [[ "$os_tag" == linux ]]; then
           ensure_appimage_tools
-          bash "$root_dir/scripts/package_appimage.sh" >> "$dist_dir/appimage-pack.log" 2>&1 || echo "warn: AppImage step failed (see dist/appimage-pack.log)"
+          bash "$root_dir/scripts/package/appimage.sh" >> "$dist_dir/appimage-pack.log" 2>&1 || echo "warn: AppImage step failed (see dist/appimage-pack.log)"
         else
           echo "warn: linux-appimage requested on non-linux host; skipping"
         fi ;;
       linux-snap)
         if [[ "$os_tag" == linux ]]; then
           ensure_snapcraft
-          bash "$root_dir/scripts/package_snap.sh" >> "$dist_dir/snapcraft-pack.log" 2>&1 || echo "warn: snapcraft step failed (see dist/snapcraft-pack.log)"
+          bash "$root_dir/scripts/package/snap.sh" >> "$dist_dir/snapcraft-pack.log" 2>&1 || echo "warn: snapcraft step failed (see dist/snapcraft-pack.log)"
         else
           echo "warn: linux-snap requested on non-linux host; skipping"
         fi ;;
       linux-flatpak)
         if [[ "$os_tag" == linux ]]; then
           ensure_flatpak_builder
-          bash "$root_dir/scripts/package_flatpak.sh" >> "$dist_dir/flatpak-pack.log" 2>&1 || echo "warn: flatpak step failed (see dist/flatpak-pack.log)"
+          bash "$root_dir/scripts/package/flatpak.sh" >> "$dist_dir/flatpak-pack.log" 2>&1 || echo "warn: flatpak step failed (see dist/flatpak-pack.log)"
         else
           echo "warn: linux-flatpak requested on non-linux host; skipping"
         fi ;;
@@ -496,25 +496,25 @@ if [[ -n "$targets_csv" ]]; then
         if [[ "$os_tag" == macos ]]; then
           ensure_cargo_bundle
           ensure_create_dmg
-          bash "$root_dir/scripts/package_macos_dmg.sh" --release || true
+          bash "$root_dir/scripts/package/macos_dmg.sh" --release || true
         else
           echo "warn: macos-dmg requested on non-macos host; skipping"
         fi ;;
       homebrew)
-        bash "$root_dir/scripts/package_brew.sh" || true ;;
+        bash "$root_dir/scripts/package/brew.sh" || true ;;
       windows-msi)
-        if [[ "$os_tag" == windows ]]; then pwsh -File "$root_dir/scripts/package_release.ps1" || true; else echo "warn: windows-msi requested on non-windows host; skipping"; fi ;;
+        if [[ "$os_tag" == windows ]]; then pwsh -File "$root_dir/scripts/package/release.ps1" || true; else echo "warn: windows-msi requested on non-windows host; skipping"; fi ;;
       scoop)
         if [[ "$os_tag" == windows ]]; then
           ver=$(sed -n 's/^version = "\(.*\)"/\1/p' "$root_dir/hyperdu-cli/Cargo.toml" | head -n1)
-          pwsh -File "$root_dir/scripts/package_scoop.ps1" -Version "$ver" || true
+          pwsh -File "$root_dir/scripts/package/scoop.ps1" -Version "$ver" || true
         else
           echo "warn: scoop requested on non-windows host; skipping"
         fi ;;
       winget)
         if [[ "$os_tag" == windows ]]; then
           ver=$(sed -n 's/^version = "\(.*\)"/\1/p' "$root_dir/hyperdu-cli/Cargo.toml" | head -n1)
-          pwsh -File "$root_dir/scripts/package_winget.ps1" -Version "$ver" || true
+          pwsh -File "$root_dir/scripts/package/winget.ps1" -Version "$ver" || true
         else
           echo "warn: winget requested on non-windows host; skipping"
         fi ;;

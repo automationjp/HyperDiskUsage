@@ -12,7 +12,7 @@ USAGE
 gen_only=0
 if [[ ${1:-} == "--generate-only" ]]; then gen_only=1; fi
 
-root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/.. && pwd)"
+root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/../.. && pwd)"
 flatpak_dir="$root_dir/packaging/flatpak"
 mkdir -p "$flatpak_dir"
 

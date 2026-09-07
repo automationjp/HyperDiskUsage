@@ -10,7 +10,7 @@ usage() {
 Usage: $(basename "$0") vMAJOR.MINOR.PATCH [options]
 
 Options:
-  --no-lint           Skip running scripts/lint.sh before tagging
+  --no-lint           Skip running scripts/lint/run.sh before tagging
   --force-tag         Delete remote tag if it already exists, then re-create
   --push-branch BR    Push this branch (default: current)
   --publish-local     Build artifacts locally and publish with gh (skip CI)
@@ -74,7 +74,7 @@ move_to_repo_root() {
     *) sp="$PWD/$sp" ;;                # make absolute from current dir
   esac
   local rr
-  rr=$(cd "$(dirname "$sp")/.." && pwd) || {
+  rr=$(cd "$(dirname "$sp")/../.." && pwd) || {
     echo "error: failed to resolve repository root; run from repo root and try again" >&2
     exit 1
   }
@@ -101,7 +101,7 @@ fi
 if [[ $RUN_LINT -eq 1 ]]; then
   if command -v cargo >/dev/null 2>&1; then
     echo "==> Lint (fmt + clippy)"
-    bash scripts/lint.sh
+    bash scripts/lint/run.sh
   else
     echo "(info) cargo not found; skipping lint. Use --no-lint to silence."
   fi
@@ -110,7 +110,7 @@ fi
 if [[ $PUBLISH_LOCAL -eq 1 ]]; then
   command -v gh >/dev/null 2>&1 || { echo "error: gh CLI not found" >&2; exit 1; }
   echo "==> Local packaging"
-  bash scripts/package_release.sh --targets "$TARGETS" --cpu-flavors "$CPU_FLAVORS" --deb --rpm --verbose
+  bash scripts/package/release.sh --targets "$TARGETS" --cpu-flavors "$CPU_FLAVORS" --deb --rpm --verbose
   echo "==> Creating GitHub Release: $TAG"
   if gh release view "$TAG" >/dev/null 2>&1; then
     echo "(info) release $TAG exists; updating assets"

@@ -21,7 +21,7 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Lint (fmt + clippy)
-        run: bash scripts/lint.sh
+        run: bash scripts/lint/run.sh
       - name: Shellcheck scripts
         run: |
           sudo apt-get update

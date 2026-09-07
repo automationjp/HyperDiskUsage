@@ -31,7 +31,7 @@ cd_repo_root() {
   local sp="${BASH_SOURCE[0]}"
   case "$sp" in /*) ;; *) sp="$PWD/$sp" ;; esac
   local rr
-  rr=$(cd "$(dirname "$sp")/.." && pwd) || {
+  rr=$(cd "$(dirname "$sp")/../.." && pwd) || {
     echo "error: could not resolve repository root" >&2; exit 1; }
   cd "$rr" || { echo "error: cannot cd to $rr" >&2; exit 1; }
 }

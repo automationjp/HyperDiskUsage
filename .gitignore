@@ -31,3 +31,10 @@ Thumbs.db
 **/*.profdata
 **/*.profraw
 .flatpak-builder/
+
+# Investigation leftovers and editor state. Ignored rather than deleted: the C
+# benchmarks and the btrfs probe still have content, and only their author knows
+# whether they are finished with them.
+.btrfs-probe/
+project_memory/
+.specstory/

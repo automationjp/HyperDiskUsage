@@ -14,7 +14,7 @@ Environment:
 USAGE
 }
 
-root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/.. && pwd)"
+root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/../.. && pwd)"
 dist_dir="$root_dir/dist"
 mkdir -p "$dist_dir"
 

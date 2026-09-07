@@ -80,7 +80,7 @@ initialized. A completed comparison prints `parity backend: mft (no fallback)`.
 
 ## Controlled Windows integration fixture
 
-`scripts/test-ntfs-fixture.ps1` is restricted to an elevated GitHub Actions runner.
+`scripts/dev/ntfs_fixture.ps1` is restricted to an elevated GitHub Actions runner.
 It creates a new 256 MiB growable VHDX at a fresh GUID-named path in RUNNER_TEMP,
 selects an unused drive letter, and verifies that the resulting NTFS volume
 belongs to that image. It never selects or cleans a physical disk by number.

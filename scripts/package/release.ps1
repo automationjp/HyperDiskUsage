@@ -25,7 +25,7 @@ Ensure-CargoWix
 
 function Show-Help {
   @'
-Usage: scripts/package_release.ps1 [-SkipGui] [-CpuFlavor generic|native] [-Help]
+Usage: scripts/package/release.ps1 [-SkipGui] [-CpuFlavor generic|native] [-Help]
 
 Builds release binaries (CLI/GUI) for the current host and packages them into dist/*.zip
 along with README.md. Also drops plain .exe copies on Windows hosts. If cargo-wix
@@ -37,15 +37,15 @@ Options:
   -Help            Show this help.
 
 Examples:
-  pwsh -File scripts/package_release.ps1
-  pwsh -File scripts/package_release.ps1 -SkipGui -CpuFlavor native
+  pwsh -File scripts/package/release.ps1
+  pwsh -File scripts/package/release.ps1 -SkipGui -CpuFlavor native
 
-Note: For cross packaging on POSIX hosts, use scripts/package_release.sh --targets ...
+Note: For cross packaging on POSIX hosts, use scripts/package/release.sh --targets ...
 '@ | Write-Host
 }
 
 if ($Help -or $Rest -contains '/help' -or $Rest -contains '/?') { Show-Help; exit 0 }
-$Root = Split-Path -Parent $PSCommandPath | Split-Path -Parent
+$Root = Split-Path -Parent $PSCommandPath | Split-Path -Parent | Split-Path -Parent
 Set-Location $Root
 
 function Build-And-Capture([string]$Package, [string]$Rustflags) {

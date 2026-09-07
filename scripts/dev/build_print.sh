@@ -5,12 +5,12 @@ set -euo pipefail
 # This is a convenience wrapper that forwards all args to `cargo build`.
 #
 # Usage:
-#   scripts/build_print.sh [CARGO_BUILD_ARGS...]
+#   scripts/dev/build_print.sh [CARGO_BUILD_ARGS...]
 #
 # Examples:
-#   scripts/build_print.sh -p hyperdu-cli --release
-#   scripts/build_print.sh -p hyperdu-gui
-#   HYPERDU_LOG=1 scripts/build_print.sh -p hyperdu-cli --release --target x86_64-unknown-linux-musl
+#   scripts/dev/build_print.sh -p hyperdu-cli --release
+#   scripts/dev/build_print.sh -p hyperdu-gui
+#   HYPERDU_LOG=1 scripts/dev/build_print.sh -p hyperdu-cli --release --target x86_64-unknown-linux-musl
 #
 # Environment:
 #   HYPERDU_TIMINGS=1      -> pass `--timings` to cargo (report in target/cargo-timings)
@@ -30,7 +30,7 @@ for a in "$@"; do
   esac
 done
 
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/.. && pwd)"
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/../.. && pwd)"
 
 # Extract optional package/target for log naming
 pkg="unknown"

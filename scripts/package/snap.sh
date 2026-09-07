@@ -12,7 +12,7 @@ USAGE
 gen_only=0
 if [[ ${1:-} == "--generate-only" ]]; then gen_only=1; fi
 
-root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/.. && pwd)"
+root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/../.. && pwd)"
 snap_dir="$root_dir/snap"
 mkdir -p "$snap_dir"
 

@@ -4,7 +4,7 @@ set -uo pipefail
 # Compare hyperdu against GNU du on the same trees.
 #
 # Usage:
-#   scripts/bench_du.sh [--bin PATH] [--runs N] [--cold] [--allow-stale] TREE [TREE...]
+#   scripts/bench/vs_du.sh [--bin PATH] [--runs N] [--cold] [--allow-stale] TREE [TREE...]
 #
 # Options:
 #   --bin PATH      hyperdu-cli binary (default: target/release/hyperdu-cli)
