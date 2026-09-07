@@ -1,0 +1,207 @@
+/* One page per language, so the whole sheet fits here. No build step and no
+   framework: the page has to render before anyone decides whether a disk tool
+   that claims to be fast is worth their time. */
+
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #9198a1;
+  --accent: #4ea1ff;
+  --accent-dim: #1f6feb;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
+    "Noto Sans JP", Meiryo, sans-serif;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ffffff;
+    --surface: #f6f8fa;
+    --border: #d1d9e0;
+    --text: #1f2328;
+    --muted: #59636e;
+    --accent: #0969da;
+    --accent-dim: #0969da;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  line-height: 1.75;
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+.wrap {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+/* ---- header ---- */
+
+.site-head {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.head-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.brand {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--text);
+  text-decoration: none;
+  letter-spacing: -0.02em;
+}
+
+.lang-switch { display: flex; gap: 0.5rem; }
+
+.lang-switch a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.lang-switch a:hover { color: var(--text); border-color: var(--border); }
+
+.lang-switch a.is-current {
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--border);
+}
+
+/* ---- content ---- */
+
+main { padding: 3rem 1.25rem 4rem; }
+
+h1 {
+  font-size: clamp(2rem, 5vw, 2.75rem);
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.75rem;
+}
+
+h2 {
+  font-size: 1.4rem;
+  letter-spacing: -0.01em;
+  margin: 3rem 0 0.75rem;
+  padding-top: 1.75rem;
+  border-top: 1px solid var(--border);
+}
+
+h3 { font-size: 1.05rem; margin: 2rem 0 0.5rem; }
+
+.lede {
+  font-size: 1.15rem;
+  color: var(--muted);
+  margin: 0 0 2rem;
+}
+
+a { color: var(--accent); }
+
+code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  overflow-x: auto;
+  line-height: 1.6;
+}
+
+pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 0.875rem;
+}
+
+/* ---- tables ---- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.25rem 0;
+  font-size: 0.925rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Timings only compare at a glance when the digits share a width. */
+td:nth-child(n+2) { font-variant-numeric: tabular-nums; }
+
+tbody tr:hover { background: var(--surface); }
+
+strong { color: var(--text); font-weight: 650; }
+
+/* ---- callout ---- */
+
+blockquote {
+  margin: 1.5rem 0;
+  padding: 0.85rem 1.1rem;
+  background: var(--surface);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 0 6px 6px 0;
+  color: var(--muted);
+}
+
+blockquote p { margin: 0.35rem 0; }
+
+/* ---- footer ---- */
+
+.site-foot {
+  border-top: 1px solid var(--border);
+  padding: 1.5rem 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.site-foot a { color: var(--muted); }
+.site-foot p { margin: 0; }
+
+ul { padding-left: 1.3rem; }
+li { margin: 0.35rem 0; }
+
+hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
