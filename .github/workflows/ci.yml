@@ -33,8 +33,8 @@ jobs:
           cargo +nightly fmt --all -- --check --config group_imports=StdExternalCrate --config imports_granularity=Crate
       - name: Build
         run: cargo build --workspace --release
-      - name: Test core
-        run: cargo test -p hyperdu-core -- --nocapture
+      - name: Test core and CLI
+        run: cargo test -p hyperdu-core -p hyperdu-cli -- --nocapture
 
   # The Windows enumeration backend and its tests are cfg(windows), so the Linux
   # job compiles neither. Run them where they apply.
