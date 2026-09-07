@@ -30,6 +30,7 @@ jobs:
         run: |
           python ../transport/.github/apply-candidate.py
           git apply ../transport/.github/mft-extra.patch
+          git apply ../transport/.github/mft-sparse.patch
       - name: Format and source snapshot
         run: |
           rustup toolchain install nightly --profile minimal --component rustfmt
@@ -87,6 +88,8 @@ jobs:
           python ../transport/.github/apply-candidate.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git apply ../transport/.github/mft-extra.patch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git apply ../transport/.github/mft-sparse.patch
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Strict real NTFS fixture
         shell: pwsh
