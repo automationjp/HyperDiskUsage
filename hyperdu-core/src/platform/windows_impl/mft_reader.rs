@@ -1328,7 +1328,7 @@ mod tests {
         let p = push_nonresident_data(&mut rec, p, 4096, 3000);
         rec[p..p + 4].copy_from_slice(&attr_type::END.to_le_bytes());
         set_used(&mut rec, (p + 4) as u32);
-        let vol = volume(&with_metadata_records(vec![rec], 5));
+        let vol = volume(with_metadata_records(vec![rec], 5));
         let entry = MftReader::open(vol).unwrap().entry(16).unwrap();
         assert_eq!(entry.sizes.real_size, 3000);
         assert_eq!(entry.sizes.allocated_size, 4096);
@@ -1347,7 +1347,7 @@ mod tests {
         let p = push_nonresident_data(&mut extension, 64, 16384, 12345);
         extension[p..p + 4].copy_from_slice(&attr_type::END.to_le_bytes());
         set_used(&mut extension, (p + 4) as u32);
-        let vol = volume(&with_metadata_records(vec![base, extension], 5));
+        let vol = volume(with_metadata_records(vec![base, extension], 5));
         let entry = MftReader::open(vol).unwrap().entry(16).unwrap();
         assert_eq!(entry.sizes.real_size, 12345);
         assert_eq!(entry.sizes.allocated_size, 16384);
@@ -1358,7 +1358,7 @@ mod tests {
     fn issue41_extension_records_are_not_independent_files() {
         let mut ext = file_record(ROOT_RECORD, "not-another-file", 4096, 100, 1);
         ext[32..40].copy_from_slice(&16u64.to_le_bytes());
-        let vol = volume(&with_metadata_records(vec![ext], 5));
+        let vol = volume(with_metadata_records(vec![ext], 5));
         assert!(MftReader::open(vol).unwrap().entry(16).is_none());
     }
 }
