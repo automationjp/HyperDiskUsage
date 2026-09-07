@@ -27,7 +27,9 @@ jobs:
         with:
           components: clippy, rustfmt
       - name: Apply candidate
-        run: python ../transport/.github/apply-candidate.py
+        run: |
+          python ../transport/.github/apply-candidate.py
+          git apply ../transport/.github/mft-extra.patch
       - name: Format and source snapshot
         run: |
           rustup toolchain install nightly --profile minimal --component rustfmt
@@ -35,10 +37,15 @@ jobs:
           git add -A
           git diff --cached --binary > "$RUNNER_TEMP/candidate.patch"
           tar --exclude=.git --exclude=target -czf "$RUNNER_TEMP/candidate-source.tar.gz" .
-      - name: Core and CLI regressions
-        run: cargo test -p hyperdu-core -p hyperdu-cli --locked 2>&1 | tee "$RUNNER_TEMP/core-cli.log"
-      - name: Workspace all features
-        run: cargo test --workspace --all-features --locked 2>&1 | tee "$RUNNER_TEMP/all-features.log"
+      - name: Workspace regressions
+        run: cargo test --workspace --locked 2>&1 | tee "$RUNNER_TEMP/workspace.log"
+      - name: Supported feature combinations
+        run: |
+          # profiling's Tracy and Puffin backends are mutually exclusive upstream.
+          # Test each rather than claiming --all-features is a valid combination.
+          cargo test -p hyperdu-core -p hyperdu-cli --locked --features hyperdu-core/mimalloc,hyperdu-core/rayon-par,hyperdu-core/rayon-inner,hyperdu-core/simd-prefetch 2>&1 | tee "$RUNNER_TEMP/features.log"
+          cargo test -p hyperdu-core -p hyperdu-cli --locked --features hyperdu-core/prof-tracy 2>&1 | tee "$RUNNER_TEMP/tracy.log"
+          cargo test -p hyperdu-core -p hyperdu-cli --locked --features hyperdu-core/prof-puffin 2>&1 | tee "$RUNNER_TEMP/puffin.log"
       - name: Clippy
         if: always()
         run: cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 | tee "$RUNNER_TEMP/clippy.log"
@@ -49,8 +56,10 @@ jobs:
           path: |
             ${{ runner.temp }}/candidate.patch
             ${{ runner.temp }}/candidate-source.tar.gz
-            ${{ runner.temp }}/core-cli.log
-            ${{ runner.temp }}/all-features.log
+            ${{ runner.temp }}/workspace.log
+            ${{ runner.temp }}/features.log
+            ${{ runner.temp }}/tracy.log
+            ${{ runner.temp }}/puffin.log
             ${{ runner.temp }}/clippy.log
           retention-days: 1
   strict-ntfs:
@@ -77,6 +86,8 @@ jobs:
         run: |
           python ../transport/.github/apply-candidate.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git apply ../transport/.github/mft-extra.patch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Strict real NTFS fixture
         shell: pwsh
         run: ./scripts/test-mft-fixture.ps1
@@ -95,3 +106,26 @@ jobs:
             ${{ runner.temp }}/hyperdu-mft-cargo.log
             ${{ runner.temp }}/hyperdu-mft-fixture.json
           retention-days: 1
+  publish-tested-source:
+    needs: [linux, strict-ntfs]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/complete-open-issues-16-41
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-candidate-evidence
+          path: ${{ runner.temp }}/validated
+      - name: Commit only validated source to the requested PR branch
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = 6c4bfa1f78658917c8f8089c499d8e4d4fa346ca
+          git apply --index "$RUNNER_TEMP/validated/candidate.patch"
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: add recoverable Linux index monitoring and strict NTFS parity validation'
+          git push origin HEAD:refs/heads/codex/complete-open-issues-16-41
