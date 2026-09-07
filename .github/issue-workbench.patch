@@ -1,113 +1,86 @@
+diff --git a/hyperdu-cli/tests/index_commands.rs b/hyperdu-cli/tests/index_commands.rs
+new file mode 100644
+index 0000000..2fba164
+--- /dev/null
++++ b/hyperdu-cli/tests/index_commands.rs
+@@ -0,0 +1,49 @@
++#![cfg(target_os = "linux")]
++
++use std::{fs, path::Path, process::{Command, Output}};
++
++fn run(action: &str, root: &Path, db: &Path) -> Output {
++    Command::new(env!("CARGO_BIN_EXE_hyperdu-cli"))
++        .args(["index", action]).arg(root).arg("--database").arg(db)
++        .output().unwrap()
++}
++
++fn json(out: Output) -> serde_json::Value {
++    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
++    serde_json::from_slice(&out.stdout).unwrap()
++}
++
++#[test]
++fn snapshot_reads_cached_totals_until_explicit_refresh() {
++    let temp = tempfile::tempdir().unwrap();
++    let root = temp.path().join("root");
++    let db = temp.path().join("index.bin");
++    fs::create_dir_all(root.join("child")).unwrap();
++    fs::write(root.join("child/file"), vec![1u8; 4096]).unwrap();
++    let first = json(run("refresh", &root, &db));
++    assert_eq!(first["files"], 1);
++    assert_eq!(first["freshness"], "stale");
++    fs::write(root.join("another"), vec![1u8; 8192]).unwrap();
++    let cached = json(run("show", &root, &db));
++    assert_eq!(cached["physical_bytes"], first["physical_bytes"]);
++    assert_eq!(cached["files"], 1);
++    let refreshed = json(run("refresh", &root, &db));
++    assert_eq!(refreshed["files"], 2);
++    assert!(refreshed["physical_bytes"].as_u64().unwrap() > first["physical_bytes"].as_u64().unwrap());
++}
++
++#[test]
++fn refuses_an_unrelated_root_and_self_indexing() {
++    let temp = tempfile::tempdir().unwrap();
++    let root = temp.path().join("root");
++    let other = temp.path().join("other");
++    let db = temp.path().join("index.bin");
++    fs::create_dir(&root).unwrap();
++    fs::create_dir(&other).unwrap();
++    json(run("refresh", &root, &db));
++    assert!(!run("show", &other, &db).status.success());
++    assert!(!run("refresh", &root, &root.join("self.bin")).status.success());
++    let previous = fs::read(&db).unwrap();
++    assert!(!run("refresh", &root.join("missing"), &db).status.success());
++    assert_eq!(fs::read(&db).unwrap(), previous);
++}
 diff --git a/hyperdu-core/src/platform/windows_impl/mft_reader.rs b/hyperdu-core/src/platform/windows_impl/mft_reader.rs
-index 98c987e..39b3cb8 100644
+index 39b3cb8..3f378bb 100644
 --- a/hyperdu-core/src/platform/windows_impl/mft_reader.rs
 +++ b/hyperdu-core/src/platform/windows_impl/mft_reader.rs
-@@ -1305,4 +1305,60 @@ mod tests {
-         );
-         assert_eq!(e.sizes.real_size, 1234);
+@@ -1328,7 +1328,7 @@ mod tests {
+         let p = push_nonresident_data(&mut rec, p, 4096, 3000);
+         rec[p..p + 4].copy_from_slice(&attr_type::END.to_le_bytes());
+         set_used(&mut rec, (p + 4) as u32);
+-        let vol = volume(&with_metadata_records(vec![rec], 5));
++        let vol = volume(with_metadata_records(vec![rec], 5));
+         let entry = MftReader::open(vol).unwrap().entry(16).unwrap();
+         assert_eq!(entry.sizes.real_size, 3000);
+         assert_eq!(entry.sizes.allocated_size, 4096);
+@@ -1347,7 +1347,7 @@ mod tests {
+         let p = push_nonresident_data(&mut extension, 64, 16384, 12345);
+         extension[p..p + 4].copy_from_slice(&attr_type::END.to_le_bytes());
+         set_used(&mut extension, (p + 4) as u32);
+-        let vol = volume(&with_metadata_records(vec![base, extension], 5));
++        let vol = volume(with_metadata_records(vec![base, extension], 5));
+         let entry = MftReader::open(vol).unwrap().entry(16).unwrap();
+         assert_eq!(entry.sizes.real_size, 12345);
+         assert_eq!(entry.sizes.allocated_size, 16384);
+@@ -1358,7 +1358,7 @@ mod tests {
+     fn issue41_extension_records_are_not_independent_files() {
+         let mut ext = file_record(ROOT_RECORD, "not-another-file", 4096, 100, 1);
+         ext[32..40].copy_from_slice(&16u64.to_le_bytes());
+-        let vol = volume(&with_metadata_records(vec![ext], 5));
++        let vol = volume(with_metadata_records(vec![ext], 5));
+         assert!(MftReader::open(vol).unwrap().entry(16).is_none());
      }
-+
-+    // Regression fixtures for #41 use actual stream names and extension links.
-+    fn named_data(rec: &mut [u8], pos: usize, name: &str, alloc: u64, real: u64) -> usize {
-+        let units: Vec<u16> = name.encode_utf16().collect();
-+        let end = push_nonresident_data(rec, pos, alloc, real);
-+        let total = (72 + units.len() * 2 + 7) & !7;
-+        rec[pos + 4..pos + 8].copy_from_slice(&(total as u32).to_le_bytes());
-+        rec[pos + 9] = units.len() as u8;
-+        rec[pos + 10..pos + 12].copy_from_slice(&72u16.to_le_bytes());
-+        for (n, unit) in units.iter().enumerate() {
-+            rec[end + n * 2..end + n * 2 + 2].copy_from_slice(&unit.to_le_bytes());
-+        }
-+        pos + total
-+    }
-+
-+    #[test]
-+    fn issue41_named_stream_before_unnamed_is_not_file_contents() {
-+        let mut rec = blank_record(1, 1);
-+        let p = push_file_name(&mut rec, 64, ROOT_RECORD, "streams");
-+        let p = named_data(&mut rec, p, "ads", 8192, 8000);
-+        let p = push_nonresident_data(&mut rec, p, 4096, 3000);
-+        rec[p..p + 4].copy_from_slice(&attr_type::END.to_le_bytes());
-+        set_used(&mut rec, (p + 4) as u32);
-+        let vol = volume(&with_metadata_records(vec![rec], 5));
-+        let entry = MftReader::open(vol).unwrap().entry(16).unwrap();
-+        assert_eq!(entry.sizes.real_size, 3000);
-+        assert_eq!(entry.sizes.allocated_size, 4096);
-+        assert_eq!(entry.size_source.named_stream_bytes, 8192);
-+    }
-+
-+    #[test]
-+    fn issue41_data_in_extension_replaces_stale_filename_sizes() {
-+        let mut base = blank_record(1, 1);
-+        let p = push_file_name(&mut base, 64, ROOT_RECORD, "growing");
-+        let p = push_attribute_list(&mut base, p, &[17]);
-+        base[p..p + 4].copy_from_slice(&attr_type::END.to_le_bytes());
-+        set_used(&mut base, (p + 4) as u32);
-+        let mut extension = blank_record(1, 0);
-+        extension[32..40].copy_from_slice(&16u64.to_le_bytes());
-+        let p = push_nonresident_data(&mut extension, 64, 16384, 12345);
-+        extension[p..p + 4].copy_from_slice(&attr_type::END.to_le_bytes());
-+        set_used(&mut extension, (p + 4) as u32);
-+        let vol = volume(&with_metadata_records(vec![base, extension], 5));
-+        let entry = MftReader::open(vol).unwrap().entry(16).unwrap();
-+        assert_eq!(entry.sizes.real_size, 12345);
-+        assert_eq!(entry.sizes.allocated_size, 16384);
-+        assert!(entry.size_source.from_data_attribute);
-+    }
-+
-+    #[test]
-+    fn issue41_extension_records_are_not_independent_files() {
-+        let mut ext = file_record(ROOT_RECORD, "not-another-file", 4096, 100, 1);
-+        ext[32..40].copy_from_slice(&16u64.to_le_bytes());
-+        let vol = volume(&with_metadata_records(vec![ext], 5));
-+        assert!(MftReader::open(vol).unwrap().entry(16).is_none());
-+    }
  }
-diff --git a/hyperdu-core/tests/index_freshness.rs b/hyperdu-core/tests/index_freshness.rs
-new file mode 100644
-index 0000000..7bea486
---- /dev/null
-+++ b/hyperdu-core/tests/index_freshness.rs
-@@ -0,0 +1,27 @@
-+use hyperdu_core::index::{Freshness, Index};
-+
-+#[test]
-+fn loading_a_snapshot_does_not_claim_continuous_observation() {
-+    let temp = tempfile::tempdir().unwrap();
-+    let path = temp.path().join("index.bin");
-+    let mut index = Index::new();
-+    index.set_own((1, 1), 123, 1);
-+    index.save(&path).unwrap();
-+    let loaded = Index::load(&path).unwrap();
-+    assert_eq!(loaded.subtree_total((1, 1)), Some((123, 1, Freshness::Stale)));
-+}
-+
-+#[test]
-+fn stale_child_invalidates_ancestor_totals_without_invalidating_siblings() {
-+    let mut index = Index::new();
-+    index.set_own((1, 1), 0, 0);
-+    index.set_own((1, 2), 10, 1);
-+    index.set_own((1, 3), 20, 1);
-+    index.link((1, 2), (1, 1));
-+    index.link((1, 3), (1, 1));
-+    index.mark_stale((1, 2));
-+    assert_eq!(index.get((1, 1)).unwrap().state, Freshness::Stale);
-+    assert_eq!(index.get((1, 3)).unwrap().state, Freshness::Fresh);
-+    index.set_own((1, 1), 5, 1);
-+    assert_eq!(index.get((1, 1)).unwrap().state, Freshness::Stale);
-+}
-diff --git a/hyperdu-core/tests/mft_portable.rs b/hyperdu-core/tests/mft_portable.rs
-new file mode 100644
-index 0000000..65e839e
---- /dev/null
-+++ b/hyperdu-core/tests/mft_portable.rs
-@@ -0,0 +1,9 @@
-+//! Exercise the on-disk parsers on Linux too; no volume or Windows APIs used.
-+#![cfg(not(windows))]
-+
-+pub use hyperdu_core::{Stat, StatMap};
-+
-+#[path = "../src/platform/windows_impl/mft.rs"]
-+mod mft;
-+#[path = "../src/platform/windows_impl/mft_reader.rs"]
-+mod mft_reader;
