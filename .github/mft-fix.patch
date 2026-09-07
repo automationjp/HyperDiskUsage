@@ -1,0 +1,20 @@
+--- a/scripts/test-mft-fixture.ps1
++++ b/scripts/test-mft-fixture.ps1
+@@ -27,12 +27,16 @@
+     Initialize-Disk -Number $disk.Number -PartitionStyle MBR
+     $partition = New-Partition -DiskNumber $disk.Number -UseMaximumSize -DriveLetter $letter
+     $partition | Format-Volume -FileSystem NTFS -AllocationUnitSize 4096 -NewFileSystemLabel 'HYPERDU_FIXTURE' -Confirm:$false | Out-Null
++    # Server may not attach Wof to a newly mounted data volume automatically.
++    # Scope attachment to this disposable VHD; the Rust test verifies a real WOF file.
++    & fltmc.exe attach Wof "${letter}:"
++    & fltmc.exe instances -v "${letter}:"
+     $root = "${letter}:\"
+     [IO.File]::WriteAllText((Join-Path $root '.hyperdu-fixture'), 'hyperdu-ci-fixture-v1')
+     $env:HYPERDU_MFT_FIXTURE_ROOT = $root
+     $env:HYPERDU_MFT_DIAG = '1'
+     $env:HYPERDU_MFT_FIXTURE_REPORT = Join-Path $parent 'hyperdu-mft-fixture.json'
+-    & cargo test -p hyperdu-core --test mft_fixture --locked -- --ignored --nocapture
++    & cargo test -p hyperdu-core --test mft_fixture --locked -- --ignored --nocapture 2>&1 | Tee-Object -FilePath (Join-Path $parent 'hyperdu-mft-cargo.log')
+     if ($LASTEXITCODE -ne 0) { throw "Strict MFT fixture failed (exit $LASTEXITCODE)." }
+ } finally {
+     Remove-Item Env:HYPERDU_MFT_FIXTURE_ROOT, Env:HYPERDU_MFT_DIAG, Env:HYPERDU_MFT_FIXTURE_REPORT -ErrorAction SilentlyContinue
