@@ -16,8 +16,11 @@ USAGE
 VER=""
 if [[ ${1:-} == "--version" ]]; then VER=${2:-}; fi
 if [[ -z "$VER" ]]; then
-  VER=$(sed -n 's/^version = "\(.*\)"/\1/p' hyperdu-cli/Cargo.toml | head -n1)
+  # The crate inherits its version from [workspace.package], so the literal is
+  # not in hyperdu-cli/Cargo.toml. pkgid prints `<url>#<version>`.
+  VER=$(cargo pkgid -p hyperdu-cli | sed 's/.*[#@]//')
 fi
+if [[ -z "$VER" ]]; then echo "error: could not determine hyperdu-cli version" >&2; exit 1; fi
 
 outdir="dist/brew"
 mkdir -p "$outdir"

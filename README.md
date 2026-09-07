@@ -73,10 +73,10 @@
 cargo install hyperdu-cli --version 0.5.0-beta.2
 
 # エージェント向け MCP サーバ
-cargo install hyperdu-mcp --version 0.5.0-beta.1
+cargo install hyperdu-mcp --version 0.5.0-beta.2
 
 # GUI（任意）
-cargo install hyperdu-gui --version 0.5.0-beta.1
+cargo install hyperdu-gui --version 0.5.0-beta.2
 ```
 
 ベータ版のため、`--version` の明示が要ります（プレリリースは既定で選ばれません）。
@@ -152,7 +152,7 @@ Claude や Codex のようなエージェントが、**容量の状況を構造�
 ### MCP サーバ
 
 ```bash
-cargo install hyperdu-mcp --version 0.5.0-beta.1
+cargo install hyperdu-mcp --version 0.5.0-beta.2
 
 claude mcp add --transport stdio hyperdu -- hyperdu-mcp   # Claude Code
 codex mcp add hyperdu -- hyperdu-mcp                      # Codex

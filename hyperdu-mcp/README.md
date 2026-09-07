@@ -7,7 +7,7 @@ tools instead of parsing `du` output.
 ## Install
 
 ```bash
-cargo install hyperdu-mcp --version 0.5.0-beta.1
+cargo install hyperdu-mcp --version 0.5.0-beta.2
 
 claude mcp add --transport stdio hyperdu -- hyperdu-mcp   # Claude Code
 codex mcp add hyperdu -- hyperdu-mcp                      # Codex

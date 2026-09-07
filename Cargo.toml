@@ -7,6 +7,27 @@ members = [
 ]
 resolver = "2"
 
+# Every crate inherits these with `<key>.workspace = true`, so a release bumps
+# exactly one line: `version` below. Before this, version and the metadata that
+# goes with it were repeated in four manifests, and the hyperdu-core dependency
+# pin in three of them, which is how a bump missed Cargo.lock once already.
+#
+# `rust-version` is deliberately not here. hyperdu-mcp needs 1.88 for rmcp and
+# the other three build on 1.75; inheriting a single floor would force the
+# higher one on CLI users for no benefit.
+[workspace.package]
+version = "0.5.0-beta.2"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/automationjp/HyperDiskUsage"
+homepage = "https://github.com/automationjp/HyperDiskUsage#readme"
+
+[workspace.dependencies]
+# The `version` here must match `workspace.package.version`: cargo publish
+# rewrites the path dependency into a registry one and needs a version to do
+# it. Publish hyperdu-core first, then the three binaries that depend on it.
+hyperdu-core = { path = "hyperdu-core", version = "0.5.0-beta.2" }
+
 [profile.release]
 opt-level = 3
 lto = "thin"

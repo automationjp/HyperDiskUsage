@@ -1,12 +1,12 @@
 [package]
 name = "hyperdu-core"
-version = "0.5.0-beta.1"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Core engine for HyperDU: ultra-fast cross-platform disk usage analyzer"
 rust-version = "1.75"
-repository = "https://github.com/automationjp/HyperDiskUsage"
-homepage = "https://github.com/automationjp/HyperDiskUsage#readme"
+repository.workspace = true
+homepage.workspace = true
 readme = "README.md"
 keywords = ["disk-usage", "du", "filesystem", "scanner", "performance"]
 categories = ["filesystem"]
