@@ -3,21 +3,48 @@ name: issue-workbench
 on:
   push:
     branches: [codex/complete-open-issues-16-41]
+    paths: [.github/issue-workbench.patch, .github/workflows/issue-workbench.yml]
+
+concurrency:
+  group: issue-workbench
+  cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  source-snapshot:
+  regression:
+    if: github.ref == 'refs/heads/codex/complete-open-issues-16-41'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false
-      - name: Archive tracked source only
+          ref: ${{ github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply reviewed changes
+        run: |
+          git apply --check .github/issue-workbench.patch
+          git apply .github/issue-workbench.patch
+          rustup toolchain install nightly --profile minimal --component rustfmt
+          cargo +nightly fmt --all -- --config group_imports=StdExternalCrate --config imports_granularity=Crate
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add hyperdu-core hyperdu-cli docs README.md packaging .github/workflows/ci.yml
+          git commit -m 'fix: apply and format issue regression changes'
+          git push origin HEAD:refs/heads/codex/complete-open-issues-16-41
+      - name: Core and CLI regressions
+        run: cargo test -p hyperdu-core -p hyperdu-cli --no-fail-fast -- --nocapture
+      - name: Clippy
+        if: always()
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Source snapshot
+        if: always()
         run: git archive --format=tar HEAD > "$RUNNER_TEMP/hyperdu-source.tar"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: hyperdu-source-${{ github.sha }}
+          name: hyperdu-source-${{ github.run_id }}
           path: ${{ runner.temp }}/hyperdu-source.tar
           retention-days: 1
