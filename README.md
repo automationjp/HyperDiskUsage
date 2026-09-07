@@ -83,9 +83,23 @@ cargo install hyperdu-gui --version 0.5.0-beta.1
 
 **インストールされるコマンド名は `hyperdu-cli` です。** 短い `hyperdu` は deb / rpm パッケージ側でのリネームでのみ存在します。
 
+### Windows のパッケージマネージャ
+
+```powershell
+winget install automationjp.HyperDU
+```
+
+```powershell
+scoop install hyperdu
+```
+
+> **公開リリース後に有効になります。** マニフェストは `release.yml` がタグから自動生成しますが、winget は [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) への PR、scoop はバケットへの登録がそれぞれ別途必要です。現時点では未提出です。
+
 ### 事前ビルド
 
 以下は GitHub Releases の最新版への直接リンクです。ダウンロードして展開するだけで実行できます。
+
+> **現時点でリンク先は存在しません。** 公開リリースがまだ 1 つもないためです（`v0.0.1` は Draft のまま）。タグを打つと `release.yml` が production ビルドの成果物を公開します。
 
 - Windows (x86_64)
   - CLI: [hyperdu-cli-windows-x86_64-generic.zip](releases/latest/download/hyperdu-cli-windows-x86_64-generic.zip)
