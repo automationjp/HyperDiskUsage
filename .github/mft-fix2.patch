@@ -1,0 +1,57 @@
+--- a/hyperdu-core/tests/mft_fixture.rs
++++ b/hyperdu-core/tests/mft_fixture.rs
+@@ -5,7 +5,7 @@
+ use std::{
+     fs::{self, File},
+     io::{Seek, SeekFrom, Write},
+-    os::windows::fs::MetadataExt,
++    os::windows::{ffi::OsStrExt, fs::MetadataExt},
+     path::{Path, PathBuf},
+     process::Command,
+ };
+@@ -23,6 +23,32 @@
+         String::from_utf8_lossy(&output.stderr)
+     );
+ }
++// WOF's filter can hide the underlying reparse flag from ordinary metadata.
++// Verify the provider through the documented WofIsExternalFile API instead.
++fn assert_wof(path: &Path) {
++    #[link(name = "Wofutil")]
++    extern "system" {
++        fn WofIsExternalFile(
++            path: *const u16,
++            external: *mut i32,
++            provider: *mut u32,
++            info: *mut std::ffi::c_void,
++            length: *mut u32,
++        ) -> i32;
++    }
++    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
++    let (mut external, mut provider) = (0i32, 0u32);
++    // SAFETY: terminated path and correctly sized live output values; optional
++    // provider-specific info and its length are both omitted.
++    let hr = unsafe {
++        WofIsExternalFile(wide.as_ptr(), &mut external, &mut provider,
++                          std::ptr::null_mut(), std::ptr::null_mut())
++    };
++    assert!(hr >= 0, "WofIsExternalFile failed: {hr:#x}");
++    assert_ne!(external, 0, "fixture was not WOF compressed");
++    assert_eq!(provider, 2, "fixture must use WOF_PROVIDER_FILE");
++}
++
+ fn data(path: &Path, bytes: &[u8]) {
+     let mut file = File::create(path).unwrap();
+     file.write_all(bytes).unwrap();
+@@ -96,11 +122,7 @@
+     let compact = wof.join("data.bin");
+     data(&compact, &vec![9; 1024 * 1024]);
+     command("compact", &["/C", "/EXE:LZX", "/F", "/Q"], &compact);
+-    assert_ne!(
+-        fs::metadata(&compact).unwrap().file_attributes() & 0x400,
+-        0,
+-        "WOF fixture must really be a reparse file"
+-    );
++    assert_wof(&compact);
+     let walked = scan_directory(&root, &Options::default()).unwrap();
+     let mft = scan_directory_mft(
+         &root,
