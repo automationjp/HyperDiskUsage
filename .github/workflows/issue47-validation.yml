@@ -37,11 +37,10 @@ jobs:
           pathlib.Path('../candidate.patch').write_bytes(patch)
           subprocess.run(['git', 'apply', '--check', '../candidate.patch'], check=True)
           subprocess.run(['git', 'apply', '../candidate.patch'], check=True)
+          subprocess.run(['git', 'apply', '../transport/.github/mft-fix.patch'], check=True)
       - name: Strict real NTFS fixture
         shell: pwsh
-        run: |
-          Start-Transcript -Path "$env:RUNNER_TEMP/ntfs-transcript.txt"
-          try { ./scripts/test-mft-fixture.ps1 } finally { Stop-Transcript }
+        run: ./scripts/test-mft-fixture.ps1
       - name: Native core and CLI regressions
         shell: pwsh
         run: |
@@ -54,6 +53,6 @@ jobs:
         with:
           name: strict-ntfs-evidence
           path: |
-            ${{ runner.temp }}/ntfs-transcript.txt
+            ${{ runner.temp }}/hyperdu-mft-cargo.log
             ${{ runner.temp }}/hyperdu-mft-fixture.json
           retention-days: 1
