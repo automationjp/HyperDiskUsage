@@ -1,0 +1,98 @@
+--- a/hyperdu-core/src/platform/windows_impl/mft_reader/streams.rs
++++ b/hyperdu-core/src/platform/windows_impl/mft_reader/streams.rs
+@@ -39,7 +39,7 @@
+     flags: u16,
+     sizes: Option<DataSizes>,
+     sparse_bytes: u64,
+-    sparse_uncompressed: bool,
++    count_runs: bool,
+ }
+ 
+ fn u16_at(b: &[u8], pos: usize) -> Option<u16> {
+@@ -128,12 +128,13 @@
+     } else {
+         None
+     };
+-    // CompressionUnit, not the COMPRESSED flag alone, decides whether the
+-    // header carries physical compressed size (the #39 accounting contract).
+-    let sparse_uncompressed = attr.non_resident
++    // Only the first extent chooses header-size versus mapped-run accounting.
++    // Real NTFS sparse continuations can have CompressionUnit=0 even when
++    // the initial extent has 4. Its value is not a second stream header.
++    let count_runs = attr.non_resident
+         && attr.flags & attr_flags::SPARSE != 0
+-        && u16_at(rec, attr.pos + 34)? == 0;
+-    let sparse_bytes = if sparse_uncompressed {
++        && (low != 0 || u16_at(rec, attr.pos + 34)? == 0);
++    let sparse_bytes = if count_runs {
+         let runs = strict_runs(rec, attr)?;
+         let covered = runs
+             .iter()
+@@ -156,7 +157,7 @@
+         flags: attr.flags,
+         sizes,
+         sparse_bytes,
+-        sparse_uncompressed,
++        count_runs,
+     })
+ }
+ 
+@@ -271,7 +272,7 @@
+             if ext.low != 0 {
+                 return None;
+             }
+-            if ext.sparse_uncompressed {
++            if ext.count_runs {
+                 sizes.allocated_size = ext.sparse_bytes;
+             }
+             return Some(if ext.name.is_empty() {
+@@ -342,14 +343,13 @@
+             let mut sizes = first.sizes?;
+             let flags = first.flags;
+             let non_resident = first.non_resident;
+-            let sparse = first.sparse_uncompressed;
++            let sparse = first.count_runs;
+             let mut end = 0u64;
+             let mut sparse_bytes = 0u64;
+             for (n, ext) in extents.iter().enumerate() {
+                 if ext.low != end
+                     || ext.flags != flags
+                     || ext.non_resident != non_resident
+-                    || ext.sparse_uncompressed != sparse
+                 {
+                     return None;
+                 }
+--- a/hyperdu-core/src/platform/windows_impl/mft_reader.rs
++++ b/hyperdu-core/src/platform/windows_impl/mft_reader.rs
+@@ -1537,4 +1537,31 @@
+             assert!(!reader.is_complete());
+         }
+     }
++    #[test]
++    fn issue41_continuation_unit_zero_does_not_override_first_extent_accounting() {
++        // Real NTFS: sparse first extent has CompressionUnit=4, continuations
++        // carry zero there. The first extent's 0x40 field is the stream total.
++        let (mut base, ext) = data_extension_fixture(true);
++        let header = parse_record_header(&base).unwrap();
++        let data = Attributes::new(&base, &header)
++            .find(|a| a.type_code == attr_type::DATA).unwrap();
++        base[data.pos + 34..data.pos + 36].copy_from_slice(&4u16.to_le_bytes());
++        base[data.pos + 64..data.pos + 72].copy_from_slice(&12288u64.to_le_bytes());
++        let mut reader = MftReader::open(volume(with_metadata_records(vec![base, ext], 5))).unwrap();
++        let entry = reader.entry(16).expect("valid sparse continuation");
++        assert_eq!((entry.sizes.real_size, entry.sizes.allocated_size), (16384, 12288));
++        assert!(reader.is_complete());
++    }
++
++    #[test]
++    fn issue41_sparse_run_accounting_is_selected_by_the_first_extent_only() {
++        // A continuation's CompressionUnit is not a new whole-stream header.
++        let (base, mut ext) = data_extension_fixture(true);
++        ext[98..100].copy_from_slice(&4u16.to_le_bytes());
++        let mut reader = MftReader::open(volume(with_metadata_records(vec![base, ext], 5))).unwrap();
++        let entry = reader.entry(16).expect("valid sparse continuation");
++        assert_eq!(entry.sizes.allocated_size, 3 * CLUSTER as u64);
++        assert!(reader.is_complete());
++    }
++
+ }
