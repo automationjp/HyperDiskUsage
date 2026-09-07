@@ -1,0 +1,35 @@
+name: issue47-validation
+on:
+  push:
+    branches: [codex/issue47-validation]
+    paths: [.github/workflows/issue47-validation.yml]
+permissions:
+  contents: read
+jobs:
+  offline-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Baseline regression suite
+        run: cargo test -p hyperdu-core -p hyperdu-cli --locked
+      - name: Export public compiler and dependency cache only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/offline"
+          toolchain="$(dirname "$(dirname "$(rustup which rustc)")")"
+          tar -czf "$RUNNER_TEMP/offline/toolchain.tar.gz" -C "$toolchain" bin lib
+          tar -czf "$RUNNER_TEMP/offline/registry.tar.gz" -C "$HOME/.cargo" registry
+          git archive --format=tar HEAD > "$RUNNER_TEMP/offline/source.tar"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hyperdu-offline-regressions
+          path: ${{ runner.temp }}/offline/
+          retention-days: 1
+          compression-level: 0
