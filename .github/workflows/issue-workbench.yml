@@ -44,7 +44,9 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p = Path('hyperdu-core/src/platform/windows_impl/mft_reader.rs')
-          text = p.read_text().replace('\nmod streams;', '\n#[path = "mft_reader/streams.rs"]\nmod streams;')
+          text = p.read_text()
+          if '#[path = "mft_reader/streams.rs"]' not in text:
+              text = text.replace('\nmod streams;', '\n#[path = "mft_reader/streams.rs"]\nmod streams;')
           text = text.replace('parse_boot_sector, parse_data_sizes, parse_file_name,', 'parse_boot_sector, parse_file_name,')
           p.write_text(text)
           PY
@@ -52,7 +54,7 @@ jobs:
           cargo +nightly fmt --all -- --config group_imports=StdExternalCrate --config imports_granularity=Crate
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add hyperdu-core hyperdu-cli docs README.md packaging .github/workflows/ci.yml
+          git add hyperdu-core hyperdu-cli docs README.md packaging
           git commit -m 'fix: connect Linux snapshots and resolve validated MFT data extents'
           git push origin HEAD:refs/heads/codex/complete-open-issues-16-41
       - name: Core and CLI regressions
