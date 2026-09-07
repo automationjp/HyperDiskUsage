@@ -1,0 +1,50 @@
+--- a/hyperdu-core/src/platform/windows_impl/mft_reader/streams.rs
++++ b/hyperdu-core/src/platform/windows_impl/mft_reader/streams.rs
+@@ -23,7 +23,7 @@
+     pub(super) named_bytes: u64,
+ }
+ 
+-#[derive(Clone, Hash, PartialEq, Eq)]
++#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+ struct Reference {
+     name: Vec<u8>,
+     low: u64,
+@@ -287,6 +287,8 @@
+                 }
+             });
+         }
++        let diagnostic = std::env::var_os("HYPERDU_MFT_DIAG").is_some();
++        if diagnostic && has_list { eprintln!("probe: base={number} refs={refs:?}"); }
+         let base_reference = number | ((u16_at(rec, 16)? as u64) << 48);
+         let mut records = HashMap::new();
+         let mut seen = HashSet::new();
+@@ -302,6 +304,7 @@
+                 }
+                 let bytes = records.get(&record)?;
+                 let h = parse_record_header(bytes)?;
++                if diagnostic { eprintln!("probe: ext={record} inuse={} base={:#x} expected={base_reference:#x} seq={} expectedseq={}", h.in_use, u64_at(bytes,32)?, u16_at(bytes,16)?, reference.record >> 48); }
+                 if !h.in_use || u64_at(bytes, 32)? != base_reference {
+                     return None;
+                 }
+@@ -326,9 +329,12 @@
+                     matched = Some(attr);
+                 }
+             }
++            if diagnostic { eprintln!("probe: ref={reference:?} matched={matched:?}"); }
+             let attr = matched?;
+             if extension {
+-                extents.push(extent(bytes, &attr, cluster)?);
++                let ext = extent(bytes, &attr, cluster);
++                if diagnostic { eprintln!("probe: extent parsed={} unit={} low={} high={} flags={:#x}", ext.is_some(), u16_at(bytes,attr.pos+34).unwrap_or(0), lowest(bytes,&attr).unwrap_or(0), u64_at(bytes,attr.pos+24).unwrap_or(0), attr.flags); }
++                extents.push(ext?);
+             }
+         }
+         let mut groups: HashMap<Vec<u8>, Vec<Extent>> = HashMap::new();
+@@ -346,6 +352,7 @@
+             let mut end = 0u64;
+             let mut sparse_bytes = 0u64;
+             for (n, ext) in extents.iter().enumerate() {
++                if diagnostic && has_list { eprintln!("probe: group={name:?} n={n} low={} high={} end={end} flags={:#x}/{flags:#x} sparse={}/{sparse} size={:?}", ext.low, ext.high, ext.flags, ext.sparse_uncompressed, ext.sizes); }
+                 if ext.low != end
+                     || ext.flags != flags
+                     || ext.non_resident != non_resident
