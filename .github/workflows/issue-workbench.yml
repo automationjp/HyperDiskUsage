@@ -1,0 +1,23 @@
+name: issue-workbench
+
+on:
+  push:
+    branches: [codex/complete-open-issues-16-41]
+
+permissions:
+  contents: read
+
+jobs:
+  source-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive tracked source only
+        run: git archive --format=tar HEAD > "$RUNNER_TEMP/hyperdu-source.tar"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hyperdu-source-${{ github.sha }}
+          path: ${{ runner.temp }}/hyperdu-source.tar
+          retention-days: 1
