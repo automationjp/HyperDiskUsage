@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "hyperdu",
+  "version": "0.4.0",
+  "description": "Disk usage for agents: find what is filling a drive and what can safely be freed. Bundles the HyperDU MCP server and a disk-space triage skill.",
+  "author": {
+    "name": "automationjp",
+    "url": "https://github.com/automationjp"
+  },
+  "homepage": "https://github.com/automationjp/HyperDiskUsage#readme",
+  "repository": "https://github.com/automationjp/HyperDiskUsage",
+  "license": "MIT",
+  "keywords": [
+    "disk-usage",
+    "storage",
+    "cleanup",
+    "build-artifacts",
+    "filesystem"
+  ]
+}

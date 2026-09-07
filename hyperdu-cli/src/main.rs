@@ -65,69 +65,13 @@ impl Drop for KeepAlive {
     }
 }
 
-// Cross-platform filesystem stats (total/free) for a given path's volume
+// Cross-platform filesystem stats (total/free) for a given path's volume.
+//
+// The platform `cfg` blocks this used to carry now live in
+// `hyperdu_core::volume`, because the MCP server reports the same numbers and
+// two copies of the same FFI would drift apart.
 fn fs_total_free(path: &Path) -> Option<(u64, u64)> {
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::ffi::OsStrExt;
-
-        use windows::{core::PCWSTR, Win32::Storage::FileSystem::GetDiskFreeSpaceExW};
-        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
-        // Ensure path ends with backslash and is NUL-terminated for root volume query
-        if let Some(&ch) = wide.last() {
-            if ch != '\\' as u16 && ch != '/' as u16 {
-                wide.push('\\' as u16);
-            }
-        }
-        if *wide.last().unwrap_or(&0) != 0 {
-            wide.push(0);
-        }
-        unsafe {
-            let mut free_avail: u64 = 0;
-            let mut total: u64 = 0;
-            let mut total_free: u64 = 0;
-            if GetDiskFreeSpaceExW(
-                PCWSTR(wide.as_ptr()),
-                Some(&mut free_avail),
-                Some(&mut total),
-                Some(&mut total_free),
-            )
-            .is_ok()
-            {
-                return Some((total, total_free));
-            }
-        }
-        None
-    }
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "android",
-        target_os = "freebsd"
-    ))]
-    {
-        use std::{ffi::CString, os::unix::ffi::OsStrExt};
-        let c = CString::new(path.as_os_str().as_bytes()).ok()?;
-        let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
-        let rc = unsafe { libc::statvfs(c.as_ptr(), &mut s as *mut _) };
-        if rc == 0 {
-            let total = (s.f_blocks as u128).saturating_mul(s.f_frsize as u128) as u64;
-            let free = (s.f_bfree as u128).saturating_mul(s.f_frsize as u128) as u64;
-            Some((total, free))
-        } else {
-            None
-        }
-    }
-    #[cfg(not(any(
-        target_os = "windows",
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "android",
-        target_os = "freebsd"
-    )))]
-    {
-        None
-    }
+    hyperdu_core::volume::total_free(path)
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
