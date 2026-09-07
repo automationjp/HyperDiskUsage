@@ -295,7 +295,7 @@ hyperdu-gui ~/Documents
 
 ## 🔥 パフォーマンス
 
-数値はすべて `scripts/bench_du.sh` による実測です。同スクリプトは、古いバイナリを測ろうとした場合と、両ツールが同じファイル集合を走査していない場合に**エラーで停止**します。
+数値はすべて `scripts/bench/vs_du.sh` による実測です。同スクリプトは、古いバイナリを測ろうとした場合と、両ツールが同じファイル集合を走査していない場合に**エラーで停止**します。
 
 ### GNU du 8.32 との比較（EC2 t3.large / xfs / kernel 6.1）
 
@@ -395,25 +395,25 @@ cargo build --release --features simd-prefetch
 **Unix/WSL:**
 ```bash
 # 基本パッケージング
-bash scripts/package_release.sh
+bash scripts/package/release.sh
 
 # クロスビルドも対応
-bash scripts/package_release.sh --targets "linux-musl,windows-gnu"
+bash scripts/package/release.sh --targets "linux-musl,windows-gnu"
 
 # CPU最適化オプション
-bash scripts/package_release.sh --cpu-flavors "generic,native"
+bash scripts/package/release.sh --cpu-flavors "generic,native"
 
 # GUIを省く
-bash scripts/package_release.sh --skip-gui
+bash scripts/package/release.sh --skip-gui
 ```
 
 **Windows (PowerShell):**
 ```powershell
 # 基本パッケージング
-powershell -ExecutionPolicy Bypass -File scripts\package_release.ps1
+powershell -ExecutionPolicy Bypass -File scripts\package\release.ps1
 
 # CPU最適化版
-powershell -ExecutionPolicy Bypass -File scripts\package_release.ps1 -CpuFlavor native
+powershell -ExecutionPolicy Bypass -File scripts\package\release.ps1 -CpuFlavor native
 ```
 
 ### テスト実行
@@ -433,14 +433,14 @@ cargo clippy --workspace -- -D warnings
 
 ### ベンチと回帰基準
 
-**GNU du との比較には `scripts/bench_du.sh` を使ってください。** 公平性の条件をスクリプト側で強制します。
+**GNU du との比較には `scripts/bench/vs_du.sh` を使ってください。** 公平性の条件をスクリプト側で強制します。
 
 ```
 # warm のみ
-scripts/bench_du.sh /path/to/tree
+scripts/bench/vs_du.sh /path/to/tree
 
 # cold も測る（drop_caches のため root/sudo が必要）
-scripts/bench_du.sh --cold /path/to/tree1 /path/to/tree2
+scripts/bench/vs_du.sh --cold /path/to/tree1 /path/to/tree2
 ```
 
 このスクリプトは以下を**自動で検出して停止**します。いずれも過去に実際にやらかした失敗です。
@@ -453,11 +453,11 @@ scripts/bench_du.sh --cold /path/to/tree1 /path/to/tree2
 
 ヘッダには commit、未コミット変更の有無、物理コア数、ファイルシステム種別、カーネルを出力します。後から「どの条件の数字か」を復元できるようにするためです。
 
-HyperDU の変種間（rayon-par など）の比較には `scripts/bench.sh` を使います。
+HyperDU の変種間（rayon-par など）の比較には `scripts/bench/run.sh` を使います。
 
 ```
-scripts/bench.sh --root /path/to/dir
-WITH_RAYON=1 scripts/bench.sh --root /path/to/dir
+scripts/bench/run.sh --root /path/to/dir
+WITH_RAYON=1 scripts/bench/run.sh --root /path/to/dir
 ```
 
 回帰基準（目安）

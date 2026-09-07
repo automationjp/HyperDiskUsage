@@ -10,15 +10,15 @@ repo_root() {
     echo "$rr"; return
   fi
   local sp="${BASH_SOURCE[0]}"; case "$sp" in /*) ;; *) sp="$PWD/$sp" ;; esac
-  cd "$(dirname "$sp")/.." && pwd
+  cd "$(dirname "$sp")/../.." && pwd
 }
 cd "$(repo_root)"
 
 echo "==> lint (fmt + clippy)"
-bash scripts/lint.sh
+bash scripts/lint/run.sh
 
 echo "==> lint (cross: macOS + Windows)"
-bash scripts/lint_cross.sh --fast
+bash scripts/lint/cross.sh --fast
 
 echo "OK: lint_all passed"
 

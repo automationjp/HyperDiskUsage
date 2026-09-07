@@ -7,6 +7,6 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$repo_root"
 
-echo "[pre-push] Running scripts/lint_all.sh"
-bash scripts/lint_all.sh
+echo "[pre-push] Running scripts/lint/all.sh"
+bash scripts/lint/all.sh
 echo "[pre-push] OK"

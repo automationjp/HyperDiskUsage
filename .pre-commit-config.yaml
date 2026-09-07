@@ -3,19 +3,19 @@ repos:
     hooks:
       - id: rust-clippy-autofix
         name: Rust Clippy Autofix (nightly)
-        entry: bash scripts/clippy_fix.sh
+        entry: bash scripts/lint/clippy_fix.sh
         language: system
         pass_filenames: false
         stages: [push]
       - id: rust-lint
         name: Rust Lint (fmt + clippy)
-        entry: bash scripts/lint.sh
+        entry: bash scripts/lint/run.sh
         language: system
         pass_filenames: false
         stages: [push]
       - id: rust-clippy-cross
         name: Rust Clippy (macOS + Windows targets)
-        entry: bash scripts/lint_cross.sh --fast
+        entry: bash scripts/lint/cross.sh --fast
         language: system
         pass_filenames: false
         stages: [push]

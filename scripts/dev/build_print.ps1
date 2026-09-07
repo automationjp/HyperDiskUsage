@@ -7,11 +7,11 @@ Param(
 # This is a convenience wrapper that forwards all args to `cargo build`.
 #
 # Usage:
-#   powershell -ExecutionPolicy Bypass -File scripts/build_print.ps1 [CARGO_BUILD_ARGS...]
+#   powershell -ExecutionPolicy Bypass -File scripts/dev/build_print.ps1 [CARGO_BUILD_ARGS...]
 #
 # Examples:
-#   powershell -ExecutionPolicy Bypass -File scripts/build_print.ps1 -p hyperdu-cli --release
-#   powershell -ExecutionPolicy Bypass -File scripts/build_print.ps1 -p hyperdu-gui
+#   powershell -ExecutionPolicy Bypass -File scripts/dev/build_print.ps1 -p hyperdu-cli --release
+#   powershell -ExecutionPolicy Bypass -File scripts/dev/build_print.ps1 -p hyperdu-gui
 #
 # Environment:
 #   HYPERDU_TIMINGS=1      -> pass `--timings` to cargo (report in target/cargo-timings)

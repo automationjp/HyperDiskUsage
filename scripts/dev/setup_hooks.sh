@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Configure Git to use repository hooks and optionally install Python pre-commit
 
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/.. && pwd)"
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/../.. && pwd)"
 cd "$repo_root"
 
 echo "==> Setting core.hooksPath to .githooks"

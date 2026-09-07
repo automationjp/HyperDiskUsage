@@ -30,7 +30,7 @@
     Where to write the manifests. Defaults to dist/winget.
 
 .EXAMPLE
-    pwsh -File scripts/package_winget.ps1 -Version 0.5.0-beta.1 `
+    pwsh -File scripts/package/winget.ps1 -Version 0.5.0-beta.1 `
         -InstallerUrl https://example.invalid/hyperdu-cli.exe `
         -InstallerSha256 0000000000000000000000000000000000000000000000000000000000000000
 #>

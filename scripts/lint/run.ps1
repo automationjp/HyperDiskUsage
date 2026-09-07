@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 
 function Show-Help {
   @'
-Usage: scripts/lint.ps1
+Usage: scripts/lint/run.ps1
 
 Runs formatting and lint checks for the workspace:
   - cargo fmt --all -- --check

@@ -5,7 +5,7 @@ set -euo pipefail
 # Falls back to stable rustfmt if nightly is not present.
 #
 # Usage:
-#   scripts/fmt_strict.sh [--check]
+#   scripts/lint/fmt_strict.sh [--check]
 
 CHECK=0
 if [[ ${1:-} == "--check" ]]; then CHECK=1; fi

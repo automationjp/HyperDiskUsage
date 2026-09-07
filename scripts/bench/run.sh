@@ -4,8 +4,8 @@ set -euo pipefail
 # Quick micro-benchmark helper for the CLI.
 #
 # Usage:
-#   scripts/bench.sh [--root PATH] [--runs N] [--bin PATH]
-#   scripts/bench.sh [PATH]
+#   scripts/bench/run.sh [--root PATH] [--runs N] [--bin PATH]
+#   scripts/bench/run.sh [PATH]
 #
 # Options:
 #   --root PATH   Root directory to scan (default: '.')

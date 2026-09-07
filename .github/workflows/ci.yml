@@ -21,12 +21,12 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Lint (fmt + clippy)
-        run: bash scripts/lint.sh
+        run: bash scripts/lint/run.sh
       - name: Shellcheck scripts
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck
-          shellcheck -S error -x scripts/*.sh
+          shellcheck -S error -x scripts/**/*.sh
       - name: Import sort (nightly strict)
         run: |
           rustup toolchain install nightly -c rustfmt
@@ -48,6 +48,6 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test core and CLI on a fixed NTFS volume
-        run: .\scripts\test-ntfs-fixture.ps1
+        run: .\scripts\dev\ntfs_fixture.ps1
 
   # Note: artifact packaging is handled in release.yml on tags. CI only builds and tests.

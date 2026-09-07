@@ -5,7 +5,7 @@ set -euo pipefail
 # This will modify files in-place. Intended for use in pre-commit.
 #
 # Usage:
-#   scripts/clippy_fix.sh [--cross]
+#   scripts/lint/clippy_fix.sh [--cross]
 #     --cross  Also attempt fixes for macOS/Windows targets
 
 CROSS=0
@@ -19,7 +19,7 @@ cd_repo_root() {
   local sp="${BASH_SOURCE[0]}"
   case "$sp" in /*) ;; *) sp="$PWD/$sp" ;; esac
   local rr
-  rr=$(cd "$(dirname "$sp")/.." && pwd) || {
+  rr=$(cd "$(dirname "$sp")/../.." && pwd) || {
     echo "error: could not resolve repository root" >&2; exit 1; }
   cd "$rr" || { echo "error: cannot cd to $rr" >&2; exit 1; }
 }

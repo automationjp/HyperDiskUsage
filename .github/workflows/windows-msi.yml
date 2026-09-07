@@ -26,7 +26,7 @@ jobs:
       - name: Build + Package (ZIP/EXE/MSI)
         shell: powershell
         run: |
-          powershell -ExecutionPolicy Bypass -File scripts/package_release.ps1
+          powershell -ExecutionPolicy Bypass -File scripts/package/release.ps1
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

@@ -29,7 +29,7 @@ $forward = $Rest -join ' '
 
 # Use -lc to run a login shell that executes our commands, then exits
 # Allow skipping hooks via --no-hooks for reliable non-interactive release
-$cmd = "cd `"$wd`"; bash scripts/release_tag.sh $forward"
+$cmd = "cd `"$wd`"; bash scripts/release/tag.sh $forward"
 
 Write-Host "==> Invoking Git Bash: $bashExe"
 Write-Host "    -> $cmd"

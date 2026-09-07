@@ -68,7 +68,7 @@ if ! rustup toolchain list 2>/dev/null | grep -q '^nightly'; then
 fi
 if rustup toolchain list 2>/dev/null | grep -q '^nightly'; then
   echo "==> rustfmt (nightly strict import order, check)"
-  bash scripts/fmt_strict.sh --check
+  bash scripts/lint/fmt_strict.sh --check
 else
   echo "(info) nightly rustfmt not found; skipping strict import order check"
 fi
@@ -98,7 +98,7 @@ fi
 
 if command -v shellcheck >/dev/null 2>&1; then
   echo "==> shellcheck (scripts)"
-  shellcheck -S error -x scripts/*.sh
+  shellcheck -S error -x scripts/**/*.sh
 else
   echo "(info) shellcheck not found; skipping shell lint"
 fi

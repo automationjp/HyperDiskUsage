@@ -133,7 +133,7 @@ impl From<IoProfileArg> for hyperdu_core::IoProfile {
       Run GUI\n\
         cargo run -p hyperdu-gui --release\n\
       Print artifacts via helper script\n\
-        bash scripts/build_print.sh -p hyperdu-cli --release\n\
+        bash scripts/dev/build_print.sh -p hyperdu-cli --release\n\
       Fast scan profile (Turbo)\n\
         hyperdu --perf turbo <PATH>\n\
       GNU-compatible block reporting\n\
