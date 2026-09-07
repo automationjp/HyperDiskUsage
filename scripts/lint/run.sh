@@ -110,4 +110,10 @@ else
   echo "(info) cargo-deny not found; skipping dependency audit"
 fi
 
+# Unconditional on purpose. Every other step above skips when its tool is
+# missing, and that is how a broken shellcheck glob passed a local lint run and
+# then failed CI: shellcheck was not installed, so nothing evaluated it.
+echo "==> script path references"
+bash scripts/lint/paths.sh
+
 echo "OK"
