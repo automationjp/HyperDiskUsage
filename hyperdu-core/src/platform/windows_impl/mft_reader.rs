@@ -1525,4 +1525,56 @@ mod tests {
             assert!(!reader.is_complete());
         }
     }
+
+    #[test]
+    fn continuation_uses_the_initial_extents_allocation_mode() {
+        // The initial extent has the whole-stream allocation field at 0x40.
+        // A continuation omits that field and need not repeat CompressionUnit.
+        let (mut base, ext) = data_extension_fixture(true);
+        let h = parse_record_header(&base).unwrap();
+        let data = Attributes::new(&base, &h)
+            .find(|a| a.type_code == attr_type::DATA)
+            .unwrap();
+        let list = data.pos + data.total_length;
+        let used = h.used_size as usize;
+        base.copy_within(list..used, list + 8);
+        base[data.pos + 4..data.pos + 8].copy_from_slice(&80u32.to_le_bytes());
+        base[data.pos + 32..data.pos + 34].copy_from_slice(&72u16.to_le_bytes());
+        base[data.pos + 34..data.pos + 36].copy_from_slice(&4u16.to_le_bytes());
+        base[data.pos + 64..data.pos + 72].copy_from_slice(&(3 * CLUSTER as u64).to_le_bytes());
+        base[data.pos + 72..data.pos + 78].copy_from_slice(&[0x11, 1, 40, 0x01, 1, 0]);
+        set_used(&mut base, (used + 8) as u32);
+        let mut reader =
+            MftReader::open(volume(with_metadata_records(vec![base, ext], 5))).unwrap();
+        let entry = reader
+            .entry(16)
+            .expect("continuation must not invalidate the stream");
+        assert_eq!(entry.sizes.allocated_size, 3 * CLUSTER as u64);
+        assert_eq!(entry.sizes.real_size, 16384);
+        assert!(reader.is_complete());
+    }
+
+    #[test]
+    fn zero_length_nonresident_sparse_stream_is_valid() {
+        for with_named in [false, true] {
+            let mut rec = blank_record(1, 1);
+            let data = push_file_name(&mut rec, 64, ROOT_RECORD, "empty-sparse");
+            let mut end = push_nonresident_data(&mut rec, data, 0, 0);
+            rec[data + 12..data + 14].copy_from_slice(&0x8000u16.to_le_bytes());
+            rec[data + 24..data + 32].copy_from_slice(&u64::MAX.to_le_bytes());
+            rec[data + 32..data + 34].copy_from_slice(&64u16.to_le_bytes());
+            rec[data + 64..data + 72].fill(0);
+            if with_named {
+                end = named_data(&mut rec, end, "ads", 4096, 123);
+            }
+            set_used(&mut rec, end as u32);
+            let mut reader = MftReader::open(volume(with_metadata_records(vec![rec], 5))).unwrap();
+            let entry = reader
+                .entry(16)
+                .expect("empty runlist and VCN -1 describe an empty stream");
+            assert_eq!(entry.sizes.real_size, 0);
+            assert_eq!(entry.sizes.allocated_size, 0);
+            assert!(reader.is_complete());
+        }
+    }
 }
