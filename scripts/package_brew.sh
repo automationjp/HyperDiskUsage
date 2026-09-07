@@ -25,7 +25,7 @@ mkdir -p "$outdir"
 cat >"$outdir/hyperdu.rb" <<'RUBY'
 class Hyperdu < Formula
   desc "Hyper-fast disk usage analyzer CLI"
-  homepage "https://github.com/your-org/HyperDiskUsage"
+  homepage "https://github.com/automationjp/HyperDiskUsage"
   url "__URL_TARBALL__"
   sha256 "__SHA256__"
   version "__VERSION__"

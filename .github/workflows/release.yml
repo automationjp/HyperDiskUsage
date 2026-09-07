@@ -162,21 +162,37 @@ jobs:
       - name: Generate Scoop & winget manifests
         shell: powershell
         run: |
-          $ver = (Select-String -Path 'hyperdu-cli/Cargo.toml' -Pattern '^version\s*=\s*"([^"]+)"' | ForEach-Object { $_.Matches[0].Groups[1].Value })[0]
-          pwsh -File scripts/package_scoop.ps1 -Version $ver
-          pwsh -File scripts/package_winget.ps1 -Version $ver
-          # Fill URLs & SHA256 for scoop manifest
+          $ErrorActionPreference = 'Stop'
+          # @() matters: a single match yields a bare string, and indexing that
+          # returns its first character -- which produced a package version of
+          # "0" instead of "0.5.0-beta.1".
+          $ver = @(Select-String -Path 'hyperdu-cli/Cargo.toml' -Pattern '^version\s*=\s*"([^"]+)"' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value })[0]
           $tag = "$env:GITHUB_REF_NAME"
-          $asset = Get-ChildItem dist\hyperdu-cli-windows-*.exe | Select-Object -First 1
-          if (-not $asset) { $asset = Get-ChildItem dist\hyperdu-cli-*.msi | Select-Object -First 1 }
-          if ($asset) {
-            $fname = $asset.Name
-            $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/$fname"
-            $hash = (Get-FileHash -Algorithm SHA256 $asset.FullName).Hash.ToLower()
-            (Get-Content dist\scoop\hyperdu.json) -replace '__URL__', $url -replace '__SHA256__', $hash | Set-Content dist\scoop\hyperdu.json -Encoding UTF8
-            # Update winget manifest as well
-            (Get-Content dist\winget\manifest.yaml) -replace '__URL__', $url -replace '__SHA256__', $hash | Set-Content dist\winget\manifest.yaml -Encoding UTF8
+          $base = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag"
+
+          function Get-Asset($pattern) {
+            $a = Get-ChildItem $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $a) { throw "no release asset matched $pattern" }
+            [pscustomobject]@{
+              Url  = "$base/$($a.Name)"
+              Hash = (Get-FileHash -Algorithm SHA256 $a.FullName).Hash.ToLower()
+            }
           }
+
+          # Different assets on purpose. winget installs the bare executable as
+          # a `portable` package; Scoop extracts the zip and resolves `bin`
+          # inside it, which keeps the shim name stable.
+          $exe = Get-Asset 'dist\hyperdu-cli-windows-*.exe'
+          $zip = Get-Asset 'dist\hyperdu-cli-windows-*.zip'
+
+          pwsh -File scripts/package_winget.ps1 -Version $ver `
+            -InstallerUrl $exe.Url -InstallerSha256 $exe.Hash
+          pwsh -File scripts/package_scoop.ps1 -Version $ver `
+            -Url $zip.Url -Sha256 $zip.Hash
+
+          Write-Host "winget manifests:"
+          Get-ChildItem dist\winget | ForEach-Object { Write-Host "  $($_.Name)" }
       - name: Open PR to Scoop bucket
         env:
           GH_TOKEN: ${{ secrets.SCOOP_GH_TOKEN }}
