@@ -549,32 +549,35 @@ pub fn scan_roots(roots: &[PathBuf], opt: &Options) -> Vec<(PathBuf, Result<Stat
         .collect()
 }
 
-/// Whether [`scan_directory`] would read the `$MFT` for this root, rather than
-/// enumerating directories.
+/// Whether the MFT backend's platform, privilege and root preconditions apply.
 ///
-/// The scan itself falls back silently, which is the right behaviour but makes
-/// the choice invisible. A caller comparing the two backends needs to know
-/// which one ran -- otherwise "the totals match" can mean "both enumerated".
-///
-/// Checks the preconditions only; it does not open the volume.
+/// This does not open or parse the volume and is not proof that an MFT scan
+/// succeeded. Use [`try_scan_directory_via_mft`] when fallback must be excluded,
+/// for example when comparing the MFT and enumeration backends.
 pub fn mft_backend_applies(root: impl AsRef<Path>, opt: &Options) -> bool {
     platform::mft_backend_applies(root.as_ref(), opt)
 }
 
+/// Try the opt-in MFT backend without ever enumerating directories.
+///
+/// `Some` contains the MFT result, with the same child-to-parent rollup as
+/// [`scan_directory`]. `None` means the backend is disabled, unavailable for
+/// this platform/root/privilege level, or could not complete its volume parse.
+/// In particular, a successful eligibility check does not guarantee `Some`.
+///
+/// Set [`Options::use_mft`] to request this backend. This exposes the existing
+/// MFT path, not additional support for per-file filters or link traversal.
+/// Ordinary callers should use [`scan_directory`] to retain its safe fallback.
+pub fn try_scan_directory_via_mft(root: impl AsRef<Path>, opt: &Options) -> Option<StatMap> {
+    platform::scan_volume_via_mft(root.as_ref(), opt).map(rollup::rollup_child_to_parent)
+}
+
 pub fn scan_directory(root: impl AsRef<Path>, opt: &Options) -> Result<StatMap> {
     let root = root.as_ref();
-    // Reading the MFT answers the whole volume at once, so it replaces the walk
-    // rather than feeding it. Anything that makes it inapplicable returns None
-    // and the normal scan runs: a slower correct answer beats a fast partial
-    // one. Off unless `use_mft` is set.
-    if let Some(map) = platform::scan_volume_via_mft(root, opt) {
-        // Roll up here too. `to_stat_map` charges each file to its own
-        // directory, which is what the walking backends produce *before*
-        // `scan_directory_with` rolls them up -- returning it as-is handed
-        // callers a map with different semantics depending on which backend
-        // ran, so a directory's reported size was its own bytes under `--mft`
-        // and its whole subtree's everywhere else.
-        return Ok(rollup::rollup_child_to_parent(map));
+    // The explicit MFT API owns rollup for both callers. Failure here retains
+    // the ordinary scanner's fallback, but parity tests can require `Some`.
+    if let Some(map) = try_scan_directory_via_mft(root, opt) {
+        return Ok(map);
     }
     let scanner = Arc::new(crate::scanner::platform_scanner());
     scan_directory_with(root, opt, scanner)
