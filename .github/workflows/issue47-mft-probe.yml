@@ -1,0 +1,44 @@
+name: issue47-mft-probe
+on:
+  push:
+    branches: [codex/issue47-validation]
+    paths: [.github/workflows/issue47-mft-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: candidate
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: transport
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+          ref: 6c4bfa1f78658917c8f8089c499d8e4d4fa346ca
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Apply candidate and diagnostic-only probe
+        run: |
+          python ../transport/.github/apply-candidate.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git apply ../transport/.github/mft-extra.patch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git apply ../transport/.github/mft-probe.patch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Strict fixture
+        run: ./scripts/test-mft-fixture.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mft-probe-evidence
+          path: |
+            ${{ runner.temp }}/hyperdu-mft-cargo.log
+            ${{ runner.temp }}/hyperdu-mft-fixture.json
+          retention-days: 1
