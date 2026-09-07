@@ -21,7 +21,7 @@
 
 use std::path::PathBuf;
 
-use hyperdu_core::{scan_directory, Options};
+use hyperdu_core::{scan_directory, try_scan_directory_via_mft, Options};
 
 /// Volume to compare on. A whole volume is required: the MFT backend declines
 /// anything else, which would make the test compare enumeration with itself.
@@ -39,9 +39,8 @@ fn parity_root() -> PathBuf {
 /// producing a 9x "discrepancy" that was entirely the summing. Every other
 /// test in this crate reads the root entry; so does this one now.
 fn totals(map: &hyperdu_core::StatMap, root: &std::path::Path) -> (u64, u64, u64) {
-    map.get(root)
-        .map(|s| (s.logical, s.physical, s.files))
-        .unwrap_or((0, 0, 0))
+    let total = map.get(root).expect("scan must contain the requested root");
+    (total.logical, total.physical, total.files)
 }
 
 /// This found two real bugs, and neither was the one it first appeared to.
@@ -71,10 +70,15 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
         ..Options::default()
     };
 
-    // Distinguishing "the totals match because both used enumeration" from "the
-    // totals match because the two backends agree" is the whole point, so check
-    // the backend actually engages before comparing anything.
+    // Skip only an ordinary local invocation without the required privileges.
+    // CI explicitly provides a freshly created NTFS volume: ineligibility is
+    // then a failure, not a passing test that performed no comparison.
     if !hyperdu_core::mft_backend_applies(&root, &mft_opt) {
+        assert!(
+            std::env::var_os("HYPERDU_MFT_PARITY_ROOT").is_none(),
+            "the explicitly requested parity volume must be eligible for MFT: {}",
+            root.display()
+        );
         eprintln!(
             "skipped: the MFT backend does not apply to {}.\n\
              \x20        Run from an elevated shell against a volume root (C:\\),\n\
@@ -84,20 +88,22 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
         return;
     }
 
+    // Eligibility is not proof of backend execution. Obtain MFT first so a
+    // declined parse fails immediately, without an expensive comparison of
+    // enumeration against another enumeration. No process-global env mutation.
+    let from_mft = try_scan_directory_via_mft(&root, &mft_opt)
+        .expect("MFT did not complete; enumeration fallback is not a parity result");
+    eprintln!("parity backend: mft (no fallback)");
     let walked_opt = Options {
         use_mft: false,
         ..Options::default()
     };
     let walked = scan_directory(&root, &walked_opt).expect("enumeration scan");
 
-    // A failure here needs to say *where* the records went. The first attempt
-    // at fixing an under-count was aimed at the wrong stage because the only
-    // number available was the final one.
-    //
-    // SAFETY: single-threaded test setup, before any scan starts.
-    unsafe { std::env::set_var("HYPERDU_MFT_DIAG", "1") };
-    let from_mft = scan_directory(&root, &mft_opt).expect("mft scan");
-    unsafe { std::env::remove_var("HYPERDU_MFT_DIAG") };
+    if std::env::var_os("HYPERDU_MFT_PARITY_FIXTURE").is_some() {
+        assert_fixture(&from_mft, &root);
+        assert_fixture(&walked, &root);
+    }
 
     let (wl, wp, wf) = totals(&walked, &root);
     let (ml, mp, mf) = totals(&from_mft, &root);
@@ -160,27 +166,14 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
     eprintln!(
         "drift:       files={file_drift:.2}% logical={byte_drift:.2}% physical={phys_drift:.2}%"
     );
-    // Physical gets a looser bar than files and logical, and the reason is not
-    // that it matters less -- it is that the two sides genuinely measure
-    // different things at the margins:
-    //
-    //   * A file whose $DATA lives in an extension record reports no size from
-    //     its base record, and the $FILE_NAME copy is stale.
-    //   * A sparse file whose runs continue in an extension record is measured
-    //     only from the runs the base record holds.
-    //   * Named streams (WOF-compressed data among them) are not counted, which
-    //     matches what `du` does but not what the enumeration API reports.
-    //
-    // Measured residual on a real volume: 5.41%, the MFT under-reporting by
-    // 6.1 GB. Tracked in #39. The bar sits above that and far below the 33%
-    // this was before sparse runs were handled, so a regression to charging
-    // holes still fails here.
+    // Retain the historical live-volume tolerance. A controlled CI fixture
+    // must additionally meet exact known totals below; a low live drift is not
+    // sufficient evidence that the MFT path executed (Refs #41, #47).
     const PHYSICAL_BAR: f64 = 8.0;
     assert!(
         phys_drift < PHYSICAL_BAR,
         "physical totals differ by {phys_drift:.2}% (enumeration {wp}, mft {mp}), \
-         above the {PHYSICAL_BAR}% allowed for the known extension-record and \
-         named-stream gaps. Check the mft-diag breakdown above: if the sparse \
+         above the {PHYSICAL_BAR}% live-volume tolerance. Check the mft-diag breakdown above: if the sparse \
          category is back in the tens of gigabytes, `parse_data_sizes` is \
          charging holes again. See #39."
     );
@@ -223,5 +216,36 @@ fn use_mft_off_never_engages_the_backend() {
     assert!(
         !hyperdu_core::mft_backend_applies(parity_root(), &opt),
         "the backend must stay off unless asked for"
+    );
+}
+
+/// Contract for scripts/test-ntfs-fixture.ps1. Both backends must independently
+/// match known fixture totals, not merely agree on the same erroneous number.
+fn assert_fixture(map: &hyperdu_core::StatMap, root: &std::path::Path) {
+    let fixture = root.join("hyperdu-fixture");
+    assert_eq!(
+        totals(map, &fixture.join("plain")),
+        (128 * 65536, 128 * 65536, 128)
+    );
+    assert_eq!(totals(map, &fixture.join("sparse")), (1048576, 0, 2));
+    assert_eq!(
+        totals(map, &fixture),
+        (128 * 65536 + 1048576, 128 * 65536, 130)
+    );
+    assert!(map.contains_key(&fixture.join("empty")));
+    let total = totals(map, root);
+    let children = map
+        .iter()
+        .filter(|(path, _)| path.parent() == Some(root))
+        .fold((0, 0, 0), |(l, p, f), (_, s)| {
+            (l + s.logical, p + s.physical, f + s.files)
+        });
+    assert_eq!(
+        (
+            total.0 - children.0,
+            total.1 - children.1,
+            total.2 - children.2
+        ),
+        (65536, 65536, 1)
     );
 }

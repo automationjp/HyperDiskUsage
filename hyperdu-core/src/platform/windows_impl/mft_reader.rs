@@ -1577,4 +1577,26 @@ mod tests {
             assert!(reader.is_complete());
         }
     }
+
+    #[test]
+    fn empty_vcn_marker_does_not_hide_allocations_or_continuations() {
+        for bad in 0..4 {
+            let mut rec = blank_record(1, 1);
+            let data = push_file_name(&mut rec, 64, ROOT_RECORD, "bad-empty");
+            let end = push_nonresident_data(&mut rec, data, 0, 0);
+            rec[data + 12..data + 14].copy_from_slice(&0x8000u16.to_le_bytes());
+            rec[data + 24..data + 32].copy_from_slice(&u64::MAX.to_le_bytes());
+            rec[data + 32..data + 34].copy_from_slice(&64u16.to_le_bytes());
+            match bad {
+                0 => rec[data + 40..data + 48].copy_from_slice(&4096u64.to_le_bytes()),
+                1 => rec[data + 48..data + 56].copy_from_slice(&1u64.to_le_bytes()),
+                2 => rec[data + 16..data + 24].copy_from_slice(&1u64.to_le_bytes()),
+                _ => rec[data + 64..data + 68].copy_from_slice(&[0x11, 1, 40, 0]),
+            }
+            set_used(&mut rec, end as u32);
+            let mut reader = MftReader::open(volume(with_metadata_records(vec![rec], 5))).unwrap();
+            assert!(reader.entry(16).is_none(), "invalid empty case {bad}");
+            assert!(!reader.is_complete());
+        }
+    }
 }

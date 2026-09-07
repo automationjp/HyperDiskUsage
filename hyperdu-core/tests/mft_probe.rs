@@ -47,6 +47,7 @@ fn dump(rec: &[u8]) {
 }
 
 #[test]
+#[ignore = "read-only investigation of a live system volume"]
 fn actual_mft_is_complete() {
     assert!(
         mft_reader::is_elevated(),

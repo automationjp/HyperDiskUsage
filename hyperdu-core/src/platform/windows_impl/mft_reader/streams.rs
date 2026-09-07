@@ -128,17 +128,38 @@ fn extent(rec: &[u8], attr: &AttrHeader, cluster: u32) -> Option<Extent> {
     } else {
         None
     };
-    // CompressionUnit, not the COMPRESSED flag alone, decides whether the
-    // header carries physical compressed size (the #39 accounting contract).
+    // HighestVCN=-1 denotes an empty non-resident stream, not 2^64 clusters.
+    // Accept it only with zero sizes and an actually empty, terminated runlist.
+    let empty = attr.non_resident && high == u64::MAX;
+    if empty
+        && (low != 0
+            || u64_at(rec, attr.pos + 40)? != 0
+            || u64_at(rec, attr.pos + 48)? != 0
+            || u64_at(rec, attr.pos + 56)? != 0
+            || sizes?.allocated_size != 0
+            || !strict_runs(rec, attr)?.is_empty())
+    {
+        return None;
+    }
+    // CompressionUnit decides the initial extent's whole-stream accounting.
+    // Continuations can omit that header; their local value is not a second
+    // stream mode. Only the lowest-VCN-zero extent selects the final size.
     let sparse_uncompressed = attr.non_resident
         && attr.flags & attr_flags::SPARSE != 0
         && u16_at(rec, attr.pos + 34)? == 0;
-    let sparse_bytes = if sparse_uncompressed {
+    let sparse_bytes = if sparse_uncompressed
+        || (attr.non_resident && low > 0 && attr.flags & attr_flags::SPARSE != 0)
+    {
         let runs = strict_runs(rec, attr)?;
         let covered = runs
             .iter()
             .try_fold(0u64, |sum, run| sum.checked_add(run.length))?;
-        if covered != high.checked_sub(low)?.checked_add(1)? {
+        let expected = if empty {
+            0
+        } else {
+            high.checked_sub(low)?.checked_add(1)?
+        };
+        if covered != expected {
             return None;
         }
         runs.iter()
@@ -346,18 +367,19 @@ impl<S: VolumeSource> MftReader<S> {
             let mut end = 0u64;
             let mut sparse_bytes = 0u64;
             for (n, ext) in extents.iter().enumerate() {
-                if ext.low != end
-                    || ext.flags != flags
-                    || ext.non_resident != non_resident
-                    || ext.sparse_uncompressed != sparse
-                {
+                if ext.low != end || ext.flags != flags || ext.non_resident != non_resident {
                     return None;
                 }
                 if n > 0 && !non_resident {
                     return None;
                 }
-                // Plain single-extent headers can describe an empty stream.
-                if has_list || extents.len() > 1 || sparse {
+                // Empty streams have no VCN range and cannot have continuations.
+                if non_resident && ext.high == u64::MAX {
+                    if extents.len() != 1 {
+                        return None;
+                    }
+                    end = 0;
+                } else if has_list || extents.len() > 1 || sparse {
                     end = ext.high.checked_add(1)?;
                     if end <= ext.low {
                         return None;
