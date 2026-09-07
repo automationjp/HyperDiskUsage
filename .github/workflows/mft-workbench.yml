@@ -3,38 +3,39 @@ on:
   push:
     branches: [codex/mft-verified-parity]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  probe:
-    runs-on: windows-latest
+  regressions:
+    runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - name: Add temporary invariant tracing
+        with:
+          components: rustfmt, clippy
+      - name: Apply and format regression changes
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('hyperdu-core/src/platform/windows_impl/mft_reader/streams.rs')
-          s = p.read_text()
-          s = s.replace('let sparse = first.sparse_uncompressed;', 'let sparse = first.sparse_uncompressed; if number == 159135 { for e in &extents { eprintln!("trace: name={:?} low={} high={} sparse={} flags={} size={:?}", e.name, e.low, e.high, e.sparse_uncompressed, e.flags, e.sizes); } }')
-          s = s.replace('let attr = matched?;', 'if number == 159135 { eprintln!("trace: ref={} low={} matched={:?}", reference.record, reference.low, matched); } let attr = matched?;')
-          p.write_text(s)
-          PY
-      - name: Read-only MFT probe (no enumeration fallback)
-        run: cargo test -p hyperdu-core --test mft_probe actual_mft_is_complete -- --nocapture 2>&1 | tee probe.log
+          git apply --check .github/mft-changes.patch
+          git apply .github/mft-changes.patch
+          rustup toolchain install nightly --profile minimal --component rustfmt
+          cargo +nightly fmt --all -- --config group_imports=StdExternalCrate --config imports_granularity=Crate
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add hyperdu-core hyperdu-cli scripts docs
+          git commit -m 'test: reproduce sparse stream edge cases'
+          git push origin HEAD:refs/heads/codex/mft-verified-parity
+      - name: Portable MFT tests
+        run: cargo test -p hyperdu-core --test mft_portable -- --nocapture 2>&1 | tee regressions.log
       - name: Source snapshot
         if: always()
         run: git archive --format=tar HEAD > source.tar
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mft-probe-${{ github.run_id }}
+          name: mft-regressions-${{ github.run_id }}
           path: |
             source.tar
-            probe.log
+            regressions.log
           retention-days: 1
