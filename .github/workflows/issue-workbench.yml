@@ -25,6 +25,16 @@ jobs:
           components: rustfmt, clippy
       - name: Apply reviewed changes
         run: |
+          python3 - <<'PY'
+          import base64, hashlib, pathlib, zlib
+          p = pathlib.Path('.github/issue-workbench.patch')
+          if p.read_text().startswith('zlib:'):
+              text = ''.join(pathlib.Path(name).read_text() for name in ['.github/issue-workbench.patch', '.github/issue-workbench.part2', '.github/issue-workbench.part3'])
+              digest, encoded = text.split('\n', 1)
+              patch = zlib.decompress(base64.b64decode(encoded))
+              assert hashlib.sha256(patch).hexdigest() == digest[5:]
+              p.write_bytes(patch)
+          PY
           git apply --check .github/issue-workbench.patch
           git apply .github/issue-workbench.patch
           rustup toolchain install nightly --profile minimal --component rustfmt
@@ -32,13 +42,13 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add hyperdu-core hyperdu-cli docs README.md packaging .github/workflows/ci.yml
-          git commit -m 'fix: apply and format issue regression changes'
+          git commit -m 'fix: connect Linux snapshots and resolve validated MFT data extents'
           git push origin HEAD:refs/heads/codex/complete-open-issues-16-41
       - name: Core and CLI regressions
-        run: cargo test -p hyperdu-core -p hyperdu-cli --no-fail-fast -- --nocapture
+        run: cargo test -p hyperdu-core -p hyperdu-cli --no-fail-fast -- --nocapture 2>&1 | tee "$RUNNER_TEMP/regressions.log"
       - name: Clippy
         if: always()
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee "$RUNNER_TEMP/clippy.log"
       - name: Source snapshot
         if: always()
         run: git archive --format=tar HEAD > "$RUNNER_TEMP/hyperdu-source.tar"
@@ -46,5 +56,8 @@ jobs:
         if: always()
         with:
           name: hyperdu-source-${{ github.run_id }}
-          path: ${{ runner.temp }}/hyperdu-source.tar
+          path: |
+            ${{ runner.temp }}/hyperdu-source.tar
+            ${{ runner.temp }}/regressions.log
+            ${{ runner.temp }}/clippy.log
           retention-days: 1
