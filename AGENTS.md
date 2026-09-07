@@ -6,8 +6,9 @@ HyperDiskUsage is a Rust workspace with four crates: `hyperdu-core/` hosts the s
 Distribution artifacts sit in `dist/`, while `packaging/`, `scripts/`, and `snap/` capture installer specs and automation. Keep generated output in `target/` out of version control.
 
 ## Build, Test, and Development Commands
-`cargo check --workspace` gives a fast compile sanity pass. Run `cargo fmt --check` to enforce formatting and `cargo clippy --workspace --all-targets --all-features` to lint. Clippy takes the MSRV from each crate's own `rust-version`, since `hyperdu-mcp` needs 1.88 for rmcp while the other three still build on 1.75.
-Use `cargo test --workspace --all-features` for the full suite. Manual checks include `cargo run -p hyperdu-cli -- --help` and `cargo run -p hyperdu-gui --release`. Package builds via `pwsh scripts/release.ps1 -Profile release` should remain idempotent and reproducible.
+`cargo check --workspace` gives a fast compile sanity pass. Run `cargo fmt --check` to enforce formatting and `cargo clippy --workspace --all-targets` to lint. Clippy takes the MSRV from each crate's own `rust-version`, since `hyperdu-mcp` needs 1.88 for rmcp while the other three still build on 1.75.
+Use `cargo test --workspace` for the default suite. Also test the parallel configuration with `cargo test --workspace --features hyperdu-core/rayon-par,hyperdu-core/rayon-inner,hyperdu-core/simd-prefetch`. The `profiling` dependency supports only one backend at a time, so `--all-features` is not a valid configuration: it enables both Tracy and Puffin and produces duplicate macro definitions. Check them separately with `cargo check --workspace --features hyperdu-core/prof-tracy` and `cargo check --workspace --features hyperdu-core/prof-puffin`; never report that as a successful `--all-features` run. See `docs/design/mft-parity-verification.md` for the reproduced baseline conflict.
+Manual checks include `cargo run -p hyperdu-cli -- --help` and `cargo run -p hyperdu-gui --release`. Package builds via `pwsh scripts/release.ps1 -Profile release` should remain idempotent and reproducible.
 
 ## Coding Style & Naming Conventions
 Follow Rust 2021 defaults with four-space indentation and a 100-character line limit from `rustfmt.toml`.

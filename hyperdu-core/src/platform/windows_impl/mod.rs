@@ -77,7 +77,10 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
     let diag_clusters = reader.mft_clusters();
     let entries = reader.entries();
     if !reader.is_complete() {
-        log::warn!("MFT DATA extents incomplete or inconsistent; using directory enumeration");
+        log::warn!("MFT DATA extents incomplete or inconsistent; declining MFT result");
+        if std::env::var_os("HYPERDU_MFT_DIAG").is_some() {
+            eprintln!("mft-diag: rejected: DATA extents incomplete or inconsistent; no MFT result");
+        }
         return None;
     }
     let record_count = reader.record_count();
@@ -187,13 +190,8 @@ pub fn scan_volume_via_mft(
     None
 }
 
-/// Whether the MFT backend would be used for this root. See
-/// [`crate::mft_backend_applies`].
-///
-/// Shares its preconditions with `scan_volume_via_mft` through `mft_drive`, so
-/// the two cannot disagree -- a caller told "the MFT path will be used" and
-/// then silently given enumeration would draw the wrong conclusion from a
-/// comparison of the two.
+/// Check only eligibility, not whether opening and parsing the volume succeeds.
+/// See [`crate::mft_backend_applies`] and [`crate::try_scan_directory_via_mft`].
 #[cfg(target_env = "msvc")]
 pub fn mft_backend_applies(root: &std::path::Path, opt: &crate::Options) -> bool {
     mft_drive(root, opt).is_some()

@@ -36,8 +36,8 @@ jobs:
       - name: Test core and CLI
         run: cargo test -p hyperdu-core -p hyperdu-cli -- --nocapture
 
-  # The Windows enumeration backend and its tests are cfg(windows), so the Linux
-  # job compiles neither. Run them where they apply.
+  # Native enumeration and MFT I/O need Windows. A fresh, owned NTFS VHDX is
+  # populated and remounted read-only; parity must use MFT, never its fallback.
   test-windows:
     runs-on: windows-latest
     steps:
@@ -47,7 +47,7 @@ jobs:
           components: clippy
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Test core and CLI
-        run: cargo test -p hyperdu-core -p hyperdu-cli -- --nocapture
+      - name: Test core and CLI on a fixed NTFS volume
+        run: .\scripts\test-ntfs-fixture.ps1
 
   # Note: artifact packaging is handled in release.yml on tags. CI only builds and tests.
