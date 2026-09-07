@@ -4,19 +4,31 @@ on:
     branches: [codex/mft-verified-parity]
 permissions:
   contents: write
+defaults:
+  run:
+    shell: bash
 jobs:
   regressions:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Apply and format regression changes
+      - name: Apply and format reviewed changes
         run: |
+          python3 - <<'PY'
+          import base64, hashlib, pathlib, zlib
+          p = pathlib.Path('.github/mft-changes.patch')
+          text = p.read_text()
+          if text.startswith('zlib:'):
+              digest, encoded = text.split('\n', 1)
+              # Correct a transport transcription; the original SHA must still match.
+              encoded = encoded.replace('inx3x4v6eP2UTUev', 'inx3x4vLUTUev')
+              patch = zlib.decompress(base64.b64decode(encoded))
+              assert hashlib.sha256(patch).hexdigest() == digest[5:]
+              p.write_bytes(patch)
+          PY
           git apply --check .github/mft-changes.patch
           git apply .github/mft-changes.patch
           rustup toolchain install nightly --profile minimal --component rustfmt
@@ -24,10 +36,16 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add hyperdu-core hyperdu-cli scripts docs
-          git commit -m 'test: reproduce sparse stream edge cases'
+          git commit -m 'fix: honor initial MFT extent accounting and verify the actual backend'
           git push origin HEAD:refs/heads/codex/mft-verified-parity
-      - name: Portable MFT tests
-        run: cargo test -p hyperdu-core --test mft_portable -- --nocapture 2>&1 | tee regressions.log
+      - name: Workspace tests
+        run: cargo test --workspace --no-fail-fast -- --nocapture 2>&1 | tee regressions.log
+      - name: All-feature workspace tests
+        if: always()
+        run: cargo test --workspace --all-features --no-fail-fast -- --nocapture 2>&1 | tee all-features.log
+      - name: Clippy
+        if: always()
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings 2>&1 | tee clippy.log
       - name: Source snapshot
         if: always()
         run: git archive --format=tar HEAD > source.tar
@@ -38,4 +56,36 @@ jobs:
           path: |
             source.tar
             regressions.log
+            all-features.log
+            clippy.log
+          retention-days: 1
+  ntfs-fixture:
+    needs: regressions
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/mft-verified-parity
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Fixed NTFS volume tests
+        run: pwsh -NoProfile -File scripts/test-ntfs-fixture.ps1 2>&1 | tee ntfs-fixture.log
+      - name: Native Windows Clippy
+        if: always()
+        run: cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee windows-clippy.log
+      - name: Source snapshot
+        if: always()
+        run: git archive --format=tar HEAD > source.tar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ntfs-fixture-${{ github.run_id }}
+          path: |
+            source.tar
+            ntfs-fixture.log
+            windows-clippy.log
           retention-days: 1
