@@ -538,7 +538,7 @@ fn read_le_signed(b: &[u8], off: usize, n: usize) -> Option<i64> {
         v |= (*byte as u64) << (i * 8);
     }
     let sign_bit = 1u64 << (n * 8 - 1);
-    if v & sign_bit != 0 {
+    if n < 8 && v & sign_bit != 0 {
         // Fill the unused high bytes with ones.
         let mask = !0u64 << (n * 8);
         v |= mask;
@@ -1540,5 +1540,9 @@ mod tests {
             sizes.allocated_size < sizes.real_size,
             "a 1 GiB sparse file holding one cluster must not be counted as 1 GiB"
         );
+    }
+    #[test]
+    fn eight_byte_negative_lcn_delta_does_not_shift_by_64() {
+        assert_eq!(read_le_signed(&(-1i64).to_le_bytes(), 0, 8), Some(-1));
     }
 }

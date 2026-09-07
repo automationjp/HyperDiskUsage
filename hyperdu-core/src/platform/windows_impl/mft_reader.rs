@@ -16,12 +16,15 @@
 // the backend is wired up.
 #![allow(dead_code)]
 
+#[path = "mft_reader/streams.rs"]
+mod streams;
+
 use std::collections::HashMap;
 
 use super::mft::{
     allocated_clusters, apply_fixups, attr_type, build_path, distinct_links, namespace,
-    parse_boot_sector, parse_data_sizes, parse_file_name, parse_record_header, parse_run_list,
-    vcn_to_offset, Attributes, DataSizes, FileName, Geometry, Run,
+    parse_boot_sector, parse_file_name, parse_record_header, parse_run_list, vcn_to_offset,
+    Attributes, DataSizes, FileName, Geometry, Run,
 };
 
 /// Somewhere MFT bytes can be read from: a volume handle in production, a
@@ -69,11 +72,11 @@ pub(crate) struct SizeSource {
     /// `$FILE_NAME` had to stand in.
     pub(crate) from_data_attribute: bool,
     /// The record has an `$ATTRIBUTE_LIST`, so some of its attributes --
-    /// possibly the rest of `$DATA` -- live in extension records that this
-    /// reader does not follow for ordinary files.
+    /// possibly the rest of `$DATA` -- live in extension records. Ordinary-file
+    /// DATA extents are resolved before an entry is emitted.
     pub(crate) has_attribute_list: bool,
-    /// Bytes in named `$DATA` streams beyond the first. `du` does not count
-    /// these; the enumeration API may. WOF-compressed files keep their real
+    /// Bytes in named `$DATA` streams, identified by name rather than order.
+    /// These remain diagnostic only; the enumeration API may count them. WOF-compressed files keep their real
     /// contents here.
     pub(crate) named_stream_bytes: u64,
 }
@@ -96,6 +99,8 @@ pub(crate) struct MftReader<S: VolumeSource> {
     /// without these runs only its first extent is reachable, and the scan
     /// would stop early while still reporting a plausible total.
     runs: Vec<Run>,
+    /// False after a required ordinary-file DATA extent could not be resolved.
+    complete: bool,
 }
 
 impl<S: VolumeSource> MftReader<S> {
@@ -140,6 +145,7 @@ impl<S: VolumeSource> MftReader<S> {
                 source,
                 geometry,
                 runs,
+                complete: true,
             };
             reader.extend_runs_from(&extensions);
             return Some(reader);
@@ -151,6 +157,7 @@ impl<S: VolumeSource> MftReader<S> {
             source,
             geometry,
             runs,
+            complete: true,
         })
     }
 
@@ -190,6 +197,10 @@ impl<S: VolumeSource> MftReader<S> {
                 return;
             }
         }
+    }
+
+    pub(crate) fn is_complete(&self) -> bool {
+        self.complete
     }
 
     pub(crate) fn geometry(&self) -> Geometry {
@@ -253,13 +264,12 @@ impl<S: VolumeSource> MftReader<S> {
     pub(crate) fn entry(&mut self, number: u64) -> Option<Entry> {
         let rec = self.read_record(number)?;
         let header = parse_record_header(&rec)?;
-        if !header.in_use {
+        // An extension belongs to its base record, never a separate file.
+        if !header.in_use || u64::from_le_bytes(rec.get(32..40)?.try_into().ok()?) != 0 {
             return None;
         }
 
         let mut names: Vec<FileName> = Vec::new();
-        let mut sizes: Option<DataSizes> = None;
-        let mut data_flags: u16 = 0;
         let mut source = SizeSource::default();
         for attr in Attributes::new(&rec, &header) {
             match attr.type_code {
@@ -270,24 +280,20 @@ impl<S: VolumeSource> MftReader<S> {
                         names.push(f);
                     }
                 }
-                // The first $DATA is the file's contents. A later one is a
-                // named alternate stream, which `du` does not count -- but its
-                // bytes are measured anyway, because the enumeration API may be
-                // counting them and that would explain part of #41.
-                attr_type::DATA if sizes.is_none() => {
-                    sizes = parse_data_sizes(&rec, &attr, self.geometry.cluster_size());
-                    data_flags = attr.flags;
-                }
-                attr_type::DATA => {
-                    if let Some(s) = parse_data_sizes(&rec, &attr, self.geometry.cluster_size()) {
-                        source.named_stream_bytes =
-                            source.named_stream_bytes.saturating_add(s.allocated_size);
-                    }
-                }
                 attr_type::ATTRIBUTE_LIST => source.has_attribute_list = true,
                 _ => {}
             }
         }
+        let resolved = match self.data_streams(number, &rec, &header) {
+            Some(streams) => streams,
+            None => {
+                self.complete = false;
+                return None;
+            }
+        };
+        let sizes = resolved.unnamed;
+        let data_flags = resolved.flags;
+        source.named_stream_bytes = resolved.named_bytes;
         source.from_data_attribute = sizes.is_some();
 
         let links = distinct_links(&names);
@@ -302,8 +308,8 @@ impl<S: VolumeSource> MftReader<S> {
             parent: chosen.parent,
             name: chosen.name.clone(),
             is_directory: header.is_directory,
-            // A record whose $DATA lives in an extension record reports no size
-            // here; $FILE_NAME's copy is the fallback, stale though it can be.
+            // Extensions are resolved above. Retain the legacy fallback only
+            // for records without a DATA attribute, never for a failed extent.
             sizes: sizes.unwrap_or(DataSizes {
                 real_size: chosen.real_size,
                 allocated_size: chosen.allocated_size,
@@ -1345,6 +1351,7 @@ mod tests {
         let mut extension = blank_record(1, 0);
         extension[32..40].copy_from_slice(&16u64.to_le_bytes());
         let p = push_nonresident_data(&mut extension, 64, 16384, 12345);
+        extension[88..96].copy_from_slice(&3u64.to_le_bytes());
         extension[p..p + 4].copy_from_slice(&attr_type::END.to_le_bytes());
         set_used(&mut extension, (p + 4) as u32);
         let vol = volume(with_metadata_records(vec![base, extension], 5));
@@ -1360,5 +1367,122 @@ mod tests {
         ext[32..40].copy_from_slice(&16u64.to_le_bytes());
         let vol = volume(with_metadata_records(vec![ext], 5));
         assert!(MftReader::open(vol).unwrap().entry(16).is_none());
+    }
+
+    fn data_extension_fixture(sparse: bool) -> (Vec<u8>, Vec<u8>) {
+        let mut base = blank_record(1, 1);
+        let data = push_file_name(&mut base, 64, ROOT_RECORD, "extents");
+        let list = push_nonresident_data(&mut base, data, 16384, 16384);
+        base[data + 24..data + 32].copy_from_slice(&1u64.to_le_bytes());
+        let end = push_attribute_list(&mut base, list, &[16, 17]);
+        // The second reference describes VCN 2, not another initial extent.
+        base[list + 24 + 32 + 8..list + 24 + 32 + 16].copy_from_slice(&2u64.to_le_bytes());
+        set_used(&mut base, end as u32);
+        let mut extension = blank_record(1, 0);
+        extension[32..40].copy_from_slice(&16u64.to_le_bytes());
+        let end = push_nonresident_data(&mut extension, 64, 16384, 16384);
+        extension[80..88].copy_from_slice(&2u64.to_le_bytes());
+        extension[88..96].copy_from_slice(&3u64.to_le_bytes());
+        set_used(&mut extension, end as u32);
+        if sparse {
+            base[data + 12..data + 14].copy_from_slice(&0x8000u16.to_le_bytes());
+            base[data + 32..data + 34].copy_from_slice(&64u16.to_le_bytes());
+            base[data + 64..data + 70].copy_from_slice(&[0x11, 1, 40, 0x01, 1, 0]);
+            extension[76..78].copy_from_slice(&0x8000u16.to_le_bytes());
+            extension[96..98].copy_from_slice(&64u16.to_le_bytes());
+            extension[128..132].copy_from_slice(&[0x11, 2, 50, 0]);
+        }
+        (base, extension)
+    }
+
+    #[test]
+    fn issue41_sparse_continuations_include_all_non_hole_clusters() {
+        let (base, ext) = data_extension_fixture(true);
+        let mut reader =
+            MftReader::open(volume(with_metadata_records(vec![base, ext], 5))).unwrap();
+        let entry = reader.entry(16).unwrap();
+        assert_eq!(entry.sizes.allocated_size, 3 * CLUSTER as u64);
+        assert_eq!(entry.sizes.real_size, 16384);
+        assert_eq!(entry.size_source.named_stream_bytes, 0);
+        assert!(reader.is_complete());
+    }
+
+    #[test]
+    fn issue41_plain_continuations_do_not_sum_whole_stream_size_twice() {
+        let (base, ext) = data_extension_fixture(false);
+        let mut reader =
+            MftReader::open(volume(with_metadata_records(vec![base, ext], 5))).unwrap();
+        assert_eq!(reader.entry(16).unwrap().sizes.allocated_size, 16384);
+        assert!(reader.is_complete());
+    }
+
+    #[test]
+    fn issue41_missing_reused_or_wrong_owner_extension_requires_fallback() {
+        for failure in 0..3 {
+            let (base, mut ext) = data_extension_fixture(false);
+            match failure {
+                0 => ext[0..4].copy_from_slice(b"BAAD"),
+                1 => ext[16..18].copy_from_slice(&1u16.to_le_bytes()),
+                _ => ext[32..40].copy_from_slice(&99u64.to_le_bytes()),
+            }
+            let mut reader =
+                MftReader::open(volume(with_metadata_records(vec![base, ext], 5))).unwrap();
+            assert!(reader.entry(16).is_none(), "failure {failure}");
+            assert!(!reader.is_complete(), "failure {failure}");
+        }
+    }
+
+    #[test]
+    fn issue41_malformed_sparse_runs_do_not_fall_back_to_inflated_header() {
+        let (mut base, ext) = data_extension_fixture(true);
+        let header = parse_record_header(&base).unwrap();
+        let attr = Attributes::new(&base, &header)
+            .find(|a| a.type_code == attr_type::DATA)
+            .unwrap();
+        // Eight nonzero bytes with no terminator inside this attribute.
+        base[attr.pos + 64..attr.pos + 72].fill(0x11);
+        let mut reader =
+            MftReader::open(volume(with_metadata_records(vec![base, ext], 5))).unwrap();
+        assert!(reader.entry(16).is_none());
+        assert!(!reader.is_complete());
+    }
+
+    #[test]
+    fn issue41_named_streams_remain_diagnostic_not_total_bytes() {
+        let mut rec = blank_record(1, 1);
+        let p = push_file_name(&mut rec, 64, ROOT_RECORD, "named");
+        let p = push_nonresident_data(&mut rec, p, 4096, 100);
+        let p = named_data(&mut rec, p, "WofCompressedData", 8192, 8000);
+        set_used(&mut rec, p as u32);
+        let mut reader = MftReader::open(volume(with_metadata_records(vec![rec], 5))).unwrap();
+        let entries = reader.entries();
+        assert!(reader.is_complete());
+        assert_eq!(entries[0].size_source.named_stream_bytes, 8192);
+        let map = to_stat_map(&entries, &paths_for(&entries), "C:\\", false, true);
+        assert_eq!(map.values().map(|s| s.physical).sum::<u64>(), 4096);
+    }
+
+    #[test]
+    fn issue41_nonresident_attribute_list_reads_referenced_data() {
+        let mut base = blank_record(1, 1);
+        let p = push_file_name(&mut base, 64, ROOT_RECORD, "external-list");
+        let end = push_nonresident_data(&mut base, p, CLUSTER as u64, 32);
+        base[p..p + 4].copy_from_slice(&attr_type::ATTRIBUTE_LIST.to_le_bytes());
+        base[p + 32..p + 34].copy_from_slice(&64u16.to_le_bytes());
+        base[p + 64..p + 68].copy_from_slice(&[0x11, 1, 80, 0]);
+        set_used(&mut base, end as u32);
+        let mut ext = blank_record(1, 0);
+        ext[32..40].copy_from_slice(&16u64.to_le_bytes());
+        let end = push_nonresident_data(&mut ext, 64, 4096, 123);
+        set_used(&mut ext, end as u32);
+        let mut vol = volume(with_metadata_records(vec![base, ext], 5));
+        vol.0.resize(81 * CLUSTER, 0);
+        let start = 80 * CLUSTER;
+        vol.0[start..start + 4].copy_from_slice(&attr_type::DATA.to_le_bytes());
+        vol.0[start + 4..start + 6].copy_from_slice(&32u16.to_le_bytes());
+        vol.0[start + 16..start + 24].copy_from_slice(&17u64.to_le_bytes());
+        let mut reader = MftReader::open(vol).unwrap();
+        assert_eq!(reader.entry(16).unwrap().sizes.real_size, 123);
+        assert!(reader.is_complete());
     }
 }

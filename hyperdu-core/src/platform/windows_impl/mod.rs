@@ -76,6 +76,10 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
     let diag_runs = reader.run_count();
     let diag_clusters = reader.mft_clusters();
     let entries = reader.entries();
+    if !reader.is_complete() {
+        log::warn!("MFT DATA extents incomplete or inconsistent; using directory enumeration");
+        return None;
+    }
     let record_count = reader.record_count();
     drop(reader);
 

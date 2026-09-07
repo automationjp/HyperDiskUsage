@@ -22,6 +22,10 @@
 //! updated by an explicit scan, and saved -- which is useful on its own and
 //! commits to nothing.
 
+mod atomic_save;
+#[cfg(target_os = "linux")]
+mod snapshot;
+
 use ahash::AHashMap as HashMap;
 
 /// Identity of a directory, stable across renames.
@@ -110,7 +114,7 @@ impl Index {
     /// That is the whole point: without it, one changed file would mean
     /// re-summing everything above it.
     pub fn set_own(&mut self, key: DirKey, own_bytes: u64, own_files: u64) {
-        self.generation += 1;
+        self.generation = self.generation.saturating_add(1);
         let gen = self.generation;
 
         let entry = self.entries.entry(key).or_default();
@@ -122,8 +126,11 @@ impl Index {
         entry.subtree_bytes = apply_delta(entry.subtree_bytes, d_bytes);
         entry.subtree_files = apply_delta(entry.subtree_files, d_files);
         entry.generation = gen;
-        // A directory whose contents were just measured is as fresh as it gets.
-        entry.state = Freshness::Fresh;
+        // Measuring own files cannot recover changes lost in descendants. A
+        // stale subtree is restored only by rebuilding it, not by one delta.
+        if entry.state != Freshness::Stale {
+            entry.state = Freshness::Fresh;
+        }
 
         self.propagate(key, d_bytes, d_files, gen);
     }
@@ -142,7 +149,7 @@ impl Index {
             None => (0, 0),
         };
 
-        self.generation += 1;
+        self.generation = self.generation.saturating_add(1);
         let gen = self.generation;
 
         // Take the subtree away from the old parent before giving it to the new
@@ -153,6 +160,9 @@ impl Index {
         self.parents.insert(child, parent);
         self.entries.entry(parent).or_default();
         self.propagate(child, bytes, files, gen);
+        if self.entries.get(&child).map(|e| e.state) != Some(Freshness::Fresh) {
+            self.invalidate_ancestors(child);
+        }
     }
 
     /// Remove a directory and take its subtree out of its ancestors' totals.
@@ -160,7 +170,7 @@ impl Index {
         let Some(entry) = self.entries.remove(&key) else {
             return;
         };
-        self.generation += 1;
+        self.generation = self.generation.saturating_add(1);
         let gen = self.generation;
         let bytes = entry.subtree_bytes as i128;
         let files = entry.subtree_files as i128;
@@ -174,24 +184,37 @@ impl Index {
     /// events. The numbers are kept -- a stale total is more useful than none,
     /// as long as the caller is told which it is.
     pub fn mark_stale(&mut self, key: DirKey) {
-        let links: Vec<(DirKey, DirKey)> = self.parents.iter().map(|(c, p)| (*c, *p)).collect();
+        let mut children: HashMap<DirKey, Vec<DirKey>> = HashMap::default();
+        for (&child, &parent) in &self.parents {
+            children.entry(parent).or_default().push(child);
+        }
+        let mut seen = ahash::AHashSet::new();
         let mut stack = vec![key];
-        let mut seen = 0usize;
-        // A cycle in the parent links would otherwise revisit forever.
-        let limit = links.len() + 1;
         while let Some(k) = stack.pop() {
-            seen += 1;
-            if seen > limit {
-                return;
+            if !seen.insert(k) {
+                continue;
             }
             if let Some(e) = self.entries.get_mut(&k) {
                 e.state = Freshness::Stale;
             }
-            for (child, parent) in &links {
-                if *parent == k && *child != k {
-                    stack.push(*child);
-                }
+            if let Some(next) = children.get(&k) {
+                stack.extend(next.iter().copied());
             }
+        }
+        self.invalidate_ancestors(key);
+    }
+
+    /// Ancestors contain the invalidated total; siblings themselves do not.
+    fn invalidate_ancestors(&mut self, key: DirKey) {
+        let mut current = key;
+        for _ in 0..=self.parents.len() {
+            let Some(&parent) = self.parents.get(&current) else {
+                break;
+            };
+            if let Some(entry) = self.entries.get_mut(&parent) {
+                entry.state = Freshness::Stale;
+            }
+            current = parent;
         }
     }
 
@@ -287,9 +310,7 @@ impl Index {
     /// Where the file belongs is a product decision the design document leaves
     /// open, so the caller supplies the path.
     pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
-        use std::io::Write;
-
-        let mut buf = Vec::with_capacity(20 + self.entries.len() * ENTRY_BYTES);
+        let mut buf = Vec::with_capacity(20 + self.entries.len() * (ENTRY_BYTES + 16));
         buf.extend_from_slice(MAGIC);
         buf.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&(self.entries.len() as u64).to_le_bytes());
@@ -311,15 +332,7 @@ impl Index {
             buf.extend_from_slice(&pino.to_le_bytes());
         }
 
-        let tmp = path.with_extension("tmp");
-        {
-            let mut f = std::fs::File::create(&tmp)?;
-            f.write_all(&buf)?;
-            // Without this the rename can land before the bytes do, leaving a
-            // named file with nothing in it.
-            f.sync_all()?;
-        }
-        std::fs::rename(&tmp, path)
+        atomic_save::write(path, &buf)
     }
 
     /// Read an index written by [`Index::save`].
@@ -378,10 +391,16 @@ impl Index {
                 subtree_bytes: u(32),
                 subtree_files: u(40),
                 generation: u(48),
-                state,
+                // No watcher covered the time between save and reload.
+                state: match state {
+                    Freshness::Fresh => Freshness::Stale,
+                    other => other,
+                },
             };
             max_generation = max_generation.max(entry.generation);
-            ix.entries.insert(key, entry);
+            if key == (0, 0) || ix.entries.insert(key, entry).is_some() {
+                return Err(bad("invalid or duplicate directory identity"));
+            }
 
             let parent = (u(64), u(72));
             // (0, 0) is the sentinel for "no parent recorded"; a real inode
@@ -394,7 +413,52 @@ impl Index {
         // Continue numbering above anything already stored, so an update after
         // a reload cannot reuse a generation.
         ix.generation = max_generation;
+        ix.validate_loaded()?;
         Ok(ix)
+    }
+
+    fn validate_loaded(&self) -> std::io::Result<()> {
+        let bad =
+            || std::io::Error::new(std::io::ErrorKind::InvalidData, "inconsistent index tree");
+        let mut pending: HashMap<DirKey, usize> = self.entries.keys().map(|&k| (k, 0)).collect();
+        let mut totals: HashMap<DirKey, (u64, u64)> = self
+            .entries
+            .iter()
+            .map(|(&k, e)| (k, (e.own_bytes, e.own_files)))
+            .collect();
+        for (&child, &parent) in &self.parents {
+            if child == parent || !self.entries.contains_key(&child) {
+                return Err(bad());
+            }
+            *pending.get_mut(&parent).ok_or_else(bad)? += 1;
+        }
+        let mut leaves: Vec<_> = pending
+            .iter()
+            .filter_map(|(&k, &n)| (n == 0).then_some(k))
+            .collect();
+        let mut visited = 0;
+        while let Some(key) = leaves.pop() {
+            visited += 1;
+            let total = totals[&key];
+            let entry = &self.entries[&key];
+            if total != (entry.subtree_bytes, entry.subtree_files) {
+                return Err(bad());
+            }
+            if let Some(parent) = self.parents.get(&key) {
+                let p = totals.get_mut(parent).ok_or_else(bad)?;
+                p.0 = p.0.checked_add(total.0).ok_or_else(bad)?;
+                p.1 = p.1.checked_add(total.1).ok_or_else(bad)?;
+                let count = pending.get_mut(parent).ok_or_else(bad)?;
+                *count -= 1;
+                if *count == 0 {
+                    leaves.push(*parent);
+                }
+            }
+        }
+        if visited != self.entries.len() {
+            return Err(bad());
+        }
+        Ok(())
     }
 }
 
@@ -409,7 +473,7 @@ fn apply_delta(total: u64, delta: i128) -> u64 {
     if next < 0 {
         0
     } else {
-        next as u64
+        next.min(u64::MAX as i128) as u64
     }
 }
 
@@ -644,7 +708,7 @@ mod tests {
             1500,
             "the total must survive, or the index is pointless"
         );
-        assert_eq!(back.get(B).unwrap().state, Freshness::Fresh);
+        assert_eq!(back.get(B).unwrap().state, Freshness::Stale);
         assert_eq!(back.get(C).unwrap().state, Freshness::Stale);
     }
 

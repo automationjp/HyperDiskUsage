@@ -10,6 +10,8 @@ use std::{
     time::Duration,
 };
 
+mod index_cli;
+
 use anyhow::Result;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use humansize::{format_size, BINARY};
@@ -117,6 +119,7 @@ impl From<IoProfileArg> for hyperdu_core::IoProfile {
 #[derive(Parser, Debug)]
 #[command(
     name = "hyperdu",
+    args_conflicts_with_subcommands = true,
     version,
     about = "HyperDU CLI - ultra-fast disk usage analyzer",
     long_about = "超高速なディスク使用量アナライザ HyperDU のCLI。\n\
@@ -138,6 +141,9 @@ impl From<IoProfileArg> for hyperdu_core::IoProfile {
     "
 )]
 struct Args {
+    #[command(subcommand)]
+    command: Option<index_cli::Command>,
+
     /// Root directory(ies) to scan (du互換時は複数可; 省略時は".")
     #[arg(
         value_name = "ROOTS",
@@ -673,6 +679,9 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let mut args = Args::parse();
+    if let Some(command) = args.command.take() {
+        return index_cli::run(command);
+    }
     // GNU du: -b is equivalent to --apparent-size --block-size=1
     if args.bytes {
         args.apparent_size = true;

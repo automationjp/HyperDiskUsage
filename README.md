@@ -416,3 +416,34 @@ WITH_RAYON=1 scripts/bench.sh --root /path/to/dir
 ---
 
 **HyperDU** - ディスク使用量分析を、より速く、より効率的に。
+
+
+### Explicit Linux snapshots (experimental)
+
+```sh
+mkdir -p "$HOME/.cache/hyperdu"
+hyperdu-cli index refresh /srv/data --database "$HOME/.cache/hyperdu/data.idx"
+hyperdu-cli index show /srv/data --database "$HOME/.cache/hyperdu/data.idx"
+```
+
+`refresh` runs the existing physical-size scanner and atomically replaces a directory-level
+snapshot. `show` loads saved totals without walking the target tree. Both emit JSON with
+`physical_bytes`, `files`, `directory_count`, `freshness: "stale"` and `monitoring: false`.
+There is no watcher or automatic refresh. Changes are visible only after another `refresh`.
+A snapshot is not an atomic filesystem view, even immediately after scanning.
+
+The database parent must already exist, and the database must be a regular file outside
+ROOT (not a symlink). Consequently `/` is not a supported snapshot root in this mode.
+Use a separate database for each tree. The mounted device/inode root identity must match;
+rebuild explicitly after remounts, restores or root replacement. An inode can be reused,
+so this identity is a consistency check, not a freshness guarantee. Cancellation, scan
+errors and unrepresentable bind-mount aliases prevent replacement of the previous file.
+Loading costs O(indexed directories), not O(files); after loading, the root lookup is O(1).
+`index` is a subcommand; use `./index` or `-- index` to scan a directory literally named
+`index`. Normal scan options do not apply to these fixed-semantics snapshot commands.
+
+For MFT scans, ordinary-file DATA extensions now use stream names and validated record
+references. Unresolved required DATA extents cause a fallback to directory enumeration.
+Named streams (including WOF) remain diagnostic only, not blanket additions to physical
+usage. Live-volume parity and an inotify watcher remain separate acceptance gates; see
+[implementation boundaries](docs/design/issue-16-41-implementation.md).
