@@ -13,7 +13,7 @@ which of that can be deleted without losing anything.
 | `skills/disk-space-triage/scripts/` | — | Setup for both binaries and the MCP server |
 
 The three surfaces are independent on purpose. The MCP server runs without the
-plugin, and the skill drives `hyperdu-cli` rather than the server, so **you can
+plugin, and the skill drives `hyperdu` rather than the server, so **you can
 adopt any one of them without the other two**.
 
 ## Setup
@@ -50,8 +50,8 @@ cargo install --git https://github.com/automationjp/HyperDiskUsage hyperdu-cli
 cargo install --git https://github.com/automationjp/HyperDiskUsage hyperdu-mcp
 ```
 
-The binary is `hyperdu-cli`, not `hyperdu`. The shorter name exists only in the
-deb and rpm packages, which rename it on install.
+The crate is `hyperdu-cli`; the command it installs is `hyperdu`. Same shape as
+ripgrep installing `rg`, and it matches the deb and rpm packages.
 
 Then register the MCP server with your client:
 
@@ -84,7 +84,7 @@ wrong report can be corrected, a wrong `rm -rf` cannot.
 ## Using only the skill
 
 Copy `skills/disk-space-triage/` anywhere your agent looks for skills. It needs
-`hyperdu-cli` and nothing else from this directory — not the MCP server, not the
+`hyperdu` and nothing else from this directory — not the MCP server, not the
 plugin manifest.
 
 ## Using only the MCP server

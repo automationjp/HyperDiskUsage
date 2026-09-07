@@ -36,9 +36,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $RepoUrl = 'https://github.com/automationjp/HyperDiskUsage'
-# The binary is `hyperdu-cli`, not `hyperdu`: the crate declares no [[bin]], so
-# cargo names it after the package. Only the deb/rpm packaging renames it.
-$CliBin = 'hyperdu-cli'
+# The crate is `hyperdu-cli`; the command it installs is `hyperdu`, declared
+# by a [[bin]] section. That matches what the deb and rpm packages install.
+$CliBin = 'hyperdu'
 $McpBin = 'hyperdu-mcp'
 $McpName = 'hyperdu'
 

@@ -31,7 +31,7 @@
 
 .EXAMPLE
     pwsh -File scripts/package/winget.ps1 -Version 0.5.0-beta.1 `
-        -InstallerUrl https://example.invalid/hyperdu-cli.exe `
+        -InstallerUrl https://example.invalid/hyperdu.exe `
         -InstallerSha256 0000000000000000000000000000000000000000000000000000000000000000
 #>
 Param(
@@ -85,7 +85,7 @@ Platform:
 MinimumOSVersion: 10.0.17763.0
 InstallerType: portable
 Commands:
-  - hyperdu-cli
+  - hyperdu
 ReleaseDate: $(Get-Date -Format 'yyyy-MM-dd')
 Installers:
   - Architecture: x64

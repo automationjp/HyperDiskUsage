@@ -7,7 +7,7 @@ set -uo pipefail
 #   scripts/bench/vs_du.sh [--bin PATH] [--runs N] [--cold] [--allow-stale] TREE [TREE...]
 #
 # Options:
-#   --bin PATH      hyperdu-cli binary (default: target/release/hyperdu-cli)
+#   --bin PATH      hyperdu binary (default: target/release/hyperdu)
 #   --runs N        Warm iterations per case (default: 5)
 #   --cold          Also measure with a cold page cache. Needs root, since it
 #                   writes to /proc/sys/vm/drop_caches between runs.
@@ -41,7 +41,7 @@ set -uo pipefail
 
 usage() { awk 'NR<=41 && /^#( |$)/ { sub(/^# ?/, ""); print }' "$0"; }
 
-BIN="target/release/hyperdu-cli"
+BIN="target/release/hyperdu"
 RUNS=5
 COLD=0
 ALLOW_STALE=0

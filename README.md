@@ -70,7 +70,7 @@
 
 ```bash
 # CLI
-cargo install hyperdu-cli --version 0.5.0-beta.1
+cargo install hyperdu-cli --version 0.5.0-beta.2
 
 # エージェント向け MCP サーバ
 cargo install hyperdu-mcp --version 0.5.0-beta.1
@@ -81,7 +81,7 @@ cargo install hyperdu-gui --version 0.5.0-beta.1
 
 ベータ版のため、`--version` の明示が要ります（プレリリースは既定で選ばれません）。
 
-**インストールされるコマンド名は `hyperdu-cli` です。** 短い `hyperdu` は deb / rpm パッケージ側でのリネームでのみ存在します。
+**クレート名は `hyperdu-cli` ですが、入るコマンドは `hyperdu` です。** `ripgrep` が `rg` を入れるのと同じ形で、deb / rpm パッケージのコマンド名とも揃います。
 
 ### Windows のパッケージマネージャ
 
@@ -187,12 +187,12 @@ plugin/skills/disk-space-triage/scripts/setup-hyperdu.sh --register # 登録ま�
 
 ```bash
 # 従来の du を HyperDU に置き換え
-alias du='hyperdu-cli --compat gnu'
+alias du='hyperdu --compat gnu'
 
 # du と同じオプションがそのまま使える
-hyperdu-cli --compat gnu -sh /var/log
-hyperdu-cli --compat gnu -ak /home --max-depth=2
-hyperdu-cli --compat gnu -b --time /usr/share
+hyperdu --compat gnu -sh /var/log
+hyperdu --compat gnu -ak /home --max-depth=2
+hyperdu --compat gnu -b --time /usr/share
 
 # du 互換の出力形式で高速動作を目指しています
 ```
@@ -201,26 +201,26 @@ hyperdu-cli --compat gnu -b --time /usr/share
 
 ```bash
 # カレントディレクトリをスキャン（デフォルトは高速モード）
-hyperdu-cli .
+hyperdu .
 
 # ターボモードで最速スキャン
-hyperdu-cli --perf turbo /large/directory
+hyperdu --perf turbo /large/directory
 
 # 進捗表示とライブチューニング付き
-hyperdu-cli /large/directory --progress --tune-log
+hyperdu /large/directory --progress --tune-log
 
 # 特定のディレクトリを除外して高速化
-hyperdu-cli . --exclude ".git,node_modules,target,build"
+hyperdu . --exclude ".git,node_modules,target,build"
 
 # CSV/JSON形式で出力
-hyperdu-cli . --csv output.csv --json output.json
+hyperdu . --csv output.csv --json output.json
 ```
 
 ### コマンドラインオプション
 
 ```
 USAGE:
-    hyperdu-cli [OPTIONS] <ROOT>
+    hyperdu [OPTIONS] <ROOT>
 
 ARGS:
     <ROOT>    スキャンするディレクトリパス
@@ -252,25 +252,25 @@ OPTIONS:
 
 ```bash
 # 1GB以上のファイルのみをカウント
-hyperdu-cli / --min-file-size 1073741824
+hyperdu / --min-file-size 1073741824
 
 # 3階層までの深さでスキャン
-hyperdu-cli . --max-depth 3
+hyperdu . --max-depth 3
 
 # 複数の除外パターンを指定
-hyperdu-cli ~/projects --exclude ".git,node_modules,target,build,dist"
+hyperdu ~/projects --exclude ".git,node_modules,target,build,dist"
 
 # 物理サイズの計算をスキップして高速化（論理サイズのみ）
-hyperdu-cli / --logical-only
+hyperdu / --logical-only
 
 # 推定サイズモードで高速スキャン（精度とトレードオフ）
-hyperdu-cli / --approximate
+hyperdu / --approximate
 
 # ライブチューニングのログを表示しながらスキャン
-hyperdu-cli /large/directory --progress --tune-log
+hyperdu /large/directory --progress --tune-log
 
 # 最適なパラメータを2秒間で測定
-hyperdu-cli /large/directory --tune-only --tune-secs 2
+hyperdu /large/directory --tune-only --tune-secs 2
 ```
 
 ## 🖼️ GUI版
@@ -330,7 +330,7 @@ warm は 5 回の最小値、cold は 3 回の burn-in 後に両ツールを交�
 du -sh /path/to/directory
 
 # HyperDU で完全互換動作
-hyperdu-cli --compat gnu -sh /path/to/directory
+hyperdu --compat gnu -sh /path/to/directory
 
 # du 互換の出力形式を目指しています
 ```
@@ -464,7 +464,7 @@ WITH_RAYON=1 scripts/bench/run.sh --root /path/to/dir
 
 ### ランタイムチューニング（任意・上級者）
 
-- `hyperdu-cli … --tune` でアダプティブチューナを有効化（dir_yield/実行スレッド数を動的調整）
+- `hyperdu … --tune` でアダプティブチューナを有効化（dir_yield/実行スレッド数を動的調整）
 - スレッドは `active_threads` を動的に制御（[1, threads] 範囲）
   - I/O待ちやSQE失敗が多い→縮退
   - throughput改善が続く→段階的に増加
@@ -518,8 +518,8 @@ WITH_RAYON=1 scripts/bench/run.sh --root /path/to/dir
 
 ```sh
 mkdir -p "$HOME/.cache/hyperdu"
-hyperdu-cli index refresh /srv/data --database "$HOME/.cache/hyperdu/data.idx"
-hyperdu-cli index show /srv/data --database "$HOME/.cache/hyperdu/data.idx"
+hyperdu index refresh /srv/data --database "$HOME/.cache/hyperdu/data.idx"
+hyperdu index show /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 ```
 
 `refresh` runs the existing physical-size scanner and atomically replaces a directory-level

@@ -2,7 +2,7 @@
 name: disk-space-triage
 description: Find out why a disk is full and what can safely be freed, using the HyperDU scanner. Use when a drive is out of space, a build fails with "no space left on device", or the user asks what is using their disk, which directories are largest, or what is safe to delete. Covers per-volume free space, largest-directory scans, and separating regenerable build output (Cargo target, node_modules, virtualenvs) from data that cannot be rebuilt.
 license: MIT
-compatibility: Requires the hyperdu-cli binary. Run scripts/setup-hyperdu.sh (or setup-hyperdu.ps1 on Windows) to install it; that needs a Rust toolchain, because HyperDU has no prebuilt release. Works on Windows, Linux, and macOS.
+compatibility: Requires the hyperdu binary. Run scripts/setup-hyperdu.sh (or setup-hyperdu.ps1 on Windows) to install it; that needs a Rust toolchain, because HyperDU has no prebuilt release. Works on Windows, Linux, and macOS.
 metadata:
   project: HyperDiskUsage
   repository: https://github.com/automationjp/HyperDiskUsage
@@ -13,7 +13,7 @@ metadata:
 Answer "why is the disk full and what can I delete" in a fixed order. Skipping
 a step is what produces confident wrong answers.
 
-This skill drives the `hyperdu-cli` command. It does not need the MCP server —
+This skill drives the `hyperdu` command. It does not need the MCP server —
 if that server is available, its `list_volumes`, `scan_path`, and
 `find_reclaimable` tools do the same work with typed arguments and structured
 results, and you should prefer them. This file is the fallback that works with
@@ -21,7 +21,8 @@ nothing but a shell.
 
 ## Setup
 
-The binary is called `hyperdu-cli`. If it is not on PATH, install it before
+The command is `hyperdu` (from the `hyperdu-cli` crate). If it is not on PATH,
+install it before
 doing anything else:
 
 ```bash
@@ -34,7 +35,7 @@ On Windows:
 .\scripts\setup-hyperdu.ps1
 ```
 
-The script installs `hyperdu-cli` and the `hyperdu-mcp` server, then prints the
+The script installs `hyperdu` and the `hyperdu-mcp` server, then prints the
 command to register the MCP server with Claude Code or Codex. It only performs
 that registration when passed `--register`, because rewriting an agent's
 configuration should be something the user asked for.
@@ -67,7 +68,7 @@ now, while one at 85% does not.
 ## Step 2 — What is large on it?
 
 ```bash
-hyperdu-cli /path/to/volume --top 20
+hyperdu /path/to/volume --top 20
 ```
 
 Read the output as a tree: HyperDU rolls sizes up, so a parent's size includes
@@ -89,7 +90,7 @@ will change.
 Scanning a full 930 GB disk with 4 million files takes roughly 47 seconds. Use
 `--max-depth` if you need an answer sooner.
 
-Check `hyperdu-cli --help` before inventing a flag. Guessing at one costs a full
+Check `hyperdu --help` before inventing a flag. Guessing at one costs a full
 scan to discover it does not exist.
 
 ## Step 3 — Drill into the largest subtree

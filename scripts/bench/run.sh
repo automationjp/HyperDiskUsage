@@ -10,7 +10,7 @@ set -euo pipefail
 # Options:
 #   --root PATH   Root directory to scan (default: '.')
 #   --runs N      Iterations per case (default: env RUNS or 3)
-#   --bin PATH    Path to hyperdu-cli binary (default: find in PATH)
+#   --bin PATH    Path to hyperdu binary (default: find in PATH)
 #   -h, --help    Show this help
 #
 # Notes:
@@ -66,10 +66,10 @@ bench_one() {
 }
 
 if [[ -z "$BIN" ]]; then
-  BIN=$(command -v hyperdu-cli || true)
+  BIN=$(command -v hyperdu || true)
 fi
 if [[ -z "$BIN" ]]; then
-  echo "error: hyperdu-cli not found in PATH; build first"
+  echo "error: hyperdu not found in PATH; build first"
   exit 1
 fi
 
@@ -79,7 +79,7 @@ if [[ "$WITH_RAYON" == "1" ]]; then
   echo "==> building rayon-par variant"
   if cargo build -p hyperdu-cli --release --features rayon-par \
       --target-dir target/bench-rayon >/dev/null; then
-    bench_one "turbo+rayon-par" target/bench-rayon/release/hyperdu-cli "$ROOT" --perf turbo
+    bench_one "turbo+rayon-par" target/bench-rayon/release/hyperdu "$ROOT" --perf turbo
   else
     echo "  (skipped: rayon-par variant failed to build)" >&2
   fi
