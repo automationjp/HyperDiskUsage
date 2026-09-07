@@ -15,6 +15,16 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
+      - name: Add temporary invariant tracing
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('hyperdu-core/src/platform/windows_impl/mft_reader/streams.rs')
+          s = p.read_text()
+          s = s.replace('let sparse = first.sparse_uncompressed;', 'let sparse = first.sparse_uncompressed; if number == 159135 { for e in &extents { eprintln!("trace: name={:?} low={} high={} sparse={} flags={} size={:?}", e.name, e.low, e.high, e.sparse_uncompressed, e.flags, e.sizes); } }')
+          s = s.replace('let attr = matched?;', 'if number == 159135 { eprintln!("trace: ref={} low={} matched={:?}", reference.record, reference.low, matched); } let attr = matched?;')
+          p.write_text(s)
+          PY
       - name: Read-only MFT probe (no enumeration fallback)
         run: cargo test -p hyperdu-core --test mft_probe actual_mft_is_complete -- --nocapture 2>&1 | tee probe.log
       - name: Source snapshot
