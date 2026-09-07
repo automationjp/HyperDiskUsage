@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blue)](https://github.com/yourusername/HyperDiskUsage)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blue)](https://github.com/automationjp/HyperDiskUsage)
 
 **HyperDU** は、高速なディスク使用量分析を目指した Rust 製ツールです。並列処理とOS固有APIの最適化により、従来のツールより高速に動作する可能性があります。
 
@@ -22,9 +22,30 @@
 - **多様な出力形式**: du互換出力、CSV、JSON、独自の詳細表示
 - **GUI版も提供**: CLI版に加えて、直感的なGUIアプリケーション
 
-## 📊 パフォーマンスについて
+## 📊 パフォーマンス
 
-本ツールは OS 固有の列挙 API と並列処理を最適化し、高速なスキャンを目指しています。実測の性能はストレージ（NVMe/SSD/HDD/ネットワーク）、ファイル構成、除外条件、オプション設定に大きく依存します。再現可能な比較が必要な場合は、同一環境・同条件で `hyperdu-cli --progress` と `du` などを用いてベンチマークを取得してください。
+同一マシン（Ryzen 9 3900X / NVMe SSD）での実測です。計測日 2026-09-07。
+
+### Windows — `C:\Users\<user>\.cargo\registry`（101,368 ファイル / 2.96 GB）
+
+| ツール | 実行時間 | HyperDU 比 |
+|---|---|---|
+| **HyperDU** | **251 ms** | — |
+| robocopy `/L /S`（Windows 純正・ネイティブ API） | 14,362 ms | **57× 遅い** |
+| GNU du 8.32（MSYS2） | 12,871 ms | **51× 遅い** |
+
+### Linux（WSL2 / ext4） — `/var`（712,374 ファイル）
+
+| ツール | 実行時間 | HyperDU 比 |
+|---|---|---|
+| **HyperDU** | **191 ms** | — |
+| du（uutils coreutils 0.8.0） | 2,900 ms | **15× 遅い** |
+
+3〜5 回の最小値です。**走査量が一致していることを毎回確認**しています（robocopy と HyperDU はファイル数 101,368、バイト数 2,956,477,017 が完全一致）。
+
+比較対象は意図的に 2 種類用意しています。MSYS2 の du は POSIX 互換層を通るぶん Windows では構造的に不利なので、**互換層を通らない Windows 純正の robocopy** も測りました。それでも 57 倍です。Linux の `du` は Ubuntu 26.04 の既定である uutils（Rust 実装）なので、**Rust 対 Rust** の比較になります。
+
+倍率はツリーの形とストレージに強く依存します。深く狭い木では差が縮み、HDD やネットワーク越しでは I/O 律速になります。**環境・手順・不利な結果を含む全数値は [docs/benchmarks.md](docs/benchmarks.md) にあります。**
 
 ### パフォーマンスの秘密
 
@@ -45,7 +66,24 @@
 
 ## 📦 インストール
 
-### 事前ビルド（推奨）
+### crates.io から
+
+```bash
+# CLI
+cargo install hyperdu-cli --version 0.5.0-beta.1
+
+# エージェント向け MCP サーバ
+cargo install hyperdu-mcp --version 0.5.0-beta.1
+
+# GUI（任意）
+cargo install hyperdu-gui --version 0.5.0-beta.1
+```
+
+ベータ版のため、`--version` の明示が要ります（プレリリースは既定で選ばれません）。
+
+**インストールされるコマンド名は `hyperdu-cli` です。** 短い `hyperdu` は deb / rpm パッケージ側でのリネームでのみ存在します。
+
+### 事前ビルド
 
 以下は GitHub Releases の最新版への直接リンクです。ダウンロードして展開するだけで実行できます。
 
@@ -67,7 +105,7 @@
 
 ```bash
 # リポジトリのクローン
-git clone https://github.com/yourusername/HyperDiskUsage.git
+git clone https://github.com/automationjp/HyperDiskUsage.git
 cd HyperDiskUsage
 
 # リリースビルド（最高パフォーマンス）
@@ -84,6 +122,50 @@ cargo install --path hyperdu-gui  # GUI版（オプション）
 - **Windows**: Visual Studio 2019 以降または MinGW-w64 (動作確認済み)
 - **Linux**: 検証済み（Amazon Linux 2023 / xfs、WSL2 / ext4）
 - **macOS**: 実機未検証
+
+## 🤖 エージェント連携（MCP / Skill / Plugin）
+
+Claude や Codex のようなエージェントが、**容量の状況を構造化データとして受け取り、何を消してよいか判断できる**ようにするための 3 つの面を同梱しています。
+
+| 面 | 仕様 | 単独で使えるか |
+|---|---|---|
+| MCP サーバ | [Model Context Protocol](https://modelcontextprotocol.io/) | 任意の MCP クライアント |
+| Agent Skill | [agentskills.io](https://agentskills.io/) | **CLI を叩くので MCP 不要** |
+| Agent Plugin | [agent-plugins.org](https://agent-plugins.org/) | 上 2 つを束ねるだけ |
+
+**互いに依存しないので、どれか 1 つだけを採用できます。**
+
+### MCP サーバ
+
+```bash
+cargo install hyperdu-mcp --version 0.5.0-beta.1
+
+claude mcp add --transport stdio hyperdu -- hyperdu-mcp   # Claude Code
+codex mcp add hyperdu -- hyperdu-mcp                      # Codex
+```
+
+公開しているツールは 3 つで、容量逼迫時に必要になる順に対応します。
+
+| ツール | 答えること |
+|---|---|
+| `list_volumes` | どのドライブが逼迫しているか |
+| `scan_path` | その中で何が大きいか |
+| `find_reclaimable` | そのうち**再生成できる**のはどれか（放置日数つき） |
+
+**削除ツールは意図的に持たせていません。** エージェントが人間の確認なしにデータを壊す経路を作らないためです。誤った報告は取り返しがつきますが、誤った `rm -rf` はつきません。
+
+`find_reclaimable` は `target/` を名前だけで判定しません。兄弟に `Cargo.toml` が無ければそれは誰かのデータであり、再生成可能と報告するのは危険だからです。
+
+### Agent Skill / Plugin
+
+`plugin/` 配下に入っています。セットアップスクリプトが両バイナリの導入と MCP 登録まで面倒を見ます。
+
+```bash
+plugin/skills/disk-space-triage/scripts/setup-hyperdu.sh            # 導入 + 登録方法の表示
+plugin/skills/disk-space-triage/scripts/setup-hyperdu.sh --register # 登録まで実行
+```
+
+詳細は [plugin/README.md](plugin/README.md) を参照してください。
 
 ## 🎯 使い方
 
