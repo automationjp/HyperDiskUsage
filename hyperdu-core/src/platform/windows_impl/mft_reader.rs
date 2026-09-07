@@ -1305,4 +1305,60 @@ mod tests {
         );
         assert_eq!(e.sizes.real_size, 1234);
     }
+
+    // Regression fixtures for #41 use actual stream names and extension links.
+    fn named_data(rec: &mut [u8], pos: usize, name: &str, alloc: u64, real: u64) -> usize {
+        let units: Vec<u16> = name.encode_utf16().collect();
+        let end = push_nonresident_data(rec, pos, alloc, real);
+        let total = (72 + units.len() * 2 + 7) & !7;
+        rec[pos + 4..pos + 8].copy_from_slice(&(total as u32).to_le_bytes());
+        rec[pos + 9] = units.len() as u8;
+        rec[pos + 10..pos + 12].copy_from_slice(&72u16.to_le_bytes());
+        for (n, unit) in units.iter().enumerate() {
+            rec[end + n * 2..end + n * 2 + 2].copy_from_slice(&unit.to_le_bytes());
+        }
+        pos + total
+    }
+
+    #[test]
+    fn issue41_named_stream_before_unnamed_is_not_file_contents() {
+        let mut rec = blank_record(1, 1);
+        let p = push_file_name(&mut rec, 64, ROOT_RECORD, "streams");
+        let p = named_data(&mut rec, p, "ads", 8192, 8000);
+        let p = push_nonresident_data(&mut rec, p, 4096, 3000);
+        rec[p..p + 4].copy_from_slice(&attr_type::END.to_le_bytes());
+        set_used(&mut rec, (p + 4) as u32);
+        let vol = volume(&with_metadata_records(vec![rec], 5));
+        let entry = MftReader::open(vol).unwrap().entry(16).unwrap();
+        assert_eq!(entry.sizes.real_size, 3000);
+        assert_eq!(entry.sizes.allocated_size, 4096);
+        assert_eq!(entry.size_source.named_stream_bytes, 8192);
+    }
+
+    #[test]
+    fn issue41_data_in_extension_replaces_stale_filename_sizes() {
+        let mut base = blank_record(1, 1);
+        let p = push_file_name(&mut base, 64, ROOT_RECORD, "growing");
+        let p = push_attribute_list(&mut base, p, &[17]);
+        base[p..p + 4].copy_from_slice(&attr_type::END.to_le_bytes());
+        set_used(&mut base, (p + 4) as u32);
+        let mut extension = blank_record(1, 0);
+        extension[32..40].copy_from_slice(&16u64.to_le_bytes());
+        let p = push_nonresident_data(&mut extension, 64, 16384, 12345);
+        extension[p..p + 4].copy_from_slice(&attr_type::END.to_le_bytes());
+        set_used(&mut extension, (p + 4) as u32);
+        let vol = volume(&with_metadata_records(vec![base, extension], 5));
+        let entry = MftReader::open(vol).unwrap().entry(16).unwrap();
+        assert_eq!(entry.sizes.real_size, 12345);
+        assert_eq!(entry.sizes.allocated_size, 16384);
+        assert!(entry.size_source.from_data_attribute);
+    }
+
+    #[test]
+    fn issue41_extension_records_are_not_independent_files() {
+        let mut ext = file_record(ROOT_RECORD, "not-another-file", 4096, 100, 1);
+        ext[32..40].copy_from_slice(&16u64.to_le_bytes());
+        let vol = volume(&with_metadata_records(vec![ext], 5));
+        assert!(MftReader::open(vol).unwrap().entry(16).is_none());
+    }
 }
