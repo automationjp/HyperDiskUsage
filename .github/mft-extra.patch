@@ -1,0 +1,154 @@
+diff --git a/hyperdu-core/src/platform/windows_impl/mft.rs b/hyperdu-core/src/platform/windows_impl/mft.rs
+--- a/hyperdu-core/src/platform/windows_impl/mft.rs
++++ b/hyperdu-core/src/platform/windows_impl/mft.rs
+@@ -388,12 +388,17 @@
+     cluster_size: u32,
+ ) -> Option<DataSizes> {
+     if !attr.non_resident {
+-        // A small file lives inside the record and occupies no clusters of its
+-        // own, so reporting the cluster size here would overcount every tiny
+-        // file on the volume.
++        // Match NTFS AllocationSize: resident storage includes the attribute's
++        // aligned value capacity, not just the logical byte count. A real VHD
++        // fixture reports 128 allocated bytes for a 123-byte resident file.
++        let value_offset = attr.value_offset.checked_sub(attr.pos)?;
++        let capacity = attr.total_length.checked_sub(value_offset)?;
++        if capacity < attr.value_length {
++            return None;
++        }
+         return Some(DataSizes {
+             real_size: attr.value_length as u64,
+-            allocated_size: attr.value_length as u64,
++            allocated_size: capacity as u64,
+         });
+     }
+     // Non-resident header: allocated at 0x28, real at 0x30. Neither is right
+@@ -1016,12 +1021,35 @@
+         let sizes = parse_data_sizes(&r, &attr, 4096).expect("sizes");
+         assert_eq!(sizes.real_size, 100);
+         assert_eq!(
+-            sizes.allocated_size, 100,
++            sizes.allocated_size, 104,
+             "a small file lives in the record; charging it a cluster would \
+              overcount every tiny file on the volume"
+         );
+     }
+ 
++    #[test]
++    fn resident_allocation_includes_alignment_and_retained_capacity() {
++        for length in [0usize, 1, 7, 8, 9, 100, 123, 256] {
++            let mut rec = record_header_bytes(FLAG_IN_USE, 56, 1024, 1);
++            let end = push_resident(&mut rec, 56, attr_type::DATA, &vec![1; length]);
++            end_marker(&mut rec, end);
++            let header = parse_record_header(&rec).unwrap();
++            let attr = Attributes::new(&rec, &header).next().unwrap();
++            let sizes = parse_data_sizes(&rec, &attr, 4096).unwrap();
++            assert_eq!(sizes.real_size, length as u64);
++            assert_eq!(sizes.allocated_size, ((length + 7) & !7) as u64);
++        }
++        let mut rec = record_header_bytes(FLAG_IN_USE, 56, 1024, 1);
++        let end = push_resident(&mut rec, 56, attr_type::DATA, &[1; 128]);
++        // Truncation need not shrink the resident attribute's reserved storage.
++        rec[72..76].copy_from_slice(&9u32.to_le_bytes());
++        end_marker(&mut rec, end);
++        let header = parse_record_header(&rec).unwrap();
++        let attr = Attributes::new(&rec, &header).next().unwrap();
++        let sizes = parse_data_sizes(&rec, &attr, 4096).unwrap();
++        assert_eq!((sizes.real_size, sizes.allocated_size), (9, 128));
++    }
++
+     #[test]
+     fn a_non_resident_data_attribute_reports_allocated_and_real_sizes() {
+         let mut r = record_header_bytes(FLAG_IN_USE, 56, 1024, 1);
+--- a/hyperdu-core/tests/mft_parity.rs
++++ b/hyperdu-core/tests/mft_parity.rs
+@@ -1,8 +1,8 @@
+ //! Does the `$MFT` backend agree with directory enumeration? (#15)
+ //!
+-//! This is the check that decides whether the MFT backend is correct. It cannot
+-//! run without administrator rights -- `\\.\C:` is not openable otherwise -- so
+-//! it skips rather than fails on an ordinary machine, and prints why.
++//! This opt-in comparison uses an existing live volume and requires administrator
++//! rights. The mandatory CI fixture is mft_fixture.rs on an isolated NTFS VHD.
++//! Neither test treats a fallback to enumeration as a successful MFT comparison.
+ //!
+ //! Everything else about the backend is covered by unit tests over a synthetic
+ //! volume. What is left, and what only a real volume can answer, is whether
+@@ -12,7 +12,7 @@
+ //!
+ //! ```text
+ //! # from an elevated shell
+-//! cargo test -p hyperdu-core --test mft_parity -- --nocapture
++//! cargo test -p hyperdu-core --test mft_parity -- --ignored --nocapture
+ //! ```
+ //!
+ //! Set `HYPERDU_MFT_PARITY_ROOT` to test a volume other than `C:\`.
+@@ -21,7 +21,7 @@
+ 
+ use std::path::PathBuf;
+ 
+-use hyperdu_core::{scan_directory, Options};
++use hyperdu_core::{scan_directory, scan_directory_mft, Options};
+ 
+ /// Volume to compare on. A whole volume is required: the MFT backend declines
+ /// anything else, which would make the test compare enumeration with itself.
+@@ -63,6 +63,7 @@
+ /// units bug. `fsutil fsinfo ntfsinfo` is the tiebreaker -- an MFT of N bytes
+ /// holds N/1024 records, and a volume cannot have more files than records.
+ #[test]
++#[ignore = "opt-in existing-volume comparison; CI uses the isolated strict NTFS fixture"]
+ fn the_mft_backend_agrees_with_directory_enumeration() {
+     let root = parity_root();
+ 
+@@ -71,18 +72,8 @@
+         ..Options::default()
+     };
+ 
+-    // Distinguishing "the totals match because both used enumeration" from "the
+-    // totals match because the two backends agree" is the whole point, so check
+-    // the backend actually engages before comparing anything.
+-    if !hyperdu_core::mft_backend_applies(&root, &mft_opt) {
+-        eprintln!(
+-            "skipped: the MFT backend does not apply to {}.\n\
+-             \x20        Run from an elevated shell against a volume root (C:\\),\n\
+-             \x20        or set HYPERDU_MFT_PARITY_ROOT. See #15.",
+-            root.display()
+-        );
+-        return;
+-    }
++    assert!(hyperdu_core::mft_backend_applies(&root, &mft_opt),
++            "MFT prerequisites missing: elevated shell and supported volume root required");
+ 
+     let walked_opt = Options {
+         use_mft: false,
+@@ -96,7 +87,8 @@
+     //
+     // SAFETY: single-threaded test setup, before any scan starts.
+     unsafe { std::env::set_var("HYPERDU_MFT_DIAG", "1") };
+-    let from_mft = scan_directory(&root, &mft_opt).expect("mft scan");
++    let from_mft = scan_directory_mft(&root, &mft_opt)
++        .expect("real MFT required; refusing enumeration fallback");
+     unsafe { std::env::remove_var("HYPERDU_MFT_DIAG") };
+ 
+     let (wl, wp, wf) = totals(&walked, &root);
+--- a/hyperdu-core/tests/mft_fixture.rs
++++ b/hyperdu-core/tests/mft_fixture.rs
+@@ -103,13 +103,16 @@
+     command("fsutil", &["sparse", "setflag"], &sparse_file);
+     {
+         let mut file = File::options().write(true).open(&sparse_file).unwrap();
+-        file.set_len(64 * 1024 * 1024).unwrap();
++        file.set_len(256 * 1024 * 1024).unwrap();
+         for n in 0..1024 {
+-            file.seek(SeekFrom::Start(n * 65536)).unwrap();
++            file.seek(SeekFrom::Start(n * 262144)).unwrap();
+             file.write_all(&[1; 4096]).unwrap();
+         }
+         file.sync_all().unwrap();
+     }
++    let sparse_totals = scan_directory(&sparse, &Options::default()).unwrap();
++    assert!(sparse_totals[&sparse].physical < sparse_totals[&sparse].logical / 2,
++            "fixture must allocate genuine holes, not every NTFS allocation unit");
+     let empty_sparse = sparse.join("empty");
+     data(&empty_sparse, &[]);
+     command("fsutil", &["sparse", "setflag"], &empty_sparse);
