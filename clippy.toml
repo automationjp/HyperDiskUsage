@@ -6,5 +6,8 @@ cognitive-complexity-threshold = 50
 too-many-lines-threshold = 500
 type-complexity-threshold = 500
 
-# Minimum supported Rust version for linting
-msrv = "1.75.0"
+# No `msrv` here on purpose. Clippy falls back to each package's own
+# `rust-version`, which is what we want now that the crates no longer agree:
+# core, cli and gui declare 1.75, while hyperdu-mcp needs 1.88 for rmcp.
+# Pinning one version workspace-wide would lint hyperdu-mcp against a floor it
+# does not have, and clippy warns about the mismatch rather than picking one.

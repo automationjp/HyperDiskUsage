@@ -3,6 +3,7 @@ members = [
   "hyperdu-core",
   "hyperdu-cli",
   "hyperdu-gui",
+  "hyperdu-mcp",
 ]
 resolver = "2"
 

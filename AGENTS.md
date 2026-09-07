@@ -1,11 +1,12 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-HyperDiskUsage is a Rust workspace with three crates: `hyperdu-core/` hosts the scanning engine with shared benchmarks in `benches/`; `hyperdu-cli/` exposes the CLI with fixtures in `tests/`; `hyperdu-gui/` packages the eGUI front-end.
+HyperDiskUsage is a Rust workspace with four crates: `hyperdu-core/` hosts the scanning engine with shared benchmarks in `benches/`; `hyperdu-cli/` exposes the CLI with fixtures in `tests/`; `hyperdu-gui/` packages the eGUI front-end; `hyperdu-mcp/` serves the engine to agents over the Model Context Protocol.
+`plugin/` carries the agent-facing packaging: an Agent Plugin manifest, its `mcp.json`, and an Agent Skill under `skills/`. These are data files, not build targets. The three agent surfaces are deliberately independent — the MCP server runs without the plugin, and the skill drives the CLI rather than the server — so keep a change to one from requiring changes to the others.
 Distribution artifacts sit in `dist/`, while `packaging/`, `scripts/`, and `snap/` capture installer specs and automation. Keep generated output in `target/` out of version control.
 
 ## Build, Test, and Development Commands
-`cargo check --workspace` gives a fast compile sanity pass. Run `cargo fmt --check` to enforce formatting and `cargo clippy --workspace --all-targets --all-features` to lint against the MSRV pinned in `clippy.toml`.
+`cargo check --workspace` gives a fast compile sanity pass. Run `cargo fmt --check` to enforce formatting and `cargo clippy --workspace --all-targets --all-features` to lint. Clippy takes the MSRV from each crate's own `rust-version`, since `hyperdu-mcp` needs 1.88 for rmcp while the other three still build on 1.75.
 Use `cargo test --workspace --all-features` for the full suite. Manual checks include `cargo run -p hyperdu-cli -- --help` and `cargo run -p hyperdu-gui --release`. Package builds via `pwsh scripts/release.ps1 -Profile release` should remain idempotent and reproducible.
 
 ## Coding Style & Naming Conventions

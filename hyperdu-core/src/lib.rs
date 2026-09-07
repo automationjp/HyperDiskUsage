@@ -36,6 +36,9 @@ mod rollup;
 mod scanner; // FileSystemScanner + platform default
 mod scheduler;
 mod tuning;
+/// Capacity of the volume a path sits on -- the other half of "what is using
+/// space", without which a size means nothing.
+pub mod volume;
 
 pub use options::{
     CompatConfig, FilterConfig, OptionsBuilder, OutputConfig, PerformanceConfig, TuningConfig,
