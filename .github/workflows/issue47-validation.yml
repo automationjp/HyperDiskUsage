@@ -6,6 +6,53 @@ on:
 permissions:
   contents: read
 jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: candidate
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: transport
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+          ref: 6c4bfa1f78658917c8f8089c499d8e4d4fa346ca
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Apply candidate
+        run: python ../transport/.github/apply-candidate.py
+      - name: Format and source snapshot
+        run: |
+          rustup toolchain install nightly --profile minimal --component rustfmt
+          cargo +nightly fmt --all -- --config group_imports=StdExternalCrate --config imports_granularity=Crate
+          git add -A
+          git diff --cached --binary > "$RUNNER_TEMP/candidate.patch"
+          tar --exclude=.git --exclude=target -czf "$RUNNER_TEMP/candidate-source.tar.gz" .
+      - name: Core and CLI regressions
+        run: cargo test -p hyperdu-core -p hyperdu-cli --locked 2>&1 | tee "$RUNNER_TEMP/core-cli.log"
+      - name: Workspace all features
+        run: cargo test --workspace --all-features --locked 2>&1 | tee "$RUNNER_TEMP/all-features.log"
+      - name: Clippy
+        if: always()
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 | tee "$RUNNER_TEMP/clippy.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-candidate-evidence
+          path: |
+            ${{ runner.temp }}/candidate.patch
+            ${{ runner.temp }}/candidate-source.tar.gz
+            ${{ runner.temp }}/core-cli.log
+            ${{ runner.temp }}/all-features.log
+            ${{ runner.temp }}/clippy.log
+          retention-days: 1
   strict-ntfs:
     runs-on: windows-latest
     timeout-minutes: 15
@@ -25,19 +72,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Apply integrity-checked candidate
-        shell: python
+      - name: Apply candidate
+        shell: pwsh
         run: |
-          import base64, zlib, hashlib, pathlib, subprocess
-          text = pathlib.Path('../transport/.github/mft-candidate.b64').read_text()
-          digest, encoded = text.split('\n', 1)
-          encoded = encoded.replace('t7FLuz7', 't7uz7').replace('5+eE0xv', '5+E0xv')
-          patch = zlib.decompress(base64.b64decode(encoded))
-          assert hashlib.sha256(patch).hexdigest() == digest
-          pathlib.Path('../candidate.patch').write_bytes(patch)
-          subprocess.run(['git', 'apply', '--check', '../candidate.patch'], check=True)
-          subprocess.run(['git', 'apply', '../candidate.patch'], check=True)
-          subprocess.run(['git', 'apply', '../transport/.github/mft-fix.patch'], check=True)
+          python ../transport/.github/apply-candidate.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Strict real NTFS fixture
         shell: pwsh
         run: ./scripts/test-mft-fixture.ps1
