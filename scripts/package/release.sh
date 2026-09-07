@@ -170,6 +170,14 @@ ensure_flatpak_builder() {
 }
 
 # macOS helpers
+# The crate inherits `version.workspace = true`, so grepping the manifest for a
+# version literal finds nothing. pkgid prints `<url>#<version>`.
+cli_version() {
+  local v
+  v=$(cargo pkgid -p hyperdu-cli --manifest-path "$root_dir/Cargo.toml" | sed 's/.*[#@]//')
+  if [[ -z "$v" ]]; then echo "error: could not determine hyperdu-cli version" >&2; return 1; fi
+  printf '%s' "$v"
+}
 ensure_brew() { command -v brew >/dev/null 2>&1; }
 ensure_cargo_bundle() { cargo install cargo-bundle >/dev/null 2>&1 || true; }
 ensure_create_dmg() { if ensure_brew; then brew install create-dmg || true; fi }
@@ -506,14 +514,14 @@ if [[ -n "$targets_csv" ]]; then
         if [[ "$os_tag" == windows ]]; then pwsh -File "$root_dir/scripts/package/release.ps1" || true; else echo "warn: windows-msi requested on non-windows host; skipping"; fi ;;
       scoop)
         if [[ "$os_tag" == windows ]]; then
-          ver=$(sed -n 's/^version = "\(.*\)"/\1/p' "$root_dir/hyperdu-cli/Cargo.toml" | head -n1)
+          ver=$(cli_version)
           pwsh -File "$root_dir/scripts/package/scoop.ps1" -Version "$ver" || true
         else
           echo "warn: scoop requested on non-windows host; skipping"
         fi ;;
       winget)
         if [[ "$os_tag" == windows ]]; then
-          ver=$(sed -n 's/^version = "\(.*\)"/\1/p' "$root_dir/hyperdu-cli/Cargo.toml" | head -n1)
+          ver=$(cli_version)
           pwsh -File "$root_dir/scripts/package/winget.ps1" -Version "$ver" || true
         else
           echo "warn: winget requested on non-windows host; skipping"

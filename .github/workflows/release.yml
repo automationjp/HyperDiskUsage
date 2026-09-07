@@ -163,11 +163,11 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          # @() matters: a single match yields a bare string, and indexing that
-          # returns its first character -- which produced a package version of
-          # "0" instead of "0.5.0-beta.1".
-          $ver = @(Select-String -Path 'hyperdu-cli/Cargo.toml' -Pattern '^version\s*=\s*"([^"]+)"' |
-            ForEach-Object { $_.Matches[0].Groups[1].Value })[0]
+          # cargo resolves the version, not a regex over the manifest: the crate
+          # inherits `version.workspace = true`, so the literal is not in
+          # hyperdu-cli/Cargo.toml any more. pkgid prints `<url>#<version>`.
+          $ver = (cargo pkgid -p hyperdu-cli) -replace '^.*[#@]', ''
+          if (-not $ver) { throw 'cargo pkgid returned no version for hyperdu-cli' }
           $tag = "$env:GITHUB_REF_NAME"
           $base = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag"
 

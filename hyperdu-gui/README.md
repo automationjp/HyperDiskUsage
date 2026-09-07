@@ -9,7 +9,7 @@ instead.
 ## Install
 
 ```bash
-cargo install hyperdu-gui --version 0.5.0-beta.1
+cargo install hyperdu-gui --version 0.5.0-beta.2
 ```
 
 Needs the usual desktop graphics stack. On Linux that means the X11 or Wayland

@@ -37,13 +37,12 @@ Param(
 $ErrorActionPreference = 'Stop'
 
 if (-not $Version) {
-  # @() matters. With a single match the pipeline yields a bare string, and
-  # indexing a string returns its first character -- which is how this produced
-  # a package version of "0" instead of "0.5.0-beta.1".
-  $Version = @(Select-String -Path 'hyperdu-cli/Cargo.toml' -Pattern '^version\s*=\s*"([^"]+)"' |
-    ForEach-Object { $_.Matches[0].Groups[1].Value })[0]
+  # Ask cargo rather than regex the manifest: the crate inherits
+  # `version.workspace = true`, so the literal is not in hyperdu-cli/Cargo.toml.
+  # pkgid prints `<url>#<version>` (or `#<name>@<version>`).
+  $Version = (cargo pkgid -p hyperdu-cli) -replace '^.*[#@]', ''
 }
-if (-not $Version) { throw 'could not determine version from hyperdu-cli/Cargo.toml' }
+if (-not $Version) { throw 'could not determine hyperdu-cli version from cargo pkgid' }
 
 # Placeholders only for a local dry run; a release passes both.
 if (-not $Url) { $Url = '__URL__' }

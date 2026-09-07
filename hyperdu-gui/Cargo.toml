@@ -1,12 +1,12 @@
 [package]
 name = "hyperdu-gui"
-version = "0.5.0-beta.1"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "Hyper-fast GUI disk usage analyzer (Windows/Linux)."
-license = "MIT"
+license.workspace = true
 rust-version = "1.75"
-repository = "https://github.com/automationjp/HyperDiskUsage"
-homepage = "https://github.com/automationjp/HyperDiskUsage#readme"
+repository.workspace = true
+homepage.workspace = true
 readme = "README.md"
 keywords = ["disk-usage", "du", "filesystem", "gui", "visualization"]
 categories = ["gui", "filesystem"]
@@ -31,7 +31,7 @@ egui_extras = "0.32"
 rfd = "0.15"
 log = "0.4"
 env_logger = "0.11"
-hyperdu-core = { path = "../hyperdu-core", version = "0.5.0-beta.1" }
+hyperdu-core = { workspace = true }
 profiling = { version = "1", optional = true }
 color-eyre = { version = "0.6", optional = true }
 
