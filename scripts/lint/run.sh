@@ -98,7 +98,7 @@ fi
 
 if command -v shellcheck >/dev/null 2>&1; then
   echo "==> shellcheck (scripts)"
-  shellcheck -S error -x scripts/*.sh
+  shellcheck -S error -x scripts/**/*.sh
 else
   echo "(info) shellcheck not found; skipping shell lint"
 fi

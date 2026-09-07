@@ -410,10 +410,10 @@ bash scripts/package/release.sh --skip-gui
 **Windows (PowerShell):**
 ```powershell
 # 基本パッケージング
-powershell -ExecutionPolicy Bypass -File scripts\package_release.ps1
+powershell -ExecutionPolicy Bypass -File scripts\package\release.ps1
 
 # CPU最適化版
-powershell -ExecutionPolicy Bypass -File scripts\package_release.ps1 -CpuFlavor native
+powershell -ExecutionPolicy Bypass -File scripts\package\release.ps1 -CpuFlavor native
 ```
 
 ### テスト実行
