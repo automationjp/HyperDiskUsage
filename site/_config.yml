@@ -1,0 +1,42 @@
+# Jekyll configuration for the project site.
+#
+# The site lives in `site/` rather than `docs/` because `docs/` already holds
+# design notes and benchmark records written for contributors, not visitors.
+# Rendering those through a site theme would bury the pages people arrive for.
+
+title: HyperDU
+description: >-
+  Fast cross-platform disk usage analyzer. Finds what is filling a disk, and
+  which of it can be safely freed.
+
+# GitHub Pages serves a project site under /<repo>/, so every internal link has
+# to carry that prefix. Getting this wrong is the usual reason a project site
+# renders with no stylesheet.
+url: https://automationjp.github.io
+baseurl: /HyperDiskUsage
+
+repository: automationjp/HyperDiskUsage
+
+# The two language trees. The layout builds its switcher from this list, so
+# adding a language here and a page under `site/<code>/` is all it takes.
+languages:
+  - code: ja
+    label: 日本語
+    path: /
+  - code: en
+    label: English
+    path: /en/
+
+# Version numbers appear in install commands on both pages. Keeping them here
+# means a release updates one place instead of six.
+versions:
+  cli: 0.5.0-beta.2
+  mcp: 0.5.0-beta.1
+  gui: 0.5.0-beta.1
+
+# No theme: the site is one page per language, and a theme's layouts would be
+# more to work around than to use.
+plugins: []
+
+exclude:
+  - README.md

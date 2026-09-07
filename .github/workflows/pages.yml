@@ -1,0 +1,62 @@
+name: pages
+
+# Builds the project site from `site/` and publishes it to GitHub Pages.
+#
+# Not the built-in "deploy from a folder" setting: that would point Jekyll at
+# `docs/`, which holds design notes and benchmark records written for
+# contributors. Those would end up rendered as site pages, burying the two that
+# visitors actually arrive for.
+
+on:
+  push:
+    branches: [main]
+    # Only the site and this workflow affect the output. Rust changes rebuild
+    # nothing here, and a deploy per source commit would be noise.
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A superseded deploy is not worth finishing, but cancelling one that is already
+# publishing can leave the site half-updated, so let it run out.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Works out the base path for a project site (/<repo>/) and hands it to
+      # Jekyll, so `relative_url` resolves without the prefix being written down
+      # in a second place.
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./site
+          destination: ./_site
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v4
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
