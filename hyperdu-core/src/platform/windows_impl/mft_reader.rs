@@ -10,10 +10,8 @@
 //! What still needs a real volume is the last mile: that Windows hands back the
 //! bytes we expect. Everything above that is settled here.
 
-// Nothing here is called from the scan yet -- `process_dir` still goes to `nt`
-// or `win32`. The reader lands with its tests first, so the volume handle that
-// follows is written against something already known to work. Remove this once
-// the backend is wired up.
+// Parser helpers are also compiled by portable fixtures without a Windows
+// volume backend; some diagnostic helpers are unused in that test harness.
 #![allow(dead_code)]
 
 #[path = "mft_reader/streams.rs"]
@@ -68,7 +66,7 @@ pub(crate) struct Entry {
 /// account for a discrepancy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SizeSource {
-    /// False when no `$DATA` was found in the base record and the stale copy in
+    /// False when no unnamed `$DATA` was found and the stale copy in
     /// `$FILE_NAME` had to stand in.
     pub(crate) from_data_attribute: bool,
     /// The record has an `$ATTRIBUTE_LIST`, so some of its attributes --
@@ -380,9 +378,14 @@ pub(crate) fn to_stat_map(
 
     for e in entries.iter().filter(|e| !e.is_directory) {
         // A file's bytes belong to the directory holding it, not to itself.
-        let Some(parent_path) = paths.get(&e.parent) else {
-            // Parent outside the scanned set: dropping the file is the same
-            // choice `paths_for` makes for orphans, and for the same reason.
+        let parent_path = if e.parent == super::mft::ROOT_RECORD {
+            // Record 5 is deliberately excluded from `entries`; its children
+            // still belong to the volume root, not to an unknown parent.
+            ""
+        } else if let Some(path) = paths.get(&e.parent) {
+            path.as_str()
+        } else {
+            // Genuine orphans remain excluded rather than assigned a parent.
             continue;
         };
         if !count_hardlinks && e.hard_link_count > 1 && !counted_links.insert(e.record) {
@@ -1484,5 +1487,42 @@ mod tests {
         let mut reader = MftReader::open(vol).unwrap();
         assert_eq!(reader.entry(16).unwrap().sizes.real_size, 123);
         assert!(reader.is_complete());
+    }
+
+    #[test]
+    fn issue41_compression_unit_preserves_header_size_even_with_sparse_flag() {
+        for with_named in [false, true] {
+            let mut rec = blank_record(1, 1);
+            let data = push_file_name(&mut rec, 64, ROOT_RECORD, "compressed");
+            let mut end = push_nonresident_data(&mut rec, data, 65536, 60000);
+            rec[data + 12..data + 14].copy_from_slice(&0x8000u16.to_le_bytes());
+            rec[data + 34..data + 36].copy_from_slice(&4u16.to_le_bytes());
+            rec[data + 64..data + 72].copy_from_slice(&4096u64.to_le_bytes());
+            if with_named {
+                end = named_data(&mut rec, end, "ads", 8192, 100);
+            }
+            set_used(&mut rec, end as u32);
+            let mut reader = MftReader::open(volume(with_metadata_records(vec![rec], 5))).unwrap();
+            assert_eq!(reader.entry(16).unwrap().sizes.allocated_size, 4096);
+            assert!(reader.is_complete());
+        }
+    }
+
+    #[test]
+    fn issue41_overlapping_or_gapped_data_extents_require_fallback() {
+        for low in [0u64, 3] {
+            let (mut base, mut ext) = data_extension_fixture(false);
+            let h = parse_record_header(&base).unwrap();
+            let list = Attributes::new(&base, &h)
+                .find(|a| a.type_code == attr_type::ATTRIBUTE_LIST)
+                .unwrap();
+            let pos = list.value_offset + 32 + 8;
+            base[pos..pos + 8].copy_from_slice(&low.to_le_bytes());
+            ext[80..88].copy_from_slice(&low.to_le_bytes());
+            let mut reader =
+                MftReader::open(volume(with_metadata_records(vec![base, ext], 5))).unwrap();
+            assert!(reader.entry(16).is_none());
+            assert!(!reader.is_complete());
+        }
     }
 }

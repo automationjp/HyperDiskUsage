@@ -63,3 +63,38 @@ fn refuses_an_unrelated_root_and_self_indexing() {
     assert!(!run("refresh", &root.join("missing"), &db).status.success());
     assert_eq!(fs::read(&db).unwrap(), previous);
 }
+
+#[test]
+fn regular_scan_flags_are_not_silently_accepted_by_snapshot_commands() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let db = temp.path().join("index.bin");
+    fs::create_dir(&root).unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_hyperdu-cli"))
+        .args(["--apparent-size", "index", "refresh"])
+        .arg(&root)
+        .arg("--database")
+        .arg(&db)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(!db.exists());
+}
+
+#[test]
+fn a_directory_named_index_can_still_be_scanned() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir(temp.path().join("index")).unwrap();
+    for args in [vec!["./index"], vec!["--", "index"]] {
+        let result = Command::new(env!("CARGO_BIN_EXE_hyperdu-cli"))
+            .current_dir(temp.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+}

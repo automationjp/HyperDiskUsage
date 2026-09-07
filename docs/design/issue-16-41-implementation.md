@@ -37,3 +37,15 @@
 - The ADS/WOF product-policy choice and real-volume physical parity of #41 remain separate
   acceptance gates. Keep the existing 8% live-volume physical tolerance; do not lower it on
   the basis of synthetic fixtures or claim the full residual is eliminated.
+
+## Additional regression findings
+
+The new named-stream fixture exposed a separate aggregation bug: `entries()` omits NTFS
+metadata records including the volume root (record 5), while `to_stat_map()` required every
+file parent to appear in `paths_for()`. Files directly below the volume root therefore lost
+both their byte totals and file count. Treat that known root explicitly; genuine orphans
+still remain excluded. This was observed as a failing 0-versus-4096-byte fixture before
+the fix, not inferred from the original live-volume discrepancy.
+
+Stream aggregation also retains the existing CompressionUnit-based compressed-size rule.
+A sparse flag without a COMPRESSED flag must not erase a valid compressed-size header.

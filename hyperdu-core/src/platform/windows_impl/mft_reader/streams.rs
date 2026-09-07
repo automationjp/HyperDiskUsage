@@ -39,6 +39,7 @@ struct Extent {
     flags: u16,
     sizes: Option<DataSizes>,
     sparse_bytes: u64,
+    sparse_uncompressed: bool,
 }
 
 fn u16_at(b: &[u8], pos: usize) -> Option<u16> {
@@ -127,10 +128,12 @@ fn extent(rec: &[u8], attr: &AttrHeader, cluster: u32) -> Option<Extent> {
     } else {
         None
     };
-    let sparse_bytes = if attr.non_resident
+    // CompressionUnit, not the COMPRESSED flag alone, decides whether the
+    // header carries physical compressed size (the #39 accounting contract).
+    let sparse_uncompressed = attr.non_resident
         && attr.flags & attr_flags::SPARSE != 0
-        && u16_at(rec, attr.pos + 34)? == 0
-    {
+        && u16_at(rec, attr.pos + 34)? == 0;
+    let sparse_bytes = if sparse_uncompressed {
         let runs = strict_runs(rec, attr)?;
         let covered = runs
             .iter()
@@ -153,6 +156,7 @@ fn extent(rec: &[u8], attr: &AttrHeader, cluster: u32) -> Option<Extent> {
         flags: attr.flags,
         sizes,
         sparse_bytes,
+        sparse_uncompressed,
     })
 }
 
@@ -267,10 +271,7 @@ impl<S: VolumeSource> MftReader<S> {
             if ext.low != 0 {
                 return None;
             }
-            if ext.non_resident
-                && ext.flags & attr_flags::SPARSE != 0
-                && ext.flags & attr_flags::COMPRESSED == 0
-            {
+            if ext.sparse_uncompressed {
                 sizes.allocated_size = ext.sparse_bytes;
             }
             return Some(if ext.name.is_empty() {
@@ -341,11 +342,15 @@ impl<S: VolumeSource> MftReader<S> {
             let mut sizes = first.sizes?;
             let flags = first.flags;
             let non_resident = first.non_resident;
-            let sparse = flags & attr_flags::SPARSE != 0 && flags & attr_flags::COMPRESSED == 0;
+            let sparse = first.sparse_uncompressed;
             let mut end = 0u64;
             let mut sparse_bytes = 0u64;
             for (n, ext) in extents.iter().enumerate() {
-                if ext.low != end || ext.flags != flags || ext.non_resident != non_resident {
+                if ext.low != end
+                    || ext.flags != flags
+                    || ext.non_resident != non_resident
+                    || ext.sparse_uncompressed != sparse
+                {
                     return None;
                 }
                 if n > 0 && !non_resident {
