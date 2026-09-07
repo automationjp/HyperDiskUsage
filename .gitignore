@@ -10,21 +10,33 @@ dist/
 # Tooling / editors
 .idea/
 .vscode/
+.cursorindexingignore
 .DS_Store
 Thumbs.db
+*.swp
+*~
 
+# Merge and patch leftovers. `.orig` in particular is easy to commit by
+# accident, and it is a copy of a source file under a name nobody reviews.
+*.orig
+*.rej
 
+# Local secrets. Nothing here reads a .env today; the entry is here so that a
+# later one cannot be committed by accident.
+.env
+.env.local
 
+# Coverage output
+*.profraw
+lcov.info
+coverage/
 
-
-
-
-
-
-
-
-
-
+# Agent working state. These hold scratch worktrees and session data for
+# whoever is driving the repo, not anything the project ships. `.claude` in
+# particular accumulates full worktree copies.
+.agents/
+.claude/
+.codex/
 
 # Cargo timings / rustc artifacts
 **/cargo-timings/
