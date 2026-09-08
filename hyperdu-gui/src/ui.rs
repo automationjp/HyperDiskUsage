@@ -24,9 +24,16 @@ pub struct App {
     max_depth: u32,
     follow: bool,
     scanning: bool,
-    selected: Option<PathBuf>,
+    // The selection is the chain of child indices from the root, not a path.
+    // find_node used to walk the whole tree comparing PathBufs on every repaint,
+    // which cost hundreds of milliseconds per frame once anything was selected.
+    // Indices make the lookup O(depth).
+    selected: Option<Vec<usize>>,
     tree: Option<Node>,
-    rx: Option<mpsc::Receiver<Vec<(PathBuf, Stat)>>>,
+    // The worker sends the finished tree, not the raw map. Building it here on
+    // the UI thread blocked update() for the whole build, so the window went
+    // "Not Responding" until it finished.
+    rx: Option<mpsc::Receiver<Node>>,
     // Live metrics
     files_processed: Option<Arc<AtomicU64>>,
     start_at: Option<Instant>,
@@ -37,23 +44,14 @@ pub struct App {
 
 // Default is derived above
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct Node {
-    path: PathBuf,
+    // No `path` here on purpose: the selection is an index chain now, so nothing
+    // read it, and one owned PathBuf per node was a large share of the peak
+    // working set on a 100k-entry tree.
     name: String,
     stat: Stat,
     children: Vec<Node>,
-}
-
-impl Default for Node {
-    fn default() -> Self {
-        Self {
-            path: PathBuf::new(),
-            name: String::new(),
-            stat: Stat::default(),
-            children: vec![],
-        }
-    }
 }
 
 impl App {
@@ -86,9 +84,10 @@ impl App {
                 max_depth,
                 min_file_size: min_file,
                 follow_links: follow,
-                threads: std::thread::available_parallelism()
-                    .map(|n| n.get())
-                    .unwrap_or(4),
+                // Same deliberate oversubscription the CLI uses; see
+                // hyperdu_core::default_threads. The GUI used to pass the raw
+                // core count, so the two disagreed for no reason.
+                threads: core::default_threads(),
                 progress_every: 8192,
                 progress_callback: None,
                 progress_sample_callback: None,
@@ -137,9 +136,11 @@ impl App {
                 *last_rate = recent;
             }));
             let res = core::scan_directory(&root, &opt).unwrap_or_default();
-            let mut v: Vec<_> = res.into_iter().collect();
-            v.sort_unstable_by_key(|(_, s)| std::cmp::Reverse(s.physical));
-            let _ = tx.send(v);
+            // Built here, off the UI thread. The previous code sorted the map
+            // into a Vec, sent that, then re-collected it into a StatMap and
+            // built the tree inside update() -- the sort was discarded by the
+            // re-collection, and the rest froze the window.
+            let _ = tx.send(build_tree(&root, &res));
         });
     }
 }
@@ -202,13 +203,11 @@ impl eframe::App for App {
 
         // Receive scan result
         if let Some(rx) = &self.rx {
-            if let Ok(v) = rx.try_recv() {
+            if let Ok(tree) = rx.try_recv() {
                 self.scanning = false;
-                let map: StatMap = v.into_iter().collect();
-                if let Some(root) = &self.root {
-                    self.tree = Some(build_tree(root, &map));
-                    self.selected = Some(root.clone());
-                }
+                self.tree = Some(tree);
+                // Empty chain == the root node.
+                self.selected = Some(Vec::new());
                 self.rx = None;
             } else if self.scanning {
                 ctx.request_repaint_after(std::time::Duration::from_millis(50));
@@ -220,7 +219,12 @@ impl eframe::App for App {
             .show(ctx, |ui| {
                 ui.heading("ディレクトリツリー");
                 if let Some(tree) = &mut self.tree {
-                    show_tree(ui, tree, &mut self.selected);
+                    // Without a scroll area the panel simply clipped everything
+                    // past the window height, with no way to reach it.
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        let mut chain = Vec::new();
+                        show_tree(ui, tree, &mut chain, &mut self.selected);
+                    });
                 } else {
                     ui.label("スキャン結果なし");
                 }
@@ -229,7 +233,7 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("内容");
             if let (Some(sel), Some(tree)) = (&self.selected, &self.tree) {
-                if let Some(node) = find_node(tree, sel) {
+                if let Some(node) = node_at(tree, sel) {
                     show_children_table(ui, node);
                 } else {
                     ui.label("選択ノードが見つかりません");
@@ -251,7 +255,9 @@ fn build_tree(root: &Path, map: &StatMap) -> Node {
     }
     // Sort children by physical desc
     for v in idx.values_mut() {
-        v.sort_by_key(|p| std::cmp::Reverse(map.get(p).map(|s| s.physical).unwrap_or(0)));
+        // cached: the comparison-driven variant re-hashed the path on every
+        // comparison, so a directory with n children paid O(n log n) lookups.
+        v.sort_by_cached_key(|p| std::cmp::Reverse(map.get(p).map(|s| s.physical).unwrap_or(0)));
     }
     fn make_node(p: &Path, idx: &HashMap<PathBuf, Vec<PathBuf>>, map: &StatMap) -> Node {
         let name = p
@@ -260,7 +266,6 @@ fn build_tree(root: &Path, map: &StatMap) -> Node {
             .unwrap_or(p.as_os_str().to_string_lossy().as_ref())
             .to_string();
         let mut node = Node {
-            path: p.to_path_buf(),
             name,
             stat: *map.get(p).unwrap_or(&Stat::default()),
             children: vec![],
@@ -275,7 +280,15 @@ fn build_tree(root: &Path, map: &StatMap) -> Node {
     make_node(root, &idx, map)
 }
 
-fn show_tree(ui: &mut egui::Ui, node: &mut Node, selected: &mut Option<PathBuf>) {
+/// `chain` is the index path from the root down to `node`, maintained as the
+/// recursion descends so a click can record where it happened without copying a
+/// PathBuf.
+fn show_tree(
+    ui: &mut egui::Ui,
+    node: &mut Node,
+    chain: &mut Vec<usize>,
+    selected: &mut Option<Vec<usize>>,
+) {
     let label = format!(
         "{}  ({} / {})",
         node.name,
@@ -283,25 +296,24 @@ fn show_tree(ui: &mut egui::Ui, node: &mut Node, selected: &mut Option<PathBuf>)
         format_size(node.stat.logical, BINARY)
     );
     let resp = egui::CollapsingHeader::new(label).show(ui, |ui| {
-        for child in &mut node.children {
-            show_tree(ui, child, selected);
+        for (i, child) in node.children.iter_mut().enumerate() {
+            chain.push(i);
+            show_tree(ui, child, chain, selected);
+            chain.pop();
         }
     });
     if resp.header_response.clicked() {
-        *selected = Some(node.path.clone());
+        *selected = Some(chain.clone());
     }
 }
 
-fn find_node<'a>(node: &'a Node, p: &Path) -> Option<&'a Node> {
-    if node.path == p {
-        return Some(node);
+/// Walk the index chain. O(depth), against the O(nodes) DFS this replaced.
+fn node_at<'a>(root: &'a Node, chain: &[usize]) -> Option<&'a Node> {
+    let mut node = root;
+    for &i in chain {
+        node = node.children.get(i)?;
     }
-    for c in &node.children {
-        if let Some(n) = find_node(c, p) {
-            return Some(n);
-        }
-    }
-    None
+    Some(node)
 }
 
 fn show_children_table(ui: &mut egui::Ui, parent: &Node) {
