@@ -66,7 +66,7 @@
 
 ## 📦 インストール
 
-### crates.io から
+### crates.io から（推奨・現在使える唯一の配布経路）
 
 ```bash
 # CLI
@@ -83,7 +83,12 @@ cargo install hyperdu-gui --version 0.5.0-beta.2
 
 **クレート名は `hyperdu-cli` ですが、入るコマンドは `hyperdu` です。** `ripgrep` が `rg` を入れるのと同じ形で、deb / rpm パッケージのコマンド名とも揃います。
 
-### Windows のパッケージマネージャ
+### 準備中の経路（GitHub Release 公開後に有効）
+
+> **以下はまだ使えません。** 公開リリースが 1 つも無いためです。最初のタグ（`v0.5.0-beta.2`）を打つと `release.yml` が production ビルドの成果物を公開し、事前ビルドのリンクが有効になります。winget と scoop はさらに [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) への PR とバケット登録が必要で、いずれも未提出です。それまでは上の crates.io 経路を使ってください。
+
+<details>
+<summary>Windows のパッケージマネージャ（準備中）</summary>
 
 ```powershell
 winget install automationjp.HyperDU
@@ -93,13 +98,12 @@ winget install automationjp.HyperDU
 scoop install hyperdu
 ```
 
-> **公開リリース後に有効になります。** マニフェストは `release.yml` がタグから自動生成しますが、winget は [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) への PR、scoop はバケットへの登録がそれぞれ別途必要です。現時点では未提出です。
+</details>
 
-### 事前ビルド
+<details>
+<summary>事前ビルド（準備中）</summary>
 
-以下は GitHub Releases の最新版への直接リンクです。ダウンロードして展開するだけで実行できます。
-
-> **現時点でリンク先は存在しません。** 公開リリースがまだ 1 つもないためです（`v0.0.1` は Draft のまま）。タグを打つと `release.yml` が production ビルドの成果物を公開します。
+GitHub Releases の最新版への直接リンクです。リリース公開後はダウンロードして展開するだけで実行できます。
 
 - Windows (x86_64)
   - CLI: [hyperdu-cli-windows-x86_64-generic.zip](releases/latest/download/hyperdu-cli-windows-x86_64-generic.zip)
@@ -114,6 +118,8 @@ scoop install hyperdu
   - GUI: [hyperdu-gui-linux-aarch64-generic.zip](releases/latest/download/hyperdu-gui-linux-aarch64-generic.zip)
 
 その他のアセット（チェックサム等）は [最新リリース一覧](releases/latest) を参照してください。
+
+</details>
 
 ### ソースからビルド
 
