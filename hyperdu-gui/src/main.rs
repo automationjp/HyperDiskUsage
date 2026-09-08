@@ -1,4 +1,6 @@
-mod ui;
+mod app;
+mod fonts;
+mod scan;
 
 fn main() {
     env_logger::init();
@@ -15,7 +17,7 @@ fn main() {
     if let Err(e) = eframe::run_native(
         "HyperDU GUI",
         native_options,
-        Box::new(|cc| Ok(Box::new(ui::App::new(cc)))),
+        Box::new(|cc| Ok(Box::new(app::App::new(cc)))),
     ) {
         eprintln!("GUI error: {e}");
     }
