@@ -29,7 +29,12 @@ USAGE
 if [[ $# -lt 1 ]]; then usage; exit 1; fi
 
 TAG="$1"; shift || true
-[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "error: tag must be like vX.Y.Z" >&2; exit 1; }
+# SemVer, including a pre-release suffix. The old pattern ended at the patch
+# number, so this helper rejected v0.5.0-beta.2 -- the very tag the project
+# needed to cut -- while .github/workflows/release.yml triggers on the glob
+# v*.*.*, which matches it. The two disagreed; the workflow is the authority.
+[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] ||
+  { echo "error: tag must be like vX.Y.Z or vX.Y.Z-prerelease" >&2; exit 1; }
 
 RUN_LINT=1
 FORCE_TAG=0
