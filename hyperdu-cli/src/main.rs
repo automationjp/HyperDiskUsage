@@ -11,7 +11,6 @@ use std::{
 };
 
 mod index_cli;
-mod tuning;
 
 use anyhow::Result;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
@@ -252,22 +251,6 @@ struct Args {
     )]
     mft: bool,
 
-    /// Run tuning only (no scan); prints recommended dir_yield_every and exits
-    #[arg(
-        long = "tune-only",
-        action = ArgAction::SetTrue,
-        long_help = "スキャンは実行せず、短時間のプローブで適切なdir_yield_every（ディレクトリ分割境界）を推定して表示します。"
-    )]
-    tune_only: bool,
-
-    /// Tuning time budget in seconds for --tune-only (default 2.0)
-    #[arg(
-        long = "tune-secs",
-        default_value_t = 2.0,
-        long_help = "--tune-only の時間予算（秒）。既定は2.0秒。0.1未満を指定した場合は2.0に切り上げます。"
-    )]
-    tune_secs: f64,
-
     /// Number of threads (defaults to CPU count)
     #[arg(long, long_help = "スレッド数。省略時は論理CPU数。")]
     threads: Option<usize>,
@@ -324,22 +307,6 @@ struct Args {
         long_help = "進捗表示の頻度（ファイル件数）。既定は8192。小さい値にすると低速FSでも無反応に見えにくくなります。"
     )]
     progress_every: Option<u64>,
-
-    /// Live-tune threshold (fraction), e.g. 0.05 = 5%
-    #[arg(
-        long = "tune-threshold",
-        default_value_t = 0.05,
-        long_help = "ライブチューニングでパラメータ変更を判断する閾値（比率）。0.05は±5%の性能変化を意味します。"
-    )]
-    tune_threshold: f64,
-
-    /// Print live-tune changes
-    #[arg(
-        long = "tune-log",
-        action = ArgAction::SetTrue,
-        long_help = "ライブチューニングによりパラメータが変化した際、その変更内容をstderrに記録します。"
-    )]
-    tune_log: bool,
 
     /// Verbose output: also auto-save reports to default filenames
     #[arg(
@@ -455,22 +422,6 @@ struct Args {
     無効化して FindFirstFileExW 経路に切り替えるには環境変数 HYPERDU_WIN_USE_NTQUERY=0 を設定します。"
     )]
     win_ntquery: bool,
-
-    /// Enable live tuning
-    #[arg(
-        long = "tune",
-        action = ArgAction::SetTrue,
-        long_help = "ライブチューニングを有効化します。"
-    )]
-    tune: bool,
-
-    /// Live-tune interval in milliseconds
-    #[arg(
-        long = "tune-interval-ms",
-        value_name = "MS",
-        long_help = "ライブチューニングの実行間隔(ms)。"
-    )]
-    tune_interval_ms: Option<u64>,
 
     /// Disable filesystem auto strategy (sets HYPERDU_FS_AUTO=0)
     #[arg(
@@ -603,8 +554,6 @@ struct AppConfig {
     auto_parallel: bool,
     heuristics_mode: String,
     prefer_inner_rayon: bool,
-    tune_enabled: bool,
-    tune_interval_ms: u64,
     win_allow_handle: bool,
     win_handle_sample_every: u64,
 }
@@ -621,8 +570,6 @@ impl Default for AppConfig {
             auto_parallel: false,
             heuristics_mode: "auto".into(),
             prefer_inner_rayon: false,
-            tune_enabled: false,
-            tune_interval_ms: 800,
             win_allow_handle: false,
             win_handle_sample_every: 64,
         }
@@ -658,8 +605,6 @@ fn load_config() -> AppConfig {
             .map(str::to_owned)
             .unwrap_or(d.heuristics_mode),
         prefer_inner_rayon: get_bool("prefer_inner_rayon", d.prefer_inner_rayon),
-        tune_enabled: get_bool("tune_enabled", d.tune_enabled),
-        tune_interval_ms: get_u64("tune_interval_ms", d.tune_interval_ms),
         win_allow_handle: get_bool("win_allow_handle", d.win_allow_handle),
         win_handle_sample_every: get_u64("win_handle_sample_every", d.win_handle_sample_every),
     }
@@ -728,10 +673,6 @@ fn main() -> Result<()> {
         .min_file_size(args.min_file_size)
         .follow_links(args.follow_links)
         .threads(threads)
-        .with_tuning(hyperdu_core::TuningConfig {
-            tune_enabled: Some(if args.tune { true } else { cfg.tune_enabled }),
-            tune_interval_ms: Some(args.tune_interval_ms.unwrap_or(cfg.tune_interval_ms)),
-        })
         .with_performance(hyperdu_core::PerformanceConfig {
             prefer_inner_rayon: Some(cfg.prefer_inner_rayon),
             io_profile: args.io_profile.map(Into::into),
@@ -882,12 +823,6 @@ fn main() -> Result<()> {
         opt.visited_dirs = Some(std::sync::Arc::new(dashmap::DashMap::with_capacity(1024)));
     }
 
-    // Tuning-only mode: probe several candidates quickly and exit
-    if args.tune_only {
-        return tuning::run_probe(&args, &opt);
-    }
-
-    // Live tuning enabled even without progress printing
     fn short_path(p: &std::path::Path) -> String {
         let name = p.file_name().and_then(|s| s.to_str());
         if let Some(n) = name {
@@ -907,18 +842,9 @@ fn main() -> Result<()> {
     }
     opt.progress_every = args.progress_every.unwrap_or(8192);
     let print_progress = args.progress;
-    let print_tune = args.tune_log || args.verbose;
-    let tune_threshold = if args.tune_threshold <= 0.0 {
-        0.05
-    } else {
-        args.tune_threshold
-    };
     let t_start = std::time::Instant::now();
     let last = std::sync::Arc::new(std::sync::Mutex::new((0u64, t_start)));
     let last_cb = last.clone();
-    let tuner_state = std::sync::Arc::new(std::sync::Mutex::new((2usize, 1isize, 0.0f64))); // (idx, dir, last_rate)
-    let yield_candidates: [usize; 5] = [8192, 16384, 32768, 65536, 131072];
-    let y_atomic = opt.dir_yield_every.clone();
     opt.progress_callback = Some(std::sync::Arc::new(move |n| {
         let now = std::time::Instant::now();
         let total_dt = now.duration_since(t_start).as_secs_f64().max(1e-6);
@@ -933,30 +859,6 @@ fn main() -> Result<()> {
                 "progress: processed {n} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)"
             );
         }
-        // Live tuning
-        let mut st = tuner_state.lock().unwrap();
-        let (ref mut idx, ref mut dir, ref mut last_rate) = *st;
-        if *last_rate == 0.0 {
-            *last_rate = recent_rate;
-        }
-        let degrade = recent_rate < *last_rate * (1.0 - tune_threshold);
-        let improve = recent_rate > *last_rate * (1.0 + tune_threshold);
-        if degrade {
-            *dir = -*dir;
-        }
-        if degrade || improve {
-            let new_idx =
-                (*idx as isize + *dir).clamp(0, (yield_candidates.len() - 1) as isize) as usize;
-            if new_idx != *idx {
-                *idx = new_idx;
-                let new_y = yield_candidates[*idx];
-                y_atomic.store(new_y, std::sync::atomic::Ordering::Relaxed);
-                if print_tune {
-                    eprintln!("[live-tune] dir_yield_every -> {new_y}");
-                }
-            }
-        }
-        *last_rate = recent_rate;
     }));
     // Keep-alive: emit periodic status if no progress callback fired recently
     let _keepalive = KeepAlive::start(print_progress, last.clone());

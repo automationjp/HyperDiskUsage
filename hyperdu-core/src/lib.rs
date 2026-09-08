@@ -35,14 +35,12 @@ mod platform;
 mod rollup;
 mod scanner; // FileSystemScanner + platform default
 mod scheduler;
-mod tuning;
 /// Capacity of the volume a path sits on -- the other half of "what is using
 /// space", without which a size means nothing.
 pub mod volume;
 
 pub use options::{
-    CompatConfig, FilterConfig, OptionsBuilder, OutputConfig, PerformanceConfig, TuningConfig,
-    WindowsConfig,
+    CompatConfig, FilterConfig, OptionsBuilder, OutputConfig, PerformanceConfig, WindowsConfig,
 };
 #[cfg(feature = "rayon-par")]
 pub use scanner::auto_parallel_scan;
@@ -137,7 +135,6 @@ pub struct Options {
     pub compute_physical: bool, // if false, use logical size as physical (faster)
     pub dir_yield_every: Arc<AtomicUsize>, // 0 = no yielding; split large dirs every N entries
     pub approximate_sizes: bool, // if true and compute_physical=false, estimate regular file size (e.g., 4KiB) to avoid statx
-    pub active_threads: Arc<AtomicUsize>, // runtime-tunable active worker threads (<= threads)
     pub cancel: Arc<AtomicBool>, // cooperative cancellation
     pub exclude_ac: Option<AhoCorasick>,
     pub exclude_regex: Vec<String>,
@@ -183,9 +180,6 @@ pub struct Options {
     pub visited_bloom: Option<Arc<Bloom>>, // fast pre-check
     pub visited_dirs: Option<Arc<DashMap<(u64, u64), ()>>>, // loop detection when following links
     // Keep progress lightweight: we intentionally do not accumulate sizes per-file here.
-    // Adaptive tuning / scheduling preferences (configured by CLI config)
-    pub tune_enabled: bool,
-    pub tune_interval_ms: u64,
     pub heuristics_mode: HeuristicsMode,
     pub prefer_inner_rayon: bool,
     /// Legacy Windows knob, kept for configuration compatibility. The Windows
@@ -246,7 +240,6 @@ impl Default for Options {
                     .unwrap_or(0),
             )),
             approximate_sizes: false,
-            active_threads: Arc::new(AtomicUsize::new(threads_default.max(1))),
             exclude_ac: None,
             exclude_regex: Vec::new(),
             exclude_glob: Vec::new(),
@@ -264,8 +257,6 @@ impl Default for Options {
             visited_bloom: None,
             visited_dirs: None,
             cancel: Arc::new(AtomicBool::new(false)),
-            tune_enabled: false,
-            tune_interval_ms: 800,
             heuristics_mode: HeuristicsMode::Auto,
             prefer_inner_rayon: false,
             win_allow_handle: false,
@@ -617,10 +608,8 @@ fn prepare_scan(
         compiled.dir_yield_every.store(0, Ordering::Relaxed);
     }
     // Report the worker count that actually runs, not the one that was asked
-    // for: the profile may have capped it, and the runtime throttle must not
-    // be allowed to re-raise it past that cap.
+    // for: the profile may have capped it.
     compiled.threads = threads;
-    compiled.active_threads = Arc::new(AtomicUsize::new(threads));
     let workers = Scheduler::make_workers(threads);
     let sched = Arc::new(Scheduler::new(&workers));
     sched.push_high(Job {
@@ -657,11 +646,6 @@ fn run_worker(
     loop {
         if options.cancel.load(Ordering::Relaxed) || sched.is_finished() {
             break;
-        }
-        // Runtime thread throttling: only the first `active_threads` workers take jobs.
-        if index >= options.active_threads.load(Ordering::Relaxed) {
-            std::thread::sleep(std::time::Duration::from_millis(5));
-            continue;
         }
         let Some(Job { dir, depth, resume }) = sched.find_job(&local, &mut next) else {
             if !sched.wait_for_work(&backoff) {
@@ -772,9 +756,6 @@ pub fn scan_directory_with(
     let threads = effective_threads(opt);
     let total_files = Arc::new(AtomicU64::new(0));
     let (options, workers, sched) = prepare_scan(&root, opt, threads);
-
-    // Start adaptive tuner if enabled
-    let _tuner = tuning::start_if_enabled(options.clone(), total_files.clone());
 
     let mut handles = Vec::with_capacity(threads);
     for (i, local) in workers.into_iter().enumerate() {

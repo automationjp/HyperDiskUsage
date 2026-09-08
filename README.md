@@ -83,7 +83,7 @@ Windows では `--mft` を指定し、管理者権限で NTFS volume root を走
 - 除外パターン、深さ、最小ファイルサイズ指定
 - JSON / CSV 出力
 - basic / deep classification
-- progress / runtime tuning
+- progress 表示
 
 ### GNU `du` compatibility mode
 

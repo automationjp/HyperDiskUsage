@@ -36,12 +36,6 @@ pub struct CompatConfig {
 }
 
 #[derive(Default, Clone)]
-pub struct TuningConfig {
-    pub tune_enabled: Option<bool>,
-    pub tune_interval_ms: Option<u64>,
-}
-
-#[derive(Default, Clone)]
 pub struct WindowsConfig {
     pub win_allow_handle: Option<bool>,
     pub win_handle_sample_every: Option<u64>,
@@ -63,8 +57,6 @@ pub struct OptionsBuilder {
     pub progress_every: Option<u64>,
     pub compat_mode: Option<CompatMode>,
     pub count_hardlinks: Option<bool>,
-    pub tune_enabled: Option<bool>,
-    pub tune_interval_ms: Option<u64>,
     pub prefer_inner_rayon: Option<bool>,
     pub io_profile: Option<IoProfile>,
     pub prefetch: Option<bool>,
@@ -171,11 +163,6 @@ impl OptionsBuilder {
         self.count_hardlinks = cfg.count_hardlinks.or(self.count_hardlinks);
         self
     }
-    pub fn with_tuning(mut self, cfg: TuningConfig) -> Self {
-        self.tune_enabled = cfg.tune_enabled.or(self.tune_enabled);
-        self.tune_interval_ms = cfg.tune_interval_ms.or(self.tune_interval_ms);
-        self
-    }
     pub fn with_windows(mut self, cfg: WindowsConfig) -> Self {
         self.win_allow_handle = cfg.win_allow_handle.or(self.win_allow_handle);
         self.win_handle_sample_every = cfg.win_handle_sample_every.or(self.win_handle_sample_every);
@@ -215,12 +202,6 @@ impl OptionsBuilder {
         if let Some(v) = self.count_hardlinks {
             opt.count_hardlinks = v;
         }
-        if let Some(v) = self.tune_enabled {
-            opt.tune_enabled = v;
-        }
-        if let Some(v) = self.tune_interval_ms {
-            opt.tune_interval_ms = v;
-        }
         if let Some(v) = self.prefer_inner_rayon {
             opt.prefer_inner_rayon = v;
         }
@@ -246,9 +227,6 @@ impl OptionsBuilder {
         if let Some(v) = self.exclude_glob {
             opt.exclude_glob = v;
         }
-        // Initialize runtime-tunable active_threads to full threads
-        opt.active_threads
-            .store(opt.threads.max(1), std::sync::atomic::Ordering::Relaxed);
         // Compile filters similar to scan bootstrap
         super::compile_filters_in_place(&mut opt);
         opt
