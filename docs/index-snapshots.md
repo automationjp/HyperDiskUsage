@@ -1,8 +1,8 @@
 # Linux directory snapshots (experimental)
 
-HyperDU の Linux 向け `index` サブコマンドは、ディレクトリ単位の走査結果を明示的に保存し、次回はファイルツリーを再走査せずに集計値を読み出すための実験的機能です。
+HyperDU の `index` サブコマンドは、**一度走査した directory 集計を保存し、次回はファイルツリーを再走査せずに読み出す**ための Linux 向け実験機能です。
 
-> この機能は watcher ではありません。自動更新や常駐監視は行わず、保存値は常に `stale` として扱います。
+> これは watcher ではありません。自動更新や常駐監視は行いません。保存値は常に `stale` として扱います。
 
 ## Quick start
 
@@ -12,58 +12,78 @@ hyperdu index refresh /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 hyperdu index show /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 ```
 
-`refresh` は既存の physical-size scanner を実行し、ディレクトリ単位の snapshot をアトミックに置き換えます。`show` は保存済み snapshot を読み込み、対象ツリーを再走査せずに結果を返します。
+- `refresh`: 通常 scanner で tree を走査し、directory 単位の snapshot を保存する
+- `show`: 保存済み snapshot を読み、対象 tree を再走査せずに結果を返す
 
-両コマンドの JSON 出力には、少なくとも次の情報が含まれます。
+## いつ使うか
 
-- `physical_bytes`
-- `files`
-- `directory_count`
-- `freshness: "stale"`
-- `monitoring: false`
+向いているケース:
 
-## Freshness semantics
+- 非常にファイル数が多い tree の概算を繰り返し確認したい
+- 「最後に明示的に更新した時点の値」でよい
+- 自動監視 daemon を入れたくない
 
-snapshot はファイルシステムの atomic snapshot ではありません。`refresh` 完了直後であっても、走査中に対象ツリーが変更される可能性があります。
+向いていないケース:
 
-また、`show` は保存済みデータだけを読みます。新しいファイルや削除されたファイルは、次に `refresh` するまで反映されません。そのため HyperDU は snapshot を常に `stale` と明示します。
+- 常に最新値が必要
+- filesystem の atomic snapshot が必要
+- ファイル変更をリアルタイム追跡したい
 
-## Database constraints
+## `stale` の意味
 
-- database の親ディレクトリは事前に存在している必要があります。
-- database は通常ファイルでなければならず、symlink は拒否します。
-- database は scan root の外側に置く必要があります。
-- この制約により `/` は snapshot root として使用できません。
-- 1つの database を複数 tree で共有せず、tree ごとに別ファイルを使用してください。
+`show` は保存済みデータだけを読みます。`refresh` 後に作成・変更・削除されたファイルは反映されません。
+
+また、`refresh` 自体も filesystem の atomic snapshot ではありません。走査中に tree が変更される可能性があります。
+
+そのため出力では次を明示します。
+
+```text
+freshness: "stale"
+monitoring: false
+```
+
+`stale` はエラーではなく、**「現在の filesystem と完全一致することは保証しない保存値」**という意味です。
+
+## Database rules
+
+安全に保存・再利用するため、database には次の制約があります。
+
+- 親 directory は事前に存在している必要がある
+- database は通常ファイルである必要がある
+- symlink は拒否する
+- database は scan root の外側に置く
+- tree ごとに別 database を使う
+
+この制約により `/` 自体は snapshot root として使用できません。
 
 ## Root identity
 
-保存時と読み込み時で、mount された root の device/inode identity が一致している必要があります。
+保存時と読み込み時で、mount root の device / inode identity が一致することを確認します。
 
-remount、restore、root replacement などで identity が変わった場合は、明示的に `refresh` して snapshot を再構築してください。
+remount、restore、root replacement などで identity が変わった場合は `refresh` し直してください。
 
-inode は再利用される可能性があるため、この identity check は consistency check であり freshness guarantee ではありません。
+inode は再利用される可能性があるため、これは freshness 保証ではなく consistency check です。
 
-## Failure semantics
+## Failure behavior
 
-次の場合、既存 snapshot を不完全な結果で置き換えません。
+`refresh` が完全に成功しない場合、既存 snapshot を不完全な値で置き換えないことを優先します。
+
+例:
 
 - cancellation
 - scan error
-- 表現できない bind-mount alias
-- root identity を安全に確定できない場合
-
-不完全な結果を「成功した snapshot」として保存しないことを優先しています。
+- 安全に表現できない bind-mount alias
+- root identity を確定できない場合
 
 ## Cost model
 
-`show` の読み込みコストは **O(indexed directories)** です。ファイル数そのものには比例しません。読み込み後の root lookup は O(1) です。
+`show` の読み込みコストは **O(indexed directories)** です。全ファイルを再走査しません。
 
-このため、非常に多数のファイルを含み、ディレクトリ数が相対的に少ない tree では、毎回のフルスキャンより大幅に軽い問い合わせが可能です。
+読み込み後の root lookup は O(1) です。
 
-## CLI parsing note
+## CLI note
 
-`index` は予約されたサブコマンドです。`index` という名前のディレクトリを通常スキャンしたい場合は、次のように明示してください。
+`index` はサブコマンド名です。`index` という実 directory を通常 scan したい場合は明示します。
 
 ```sh
 hyperdu ./index
@@ -71,11 +91,11 @@ hyperdu ./index
 hyperdu -- index
 ```
 
-通常スキャン用オプションは、固定 semantics を持つ `index refresh` / `index show` には適用されません。
+通常 scan の option は、固定 semantics を持つ `index refresh` / `index show` にそのまま適用されません。
 
-## Relationship to watchers
+## What is not implemented
 
-現在の snapshot 機能には、次のものは含まれません。
+現在は次を含みません。
 
 - inotify watcher
 - background daemon
@@ -83,10 +103,10 @@ hyperdu -- index
 - overflow recovery
 - watch budget policy
 
-これらは別の受入条件として扱っています。実装境界は [Issue #16 / #41 implementation notes](design/issue-16-41-implementation.md) を参照してください。
+これらは将来検討の別機能です。過去の persistent-index / watcher 設計は [old documentation](old/README.md) に保存しています。
 
-## Windows MFT note
+## Related docs
 
-snapshot 実装とは別に、Windows の MFT scan では ordinary-file DATA extension の stream name と validated record reference を使用します。必須 DATA extent を解決できない場合は directory enumeration に fallback します。
-
-named stream（WOF を含む）は診断情報として扱い、physical usage に無条件で加算しません。live-volume parity は別の acceptance gate です。詳細は [MFT parity verification](design/mft-parity-verification.md) と [Issue #16 / #41 implementation notes](design/issue-16-41-implementation.md) を参照してください。
+- [Architecture](architecture.md)
+- [Performance design](performance.md)
+- [Historical design records](old/README.md)

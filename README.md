@@ -1,6 +1,6 @@
 # HyperDU
 
-> **何がディスクを埋めているかを、すぐに。**  
+> **何がディスクを埋めているかを、速く見つける。**  
 > Rust 製の高速・クロスプラットフォームなディスク使用量アナライザー。CLI、GUI、GNU `du` 互換モード、AI エージェント向け MCP / Skill を提供します。
 
 [![CI](https://github.com/automationjp/HyperDiskUsage/actions/workflows/ci.yml/badge.svg)](https://github.com/automationjp/HyperDiskUsage/actions/workflows/ci.yml)
@@ -9,13 +9,11 @@
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-black?logo=rust)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Windows%20%7C%20Linux-tested-blue)](#platform-status)
 
-[Web site](https://automationjp.github.io/HyperDiskUsage/) · [English](https://automationjp.github.io/HyperDiskUsage/en/) · [Benchmarks](docs/benchmarks.md) · [Agent Plugin](plugin/README.md)
+[Performance](docs/performance.md) · [Benchmark plan](docs/benchmarks.md) · [Documentation](docs/README.md) · [Web site](https://automationjp.github.io/HyperDiskUsage/) · [English](https://automationjp.github.io/HyperDiskUsage/en/)
 
 ---
 
 ## Quick start
-
-CLI は crates.io から導入できます。
 
 ```bash
 cargo install hyperdu-cli --version 0.5.0-beta.2
@@ -23,8 +21,6 @@ hyperdu . --top 20
 ```
 
 クレート名は `hyperdu-cli` ですが、インストールされるコマンド名は **`hyperdu`** です。
-
-よく使う例:
 
 ```bash
 # カレントディレクトリを解析
@@ -44,50 +40,52 @@ hyperdu --compat gnu -sh /var/log
 
 ## Performance
 
-HyperDU は、単に `du` を Rust で書き直したものではありません。OS ごとのディレクトリ列挙 API、並列走査、物理サイズ取得方法まで含めて走査経路を最適化しています。
+HyperDU の主題は **高速なディスク使用量解析**です。
 
-同一マシン（Ryzen 9 3900X / NVMe SSD）で 2026-09-07 に測定した代表値です。
+単に `du` を Rust で書き直すのではなく、OS ごとの directory enumeration、metadata 取得、並列走査、physical-size accounting まで含めて hot path を最適化しています。
 
-| Platform | Dataset | HyperDU | Comparison | Result |
-|---|---:|---:|---:|---:|
-| Windows | 101,368 files / 2.96 GB | **251 ms** | robocopy `/L /S`: 14,362 ms | **57×** |
-| Windows | 101,368 files / 2.96 GB | **251 ms** | GNU du 8.32 (MSYS2): 12,871 ms | **51×** |
-| Linux (WSL2/ext4) | 712,374 files | **191 ms** | du (uutils 0.8.0): 2,900 ms | **15×** |
+### Benchmark status: remeasurement required
 
-ここでの倍率は「比較対象の実行時間 ÷ HyperDU」です。
+公開用の性能値は現在再計測中です。過去の benchmark は履歴として `docs/old/` に移しました。
 
-走査量が一致していることを確認して測定しています。Windows の比較では HyperDU と robocopy のファイル数 101,368、バイト数 2,956,477,017 が一致しています。
+新しい測定が完了するまで、倍率を断定しません。
 
-ただし、**57× や 15× がすべての環境で出るわけではありません**。ツリー形状、ページキャッシュ、物理コア数、ファイルシステム、HDD/NVMe、ネットワークストレージなどで差は変わります。より差が小さい結果を含む測定条件・warm/cold benchmark・再現手順は [docs/benchmarks.md](docs/benchmarks.md) にまとめています。
+| Scenario | Dataset | HyperDU | Baseline | Ratio |
+|---|---|---:|---:|---:|
+| Windows / NTFS | TBD | TBD | TBD | TBD |
+| Linux / ext4 | TBD | TBD | TBD | TBD |
+| Linux / XFS | TBD | TBD | TBD | TBD |
+
+再計測で必要な環境、correctness parity、warm/cold、raw result、公開条件は [Benchmark plan](docs/benchmarks.md) にまとめています。
 
 ### Why it is fast
 
 | Platform | Main path | Optimization |
 |---|---|---|
-| Linux | `getdents64` + `statx` | ディレクトリエントリをまとめて取得し、並列に metadata を集計 |
-| Windows | `NtQueryDirectoryFile` / `FileIdFullDirectoryInformation` | 名前・サイズ・allocation size・file ID をバッチで取得 |
-| macOS | `getattrlistbulk` | metadata をバルク取得 |
+| Linux | `getdents64` + `statx` | directory entry をまとめて取得し、metadata を効率よく並列集計 |
+| Windows | `NtQueryDirectoryFile` / `FileIdFullDirectoryInformation` | name・size・allocation size・file ID を batch 取得 |
+| macOS | `getattrlistbulk` | metadata を bulk 取得 |
 
-加えて、コアスキャナではワーカーごとの LIFO deque と work stealing を使って動的に負荷分散します。巨大ディレクトリの処理継続ジョブも優先キューへ回し、ワーカーが一時的な queue empty を終了と誤認しないよう in-flight job を追跡します。
+加えて `hyperdu-core` は worker ごとの LIFO deque と work stealing を使い、directory tree の偏りに応じて work を再分配します。
 
-Windows では `--mft` を指定し、管理者権限で NTFS volume root を走査できる場合、`$MFT` 直接読み取り経路も利用できます。必要な DATA extent を安全に解決できない場合は directory enumeration へ fallback します。
+Windows では `--mft` を指定し、NTFS volume root・権限などの条件を満たす場合に `$MFT` 直接読み取り経路も利用できます。安全に解析できない場合は directory enumeration へ fallback します。
+
+高速化の設計詳細は [Performance design](docs/performance.md)、component 間の関係は [Architecture](docs/architecture.md) を参照してください。
 
 ## What HyperDU provides
 
 ### Fast disk analysis
 
-- 論理サイズ / 物理 allocation size の集計
+- logical size / physical allocation size の集計
 - hardlink の重複排除
-- マルチスレッド走査
-- filesystem ごとの自動戦略
-- 除外パターン、深さ、最小ファイルサイズ指定
-- JSON / CSV 出力
+- multithread scan + work stealing
+- filesystem ごとの scan strategy
+- exclude / max depth / minimum file size
+- JSON / CSV output
 - basic / deep classification
 - progress / runtime tuning
 
 ### GNU `du` compatibility mode
-
-既存スクリプトから移行しやすいよう、GNU `du` 互換モードを提供しています。
 
 ```bash
 hyperdu --compat gnu -sh /var/log
@@ -95,30 +93,22 @@ hyperdu --compat gnu -ak /home --max-depth=2
 hyperdu --compat gnu -b --time /usr/share
 ```
 
-必要であれば alias で段階的に置き換えられます。
-
 ```bash
 alias du='hyperdu --compat gnu'
 ```
 
-互換性や出力差分は継続的にテストしていますが、GNU coreutils の全挙動を無条件に完全再現することを保証するものではありません。
+互換性は継続的にテストしていますが、GNU coreutils の全挙動を無条件に完全再現することを保証するものではありません。
 
 ### Structured output
-
-人が読む CLI 出力だけでなく、後段処理しやすい JSON / CSV を生成できます。
 
 ```bash
 hyperdu /srv/data --json usage.json
 hyperdu /srv/data --csv usage.csv
 ```
 
-分類結果も別レポートとして出力できます。詳細は `hyperdu --help` を参照してください。
-
 ## AI agents: MCP / Skill / Plugin
 
-HyperDU は、人間が端末で使うだけでなく、Claude や Codex などの AI エージェントがディスク逼迫を調査できるように設計しています。
-
-提供する面は独立しています。
+HyperDU は Claude や Codex などの AI エージェントからも利用できます。
 
 | Interface | Purpose | MCP required? |
 |---|---|---|
@@ -130,39 +120,30 @@ MCP server は次の 3 ツールを公開します。
 
 | Tool | Question it answers |
 |---|---|
-| `list_volumes` | どのドライブ / volume が逼迫しているか |
+| `list_volumes` | どの volume が逼迫しているか |
 | `scan_path` | その中で何が大きいか |
-| `find_reclaimable` | そのうち再生成可能な候補は何か |
+| `find_reclaimable` | 再生成可能な候補は何か |
 
-**削除ツールは意図的に提供していません。** 誤った容量報告はやり直せますが、エージェントによる誤削除は取り返せないためです。
-
-`find_reclaimable` も名前だけで `target/` などを削除候補と判定しません。たとえば Rust の `target/` と判断するには、周辺の `Cargo.toml` など再生成可能性を裏付ける context を確認します。
-
-### MCP setup
-
-MCP server は crates.io から導入できます。`rmcp` の要件により Rust 1.88 以上が必要です。
+**削除ツールは意図的に提供していません。** エージェントが人間の確認なしにデータを破壊する経路を作らないためです。
 
 ```bash
 cargo install hyperdu-mcp --version 0.5.0-beta.2
-
 claude mcp add --transport stdio hyperdu -- hyperdu-mcp
 # Codex:
 codex mcp add hyperdu -- hyperdu-mcp
 ```
 
-Agent Skill / Plugin のセットアップは [plugin/README.md](plugin/README.md) を参照してください。
+Agent Skill / Plugin は [plugin/README.md](plugin/README.md) を参照してください。
 
 ## GUI
 
-`hyperdu-gui` は `egui` / `eframe` ベースのデスクトップ UI です。
+`hyperdu-gui` は `egui` / `eframe` ベースの desktop UI です。
 
-主な機能:
-
-- リアルタイムスキャン表示
-- インタラクティブな tree view
-- ディレクトリの drill-down
-- files/s など throughput の表示
-- 結果 export
+- realtime scan
+- interactive tree view
+- directory drill-down
+- throughput 表示
+- result export
 
 ```bash
 cargo install hyperdu-gui --version 0.5.0-beta.2
@@ -171,9 +152,7 @@ hyperdu-gui
 
 ## Installation
 
-### crates.io — recommended
-
-現在利用できる正式な配布経路は crates.io です。0.5.0-beta.2 は CLI / Core / GUI / MCP の各 crate が公開済みです。
+### crates.io
 
 ```bash
 # CLI (Rust 1.75+)
@@ -186,53 +165,20 @@ cargo install hyperdu-gui --version 0.5.0-beta.2
 cargo install hyperdu-mcp --version 0.5.0-beta.2
 ```
 
-プレリリースのため、現時点ではバージョンを明示するのが確実です。
-
-### From source
-
-```bash
-git clone https://github.com/automationjp/HyperDiskUsage.git
-cd HyperDiskUsage
-
-# CLI (Rust 1.75+)
-cargo install --path hyperdu-cli
-
-# GUI (Rust 1.75+)
-cargo install --path hyperdu-gui
-
-# MCP server (Rust 1.88+)
-cargo install --path hyperdu-mcp
-```
-
-最高性能を確認したい場合は、ローカル CPU 向けに release build できます。
-
-```bash
-RUSTFLAGS="-C target-cpu=native" cargo build --release -p hyperdu-cli
-```
-
 ### Prebuilt binaries
 
-[v0.5.0-beta.2](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.2) から取得できます。展開してそのまま実行できます。
+[v0.5.0-beta.2](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.2) から取得できます。
 
 | Platform | CLI | GUI |
 |---|---|---|
 | Windows x86_64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-windows-x86_64-generic.zip) / [exe](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-windows-x86_64-generic.exe) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-gui-windows-x86_64-generic.zip) |
 | Linux x86_64 (glibc) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-linux-x86_64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-gui-linux-x86_64-generic.zip) |
-| Linux x86_64 (musl, static) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-linux-x86_64-musl-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-gui-linux-x86_64-musl-generic.zip) |
+| Linux x86_64 (musl) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-linux-x86_64-musl-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-gui-linux-x86_64-musl-generic.zip) |
 | Linux aarch64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-linux-aarch64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-gui-linux-aarch64-generic.zip) |
 
-Debian / Ubuntu 向けの `.deb` も同じリリースにあります。
-
-```bash
-curl -LO https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli_0.5.0.beta.2-1_amd64.deb
-sudo dpkg -i hyperdu-cli_0.5.0.beta.2-1_amd64.deb
-```
-
-プレリリースのため、`releases/latest` は解決しません（GitHub は prerelease を latest として扱いません）。上のリンクはバージョン固定です。
+Debian / Ubuntu 向け `.deb` も同じ release にあります。
 
 ### Scoop (Windows)
-
-このリポジトリ自体が scoop bucket として使えます。
 
 ```powershell
 scoop bucket add hyperdu https://github.com/automationjp/HyperDiskUsage
@@ -245,30 +191,30 @@ scoop install hyperdu
 winget install automationjp.HyperDU
 ```
 
-manifest は `winget validate` を通過していますが、[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) への登録が完了するまでは利用できません。
+manifest は `winget validate` 済みですが、winget-pkgs への登録完了までは利用できません。
+
+### From source
+
+```bash
+git clone https://github.com/automationjp/HyperDiskUsage.git
+cd HyperDiskUsage
+cargo install --path hyperdu-cli
+```
 
 ## Platform status
 
 | Platform | Status | Notes |
 |---|---|---|
-| Windows | **Tested** | NTFS、CI、native directory enumeration、optional MFT path |
-| Linux | **Tested** | Amazon Linux 2023 / XFS、WSL2 / ext4、CI |
-| macOS | CLI: **未検証** / GUI: **ビルド不可** | `getattrlistbulk` implementationあり。GUI は `eframe` が推移的に引く `webbrowser` が macOS でコンパイルできないため、現状ビルドできません。release workflow も macOS を対象外にしています |
+| Windows | **Tested** | NTFS、CI、native enumeration、optional MFT path |
+| Linux | **Tested** | XFS / ext4、CI |
+| macOS | CLI: **未検証** / GUI: **ビルド不可** | `getattrlistbulk` implementationあり。release workflow は現在対象外 |
 
 Minimum Rust versions:
 
 - `hyperdu-core`, `hyperdu-cli`, `hyperdu-gui`: **Rust 1.75+**
-- `hyperdu-mcp`: **Rust 1.88+** (`rmcp` requirement)
-
-### Filesystem notes
-
-Linux では filesystem に応じて strategy を調整します。たとえば ext4/XFS/ZFS、Btrfs、DrvFS、NFS/SMB/SSHFS/9p/FUSE では physical size や prefetch、buffer size、推奨 thread count の扱いが異なります。
-
-Windows の標準経路は `NtQueryDirectoryFile` です。`HYPERDU_WIN_USE_NTQUERY=0` で `FindFirstFileExW` fallback に切り替えられます。`\\?\` path prefix を使うため、long path も扱います。
+- `hyperdu-mcp`: **Rust 1.88+**
 
 ## Experimental: persisted Linux snapshots
-
-Linux では、明示的に更新する directory snapshot を実験的に提供しています。
 
 ```bash
 mkdir -p "$HOME/.cache/hyperdu"
@@ -276,85 +222,38 @@ hyperdu index refresh /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 hyperdu index show /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 ```
 
-これは watcher ではありません。`show` は tree を再走査せず保存値を返し、freshness は常に `stale` と明示します。
+これは watcher ではありません。`show` は保存値を返し、freshness は常に `stale` と明示します。
 
-DB 配置制約、root identity、failure semantics、計算量、watcher との境界は [docs/index-snapshots.md](docs/index-snapshots.md) に分離しました。
+詳細は [Linux directory snapshots](docs/index-snapshots.md) を参照してください。
 
-## Benchmarking
+## Documentation
 
-GNU `du` との比較は `scripts/bench/vs_du.sh` を使ってください。
-
-```bash
-# warm benchmark
-scripts/bench/vs_du.sh /path/to/tree
-
-# cold benchmark (drop_caches のため root/sudo が必要)
-scripts/bench/vs_du.sh --cold /path/to/tree1 /path/to/tree2
-```
-
-この harness は、性能数値が不正に良く見える代表的な失敗を検出して停止します。
-
-- 古い binary を測っている
-- HyperDU と比較対象で走査ファイル集合が違う
-- cold measurement を最小値だけで評価し、storage burst を拾っている
-
-benchmark header には commit、dirty state、physical core count、filesystem、kernel などを残し、後から測定条件を復元できるようにしています。
-
-詳細な結果と方法論は [docs/benchmarks.md](docs/benchmarks.md) を参照してください。
-
-## Architecture
-
-```text
-HyperDiskUsage/
-├── hyperdu-core/     # scanning engine / platform-specific fast paths
-├── hyperdu-cli/      # `hyperdu` command
-├── hyperdu-gui/      # desktop GUI
-├── hyperdu-mcp/      # MCP server for AI agents
-├── plugin/           # Agent Skill / Plugin
-├── docs/             # benchmarks and design notes
-├── site/             # bilingual project web site
-└── scripts/          # benchmark, packaging, lint, development tools
-```
-
-コアと interface を分離しているため、CLI / GUI / MCP は同じ scanner semantics を共有します。
+- [Documentation index](docs/README.md)
+- [Performance design](docs/performance.md)
+- [Benchmark plan / remeasurement checklist](docs/benchmarks.md)
+- [Architecture](docs/architecture.md)
+- [Linux persisted snapshots](docs/index-snapshots.md)
+- [Historical / old documents](docs/old/README.md)
+- [Agent Plugin / Skill](plugin/README.md)
 
 ## Development
 
 ```bash
-# fast compile check
 cargo check --workspace
-
-# tests
 cargo test --workspace
-
-# formatting
 cargo fmt --check
-
-# lint
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-performance path を変更する PR では、通常の unit/integration test に加えて benchmark の比較条件と regression の有無も確認してください。
-
-大きな変更は先に Issue で設計・受入条件を合わせることを推奨します。GUI変更では screenshot/GIF、scanner変更では risk / rollback と benchmark evidence があるとレビューしやすくなります。
-
-## Documentation
-
-- [Benchmark methodology and results](docs/benchmarks.md)
-- [Linux persisted snapshots](docs/index-snapshots.md)
-- [MFT parity verification](docs/design/mft-parity-verification.md)
-- [Issue #16 / #41 implementation boundaries](docs/design/issue-16-41-implementation.md)
-- [Agent Plugin / Skill](plugin/README.md)
-- [Project web site (日本語)](https://automationjp.github.io/HyperDiskUsage/)
-- [Project web site (English)](https://automationjp.github.io/HyperDiskUsage/en/)
+performance path を変更する PR では、通常の test に加えて [Benchmark plan](docs/benchmarks.md) の correctness gate と再計測条件を確認してください。
 
 ## Known limitations
 
-- ベータ版です。CLI option、MCP tool schema、出力形式は変更される可能性があります。
-- macOS は build path はありますが、実機での性能・互換性検証はまだ完了していません。
-- WSL の `/mnt/*` 上では Rust build 時の temporary directory cleanup が不安定になる場合があります。Linux filesystem 側へ checkout するか `CARGO_TARGET_DIR` を変更してください。
-- symbolic link は既定では追跡しません。`--follow-links` を有効化する場合は cycle に注意してください。
-- network filesystem や HDD では I/O latency が支配的になり、CPU 並列化による差は小さくなる場合があります。
+- ベータ版です。CLI option、MCP tool schema、output format は変更される可能性があります。
+- 公開用 benchmark は再計測中です。性能値を更新する前に benchmark gate を通します。
+- macOS の性能・互換性検証は完了していません。
+- network filesystem や HDD では I/O latency が支配的になり、並列化による差が小さくなる場合があります。
+- symbolic link は既定では追跡しません。`--follow-links` 利用時は cycle に注意してください。
 
 ## License
 
@@ -362,9 +261,7 @@ performance path を変更する PR では、通常の unit/integration test に
 
 ## Acknowledgements
 
-実装・設計の参考として、特に次のプロジェクトから多くを学んでいます。
-
-- [ripgrep](https://github.com/BurntSushi/ripgrep) — 高速な filesystem / search implementation
+- [ripgrep](https://github.com/BurntSushi/ripgrep) — high-performance filesystem/search implementation
 - [fd](https://github.com/sharkdp/fd) — parallel filesystem traversal
 - [dust](https://github.com/bootandy/dust) — disk usage UX
 
