@@ -1,6 +1,6 @@
 # HyperDU Documentation
 
-HyperDU のドキュメントは、**高速なディスク使用量解析をどう実現し、どう検証するか**を中心に整理しています。
+HyperDU のドキュメントは、**高速なディスク使用量解析をどう実現し、どうセットアップし、どう検証するか**を中心に整理しています。
 
 現在公開する性能数値は再計測中です。過去の計測値は `old/` に保存し、現行ドキュメントでは新しい測定が完了するまで `TBD` としています。
 
@@ -8,11 +8,25 @@ HyperDU のドキュメントは、**高速なディスク使用量解析をど�
 
 | 目的 | ドキュメント |
 |---|---|
+| インストール、Rust、OS依存、build/test環境を準備したい | [Setup and build environment](setup.md) |
 | HyperDU がなぜ速いのか知りたい | [Performance design](performance.md) |
 | 性能を再計測・比較したい | [Benchmark plan](benchmarks.md) |
 | CLI / GUI / MCP と scanner の関係を知りたい | [Architecture](architecture.md) |
 | Linux の保存済み snapshot を使いたい | [Linux directory snapshots](index-snapshots.md) |
 | AI Agent / MCP / Skill を使いたい | [Agent Plugin / Skill](../plugin/README.md) |
+
+## Setup first
+
+HyperDU は導入方法によって必要な環境が異なります。
+
+- **prebuilt / Scoop / `.deb` を使うだけ**: Rust toolchain は不要
+- **CLI / Core / GUI をソースから build**: Rust 1.75+ が最低要件
+- **MCP または workspace 全体を build/test**: Rust 1.88+ が必要
+- **Windows source build**: MSVC toolchain + Windows SDK を推奨
+- **Linux source build**: Rust に加えて native build toolchain が必要
+- **Linux GUI**: X11 / Wayland development libraries が必要
+
+コマンドを含む詳細は [Setup and build environment](setup.md) を参照してください。
 
 ## Performance first
 
