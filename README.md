@@ -194,8 +194,13 @@ cargo install hyperdu-mcp --version 0.5.0-beta.2
 git clone https://github.com/automationjp/HyperDiskUsage.git
 cd HyperDiskUsage
 
+# CLI (Rust 1.75+)
 cargo install --path hyperdu-cli
+
+# GUI (Rust 1.75+)
 cargo install --path hyperdu-gui
+
+# MCP server (Rust 1.88+)
 cargo install --path hyperdu-mcp
 ```
 
