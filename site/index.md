@@ -60,14 +60,14 @@ cargo install hyperdu-cli --version {{ site.versions.cli }}
 
 ベータ版のため `--version` の明示が要ります。**クレート名は `hyperdu-cli` ですが、入るコマンドは `hyperdu` です**（`ripgrep` が `rg` を入れるのと同じ形）。
 
-### Windows
+### Windows（準備中）
+
+> **まだ使えません。** 公開リリースが無いためです。リリース後も winget は [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) への PR、scoop はバケットへの登録が別途必要で、いずれも未提出です。それまでは上の crates.io 経路を使ってください。
 
 ```powershell
 winget install automationjp.HyperDU
 scoop install hyperdu
 ```
-
-> **まだ使えません。** マニフェストは生成できますが、winget は [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) への PR、scoop はバケットへの登録が別途必要で、いずれも未提出です。
 
 ### ソースから
 
