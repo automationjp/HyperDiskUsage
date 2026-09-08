@@ -135,7 +135,6 @@ pub struct Options {
     pub compute_physical: bool, // if false, use logical size as physical (faster)
     pub dir_yield_every: Arc<AtomicUsize>, // 0 = no yielding; split large dirs every N entries
     pub approximate_sizes: bool, // if true and compute_physical=false, estimate regular file size (e.g., 4KiB) to avoid statx
-    pub active_threads: Arc<AtomicUsize>, // runtime-tunable active worker threads (<= threads)
     pub cancel: Arc<AtomicBool>, // cooperative cancellation
     pub exclude_ac: Option<AhoCorasick>,
     pub exclude_regex: Vec<String>,
@@ -241,7 +240,6 @@ impl Default for Options {
                     .unwrap_or(0),
             )),
             approximate_sizes: false,
-            active_threads: Arc::new(AtomicUsize::new(threads_default.max(1))),
             exclude_ac: None,
             exclude_regex: Vec::new(),
             exclude_glob: Vec::new(),
@@ -613,7 +611,6 @@ fn prepare_scan(
     // for: the profile may have capped it, and the runtime throttle must not
     // be allowed to re-raise it past that cap.
     compiled.threads = threads;
-    compiled.active_threads = Arc::new(AtomicUsize::new(threads));
     let workers = Scheduler::make_workers(threads);
     let sched = Arc::new(Scheduler::new(&workers));
     sched.push_high(Job {
@@ -650,11 +647,6 @@ fn run_worker(
     loop {
         if options.cancel.load(Ordering::Relaxed) || sched.is_finished() {
             break;
-        }
-        // Runtime thread throttling: only the first `active_threads` workers take jobs.
-        if index >= options.active_threads.load(Ordering::Relaxed) {
-            std::thread::sleep(std::time::Duration::from_millis(5));
-            continue;
         }
         let Some(Job { dir, depth, resume }) = sched.find_job(&local, &mut next) else {
             if !sched.wait_for_work(&backoff) {

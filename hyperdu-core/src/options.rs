@@ -227,9 +227,6 @@ impl OptionsBuilder {
         if let Some(v) = self.exclude_glob {
             opt.exclude_glob = v;
         }
-        // Initialize runtime-tunable active_threads to full threads
-        opt.active_threads
-            .store(opt.threads.max(1), std::sync::atomic::Ordering::Relaxed);
         // Compile filters similar to scan bootstrap
         super::compile_filters_in_place(&mut opt);
         opt

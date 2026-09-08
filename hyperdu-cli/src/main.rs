@@ -11,7 +11,6 @@ use std::{
 };
 
 mod index_cli;
-mod tuning;
 
 use anyhow::Result;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
@@ -251,22 +250,6 @@ struct Args {
     切り替わっても結果は正しく、遅くなるだけです。"
     )]
     mft: bool,
-
-    /// Run tuning only (no scan); prints recommended dir_yield_every and exits
-    #[arg(
-        long = "tune-only",
-        action = ArgAction::SetTrue,
-        long_help = "スキャンは実行せず、短時間のプローブで適切なdir_yield_every（ディレクトリ分割境界）を推定して表示します。"
-    )]
-    tune_only: bool,
-
-    /// Tuning time budget in seconds for --tune-only (default 2.0)
-    #[arg(
-        long = "tune-secs",
-        default_value_t = 2.0,
-        long_help = "--tune-only の時間予算（秒）。既定は2.0秒。0.1未満を指定した場合は2.0に切り上げます。"
-    )]
-    tune_secs: f64,
 
     /// Number of threads (defaults to CPU count)
     #[arg(long, long_help = "スレッド数。省略時は論理CPU数。")]
@@ -838,11 +821,6 @@ fn main() -> Result<()> {
     if args.follow_links && !matches!(opt.compat_mode, hyperdu_core::CompatMode::HyperDU) {
         opt.visited_bloom = Some(std::sync::Arc::new(hyperdu_core::Bloom::with_bits(1 << 20)));
         opt.visited_dirs = Some(std::sync::Arc::new(dashmap::DashMap::with_capacity(1024)));
-    }
-
-    // Tuning-only mode: probe several candidates quickly and exit
-    if args.tune_only {
-        return tuning::run_probe(&args, &opt);
     }
 
     // Live tuning enabled even without progress printing
