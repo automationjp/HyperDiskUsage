@@ -1776,6 +1776,7 @@ dependencies = [
  "log",
  "profiling",
  "rfd",
+ "tempfile",
 ]
 
 [[package]]

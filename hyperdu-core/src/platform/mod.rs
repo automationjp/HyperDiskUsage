@@ -79,6 +79,20 @@ pub fn mft_backend_applies(_root: &std::path::Path, _opt: &crate::Options) -> bo
     false
 }
 
+/// Allocated size of one file, for [`crate::file_stat`].
+///
+/// Windows only, and deliberately without a stub for the other platforms:
+/// `file_stat` reads `MetadataExt::blocks()` on unix and never reaches here, so
+/// a stub would be dead code that the macOS lint gate rejects.
+///
+/// `std::fs::Metadata` carries no allocated size on Windows, so the enumeration
+/// backend reads it out of `FILE_ID_FULL_DIR_INFORMATION`. A caller holding only
+/// a path has to open the file and ask for the same field.
+#[cfg(windows)]
+pub fn allocated_size(path: &std::path::Path) -> Option<u64> {
+    windows_impl::allocated_size(path)
+}
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub fn process_dir_wrapped(ctx: &ScanContext, dir_ctx: &DirContext, map: &mut StatMap) {
     linux_x86_64_impl::process_dir(ctx, dir_ctx, map);

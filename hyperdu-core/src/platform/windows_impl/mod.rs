@@ -30,6 +30,11 @@ mod win32;
 use crate::{DirContext, ScanContext, StatMap};
 
 /// Volume serial of `path`, or zero when it cannot be read.
+/// Allocated size of one file. See [`crate::platform::allocated_size`].
+pub fn allocated_size(path: &std::path::Path) -> Option<u64> {
+    entry::allocation_size_by_path(&path::to_wide_for_open(path))
+}
+
 pub fn volume_id(path: &std::path::Path) -> u64 {
     entry::file_id_by_path(&path::to_wide_for_open(path))
         .map(|(vol, _)| vol)
