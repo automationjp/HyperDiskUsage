@@ -96,8 +96,18 @@ EOF
 # must not depend on whatever the default happens to be at the time.
 hyperdu() { "$BIN" "$1" --top 1 --exclude "" --one-file-system "${@:2}"; }
 
+# `--count-links` for the check only, because the comparison is against `find`,
+# which prints every link. hyperdu and du both fold hardlinks by default and
+# agree while doing it -- four links to one 100000-byte inode give `du -sb`
+# 100000 and hyperdu log=100000 -- so comparing the folded number against find
+# flags that agreement as a mismatch. /usr made this concrete: 122697 folded
+# against 122814 from find, exactly the 117 the hardlinks account for.
+#
+# Counting links does not change which entries are visited, so this still
+# catches what the check is for: an exclude pattern quietly shrinking the tree.
+# The timed runs below use the defaults, untouched.
 hyperdu_files() {
-  hyperdu "$1" 2>/dev/null | sed -n 's/.*files=\([0-9]*\).*/\1/p' | tail -1
+  hyperdu "$1" --count-links 2>/dev/null | sed -n 's/.*files=\([0-9]*\).*/\1/p' | tail -1
 }
 
 # du and hyperdu must walk the same set, or the comparison measures the filter.
@@ -109,7 +119,7 @@ check_same_workload() {
 error: hyperdu and find disagree on '$tree'; the two tools are not scanning the
        same set, so any timing from this tree is meaningless.
          find    : $find_files files
-         hyperdu : ${hd_files:-<none>} files
+         hyperdu : ${hd_files:-<none>} files  (counted with --count-links)
        Check the active exclude patterns (hyperdu prints them under "Excludes:").
 EOF
   exit 4
@@ -196,7 +206,12 @@ printf '\n'
 for tree in "${TREES[@]}"; do
   files=$(find "$tree" -xdev -type f 2>/dev/null | wc -l)
   dirs=$(find "$tree" -xdev -type d 2>/dev/null | wc -l)
-  fstype=$(stat -f -c %T "$tree" 2>/dev/null || echo '?')
+  # `stat -f` reports the superblock magic, and ext4 shares 0xEF53 with its
+  # predecessors, so it calls an ext4 volume "ext2/ext3". The published tables
+  # separate ext4 from XFS, so the label has to be the real one: ask the mount
+  # table first and keep `stat -f` only for paths findmnt cannot resolve.
+  fstype=$(findmnt -no FSTYPE --target "$tree" 2>/dev/null | head -1)
+  [[ -n "$fstype" ]] || fstype=$(stat -f -c %T "$tree" 2>/dev/null || echo '?')
 
   check_same_workload "$tree" "$files"
 
