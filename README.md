@@ -210,16 +210,42 @@ cargo install --path hyperdu-mcp
 RUSTFLAGS="-C target-cpu=native" cargo build --release -p hyperdu-cli
 ```
 
-### Other distribution channels — preparing
+### Prebuilt binaries
 
-以下は **まだ利用できません**。README から存在しない download URL へ誘導しないため、公開前の release asset 直リンクは掲載していません。
+[v0.5.0-beta.2](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.2) から取得できます。展開してそのまま実行できます。
 
-- GitHub Releases: public release はまだありません
-- winget: manifest submission 前
-- scoop: bucket registration 前
-- deb / rpm / prebuilt assets: release workflow で生成し、public release 後に利用可能になる予定です
+| Platform | CLI | GUI |
+|---|---|---|
+| Windows x86_64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-windows-x86_64-generic.zip) / [exe](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-windows-x86_64-generic.exe) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-gui-windows-x86_64-generic.zip) |
+| Linux x86_64 (glibc) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-linux-x86_64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-gui-linux-x86_64-generic.zip) |
+| Linux x86_64 (musl, static) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-linux-x86_64-musl-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-gui-linux-x86_64-musl-generic.zip) |
+| Linux aarch64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-linux-aarch64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-gui-linux-aarch64-generic.zip) |
 
-現時点では上の crates.io 経路を利用してください。
+Debian / Ubuntu 向けの `.deb` も同じリリースにあります。
+
+```bash
+curl -LO https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli_0.5.0.beta.2-1_amd64.deb
+sudo dpkg -i hyperdu-cli_0.5.0.beta.2-1_amd64.deb
+```
+
+プレリリースのため、`releases/latest` は解決しません（GitHub は prerelease を latest として扱いません）。上のリンクはバージョン固定です。
+
+### Scoop (Windows)
+
+このリポジトリ自体が scoop bucket として使えます。
+
+```powershell
+scoop bucket add hyperdu https://github.com/automationjp/HyperDiskUsage
+scoop install hyperdu
+```
+
+### winget (Windows) — 申請中
+
+```powershell
+winget install automationjp.HyperDU
+```
+
+manifest は `winget validate` を通過していますが、[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) への登録が完了するまでは利用できません。
 
 ## Platform status
 

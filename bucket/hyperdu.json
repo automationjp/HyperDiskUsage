@@ -1,0 +1,23 @@
+{
+  "version": "0.5.0-beta.2",
+  "description": "Fast cross-platform disk usage analyzer",
+  "homepage": "https://github.com/automationjp/HyperDiskUsage",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-windows-x86_64-generic.zip",
+      "hash": "730fae10010d85349e3de12e773f719a03ebfc05d4e2cb97d9dee03f34fc2d0b"
+    }
+  },
+  "bin": "hyperdu.exe",
+  "checkver": {
+    "github": "https://github.com/automationjp/HyperDiskUsage"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/automationjp/HyperDiskUsage/releases/download/v$version/hyperdu-cli-windows-x86_64-generic.zip"
+      }
+    }
+  }
+}
