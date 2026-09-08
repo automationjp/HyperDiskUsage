@@ -172,18 +172,16 @@ cargo build --release -p hyperdu-mcp
 cargo install --path hyperdu-mcp
 ```
 
-確認:
+`hyperdu-mcp` は通常の対話型 CLI ではなく、**stdio 上で MCP client から接続される server** です。直接起動すると protocol input を待機します。
 
-```bash
-hyperdu-mcp --help
-```
-
-MCP client への登録例:
+登録例:
 
 ```bash
 claude mcp add --transport stdio hyperdu -- hyperdu-mcp
 codex mcp add hyperdu -- hyperdu-mcp
 ```
+
+動作確認は利用する MCP client 側から server が起動・接続できることを確認してください。
 
 ## 5. 開発環境の確認
 

@@ -9,7 +9,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-black?logo=rust)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Windows%20%7C%20Linux-tested-blue)](#platform-status)
 
-[Performance](docs/performance.md) · [Benchmark plan](docs/benchmarks.md) · [Documentation](docs/README.md) · [Web site](https://automationjp.github.io/HyperDiskUsage/) · [English](https://automationjp.github.io/HyperDiskUsage/en/)
+[Setup](docs/setup.md) · [Performance](docs/performance.md) · [Benchmark plan](docs/benchmarks.md) · [Documentation](docs/README.md) · [Web site](https://automationjp.github.io/HyperDiskUsage/) · [English](https://automationjp.github.io/HyperDiskUsage/en/)
 
 ---
 
@@ -152,6 +152,8 @@ hyperdu-gui
 
 ## Installation
 
+**実行だけなら prebuilt binary / Scoop / `.deb` で Rust は不要です。** ソースから build する場合の Rust version、Windows MSVC / Windows SDK、Linux native build tools、GUI依存、MCP環境は [Setup and build environment](docs/setup.md) にまとめています。
+
 ### crates.io
 
 ```bash
@@ -201,6 +203,8 @@ cd HyperDiskUsage
 cargo install --path hyperdu-cli
 ```
 
+詳しい build environment は [docs/setup.md](docs/setup.md) を参照してください。
+
 ## Platform status
 
 | Platform | Status | Notes |
@@ -213,6 +217,7 @@ Minimum Rust versions:
 
 - `hyperdu-core`, `hyperdu-cli`, `hyperdu-gui`: **Rust 1.75+**
 - `hyperdu-mcp`: **Rust 1.88+**
+- workspace 全体の build/test: **Rust 1.88+**
 
 ## Experimental: persisted Linux snapshots
 
@@ -228,6 +233,7 @@ hyperdu index show /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 
 ## Documentation
 
+- [Setup and build environment](docs/setup.md)
 - [Documentation index](docs/README.md)
 - [Performance design](docs/performance.md)
 - [Benchmark plan / remeasurement checklist](docs/benchmarks.md)
@@ -244,6 +250,8 @@ cargo test --workspace
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+workspace 全体の開発では Rust 1.88+ を使用します。platform-specific prerequisites と optional feature の確認方法は [Setup and build environment](docs/setup.md) を参照してください。
 
 performance path を変更する PR では、通常の test に加えて [Benchmark plan](docs/benchmarks.md) の correctness gate と再計測条件を確認してください。
 
