@@ -66,7 +66,12 @@ depends = "$auto"
 maintainer = "HyperDU Maintainers <maintainers@example.com>"
 extended-description = "Hyper-fast disk usage analyzer CLI."
 maintainer-scripts = "../packaging/deb"
+# An explicit assets list turns OFF cargo-deb's automatic binary inclusion, so the
+# executable has to be listed here too. Without this line the .deb installed the
+# man page, the completions and the docs -- and no `hyperdu` command at all.
+# Same source path as [package.metadata.generate-rpm] below, for the same reason.
 assets = [
+  ["../target/release/hyperdu", "/usr/bin/hyperdu", "755"],
   ["../README.md", "/usr/share/doc/hyperdu/README.md", "644"],
   ["../LICENSE", "/usr/share/doc/hyperdu/LICENSE", "644"],
   ["../packaging/man/hyperdu.1", "/usr/share/man/man1/hyperdu.1", "644"],
