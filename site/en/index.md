@@ -4,152 +4,95 @@ lang: en
 home_path: /en/
 lang_switch_label: Language
 permalink: /en/
-title: "HyperDU — find what is filling the disk"
-description: "Fast cross-platform disk usage analysis, measured on Windows and Linux. Answers what is using space and which of it is safe to delete."
+title: "HyperDU — fast disk usage analysis"
+description: "A Rust disk-usage analyzer built around platform-specific fast paths and parallel traversal. Public benchmark numbers are being remeasured."
 ---
 
-# Find what is filling the disk
+# Fast disk usage analysis
 
 <p class="lede">
-When a disk fills up, the useful question is not just what is large. It is <strong>which of it is safe to delete</strong>. HyperDU answers both.
+HyperDU is a Rust disk-usage analyzer built to <strong>find what is filling a disk quickly</strong>.
 </p>
 
 ```bash
+cargo install hyperdu-cli --version {{ site.versions.cli }}
 hyperdu /path --top 20
 ```
 
-## Speed
+## Performance
 
-Measured on one machine (Ryzen 9 3900X, NVMe SSD) on 2026-09-07.
+HyperDU is not just `du` rewritten in Rust. Its hot path includes platform-specific directory enumeration, metadata acquisition, and parallel traversal.
 
-### Windows — 101,368 files / 2.96 GB
+### Public benchmarks are being remeasured
 
-| Tool | Time | Ratio |
-|---|---|---|
-| **HyperDU** | **251 ms** | — |
-| robocopy `/L /S` | 14,362 ms | **57×** |
-| GNU du 8.32 (MSYS2) | 12,871 ms | **51×** |
+Historical numbers are archived and are not used as current performance claims. Until the new measurements are complete, the result fields remain `TBD`.
 
-### Linux (WSL2, ext4) — 712,374 files
+| Scenario | HyperDU | Baseline | Ratio |
+|---|---:|---:|---:|
+| Windows / NTFS | TBD | TBD | TBD |
+| Linux / ext4 | TBD | TBD | TBD |
+| Linux / XFS | TBD | TBD | TBD |
 
-| Tool | Time | Ratio |
-|---|---|---|
-| **HyperDU** | **191 ms** | — |
-| du (uutils coreutils 0.8.0) | 2,900 ms | **15×** |
-
-Two comparisons on purpose. MSYS2's `du` goes through a POSIX compatibility
-layer, which puts it at a structural disadvantage on Windows, so **robocopy**
-was measured too: Microsoft's own tool, native API, no emulation. It is still
-57× slower.
-
-On Linux, `du` is Ubuntu 26.04's default, which is uutils coreutils — a Rust
-implementation. That makes it a **Rust-to-Rust** comparison.
-
-> **Scan volumes were verified identical every time.** robocopy and HyperDU
-> agreed exactly: 101,368 files, 2,956,477,017 bytes. Neither side is skipping
-> work to look fast.
-
-Ratios depend heavily on tree shape and storage. Deep, narrow trees narrow the
-gap, and on spinning disks or network filesystems the work becomes I/O bound.
-**Full numbers, method, and the less flattering results** are in
-[docs/benchmarks.md](https://github.com/{{ site.repository }}/blob/main/docs/benchmarks.md).
+See the [benchmark plan](https://github.com/{{ site.repository }}/blob/main/docs/benchmarks.md) for the test matrix and publication checklist.
 
 ## Why it is fast
 
-- **Per-platform bulk enumeration** — `getdents64` + `statx` on Linux,
-  `NtQueryDirectoryFile` on Windows (allocation size and file id arrive with the
-  batch, so hardlink dedupe costs no extra syscalls), `getattrlistbulk` on macOS
-- **Reads the NTFS `$MFT` directly** when run elevated against a volume root
-- **Work stealing** across per-worker LIFO deques, taking from the shallow end so
-  a thief gets a large subtree
+- **Linux** — `getdents64` + `statx` for low-overhead enumeration and metadata retrieval
+- **Windows** — `NtQueryDirectoryFile` batches name, size, allocation size, and file ID
+- **macOS** — `getattrlistbulk` for bulk metadata retrieval
+- **Work stealing** — redistributes directory work between workers as tree sizes diverge
+- **Optional NTFS `$MFT` path** — direct volume-root path when supported, with safe fallback to normal enumeration
 
-## Install
+See [Performance design](https://github.com/{{ site.repository }}/blob/main/docs/performance.md) for details.
 
-### crates.io
-
-```bash
-cargo install hyperdu-cli --version {{ site.versions.cli }}
-```
-
-Prereleases are not selected by default, so `--version` is required. **The crate
-is `hyperdu-cli`; the command it installs is `hyperdu`** — the same shape as
-ripgrep installing `rg`.
-
-### Windows (not yet available)
-
-> **Not available yet.** There is no published release. Even after one exists,
-> winget needs a pull request to
-> [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) and Scoop
-> needs a bucket entry; neither has been submitted. Use the crates.io route
-> above until then.
-
-```powershell
-winget install automationjp.HyperDU
-scoop install hyperdu
-```
-
-### From source
+## Usage
 
 ```bash
-git clone https://github.com/{{ site.repository }}.git
-cd HyperDiskUsage
-cargo install --path hyperdu-cli
+# largest entries
+hyperdu /path --top 20
+
+# JSON output
+hyperdu /path --json out.json
+
+# GNU du compatibility mode
+hyperdu --compat gnu -sh /var/log
 ```
 
-## For agents
+## AI agent integration
 
-Three surfaces let an agent such as Claude or Codex receive disk usage as
-structured data and decide what is safe to remove. **They do not depend on each
-other, so you can adopt any one alone.**
+Claude, Codex, and other agents can inspect disk pressure through structured tools.
 
-| Surface | Usable alone |
+| Tool | Answers |
 |---|---|
-| MCP server | Any MCP client |
-| Agent Skill | Drives the CLI, so no MCP needed |
-| Agent Plugin | Bundles the other two |
+| `list_volumes` | Which volume is short on space |
+| `scan_path` | What is large inside it |
+| `find_reclaimable` | Which candidates can be rebuilt |
+
+**There is deliberately no delete tool.**
 
 ```bash
 cargo install hyperdu-mcp --version {{ site.versions.mcp }}
 claude mcp add --transport stdio hyperdu -- hyperdu-mcp
 ```
 
-Three tools, in the order the questions actually arrive:
+## Install
 
-| Tool | Answers |
-|---|---|
-| `list_volumes` | Which volume is short on space |
-| `scan_path` | What is large inside it |
-| `find_reclaimable` | Which of that can be **rebuilt**, with idle days |
+HyperDU is available through crates.io, prebuilt GitHub Release assets, and Scoop. winget submission is in progress.
 
-**There is no delete tool, deliberately.** Exposing one would create a path for
-an agent to destroy data without a human in the loop. A wrong report can be
-corrected; a wrong `rm -rf` cannot.
+See the [README](https://github.com/{{ site.repository }}#installation) for installation options.
 
-`find_reclaimable` does not classify `target/` by name alone. Without a
-`Cargo.toml` beside it, that directory is someone's data, and reporting it as
-reclaimable would be the failure that makes the tool unusable.
+## Current status
 
-## Where this stands
+- Beta
+- Windows and Linux are tested targets
+- macOS CLI is not hardware-verified; GUI is not currently a release target
+- Public performance benchmarks are being remeasured
 
-- **Beta.** The API and the tool surface may still change
-- **No GitHub Releases yet.** Today the paths in are `cargo install` or a source
-  build
-- **macOS is unverified on hardware** — it builds, but has not been run
-- The Linux figures come from WSL2 and may differ from bare metal
+## Documentation
 
-## Usage
+- [Performance design](https://github.com/{{ site.repository }}/blob/main/docs/performance.md)
+- [Benchmark plan](https://github.com/{{ site.repository }}/blob/main/docs/benchmarks.md)
+- [Architecture](https://github.com/{{ site.repository }}/blob/main/docs/architecture.md)
+- [Documentation index](https://github.com/{{ site.repository }}/blob/main/docs/README.md)
 
-```bash
-# largest directories
-hyperdu /path --top 20
-
-# structured output
-hyperdu /path --json out.json
-
-# drop-in for du
-hyperdu --compat gnu -sh /var/log
-alias du='hyperdu --compat gnu'
-```
-
-See the [README](https://github.com/{{ site.repository }}#readme) for the full
-option list.
+Historical benchmarks and issue-specific design records are kept under `docs/old/`.
