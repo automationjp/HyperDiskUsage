@@ -70,73 +70,17 @@ jobs:
             dist/*
             snap/snapcraft.yaml
             packaging/flatpak/org.hyperdu.GUI.yaml
+      # --verbose writes dist/build_*.log. They are useful for debugging a failed
+      # release, so they stay in the actions artifact uploaded above, but the
+      # v0.0.1 draft proved they otherwise ship as public release assets.
+      - name: Drop build logs from release assets
+        run: rm -f dist/*.log
       - name: Create GitHub Release (upload assets)
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: |
-            dist/*
-
-  macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - name: Install packagers
-        run: |
-          brew update
-          brew install create-dmg || true
-          cargo install cargo-bundle || true
-      - name: Lint (fmt + clippy)
-        run: bash scripts/lint/run.sh
-      - name: Build DMG / zip (GUI)
-        run: |
-          bash scripts/package/macos_dmg.sh --release
-      - name: Generate Homebrew formula
-        run: bash scripts/package/brew.sh
-      - name: Insert URL/SHA into formula
-        run: |
-          URL_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
-          bash scripts/package/release.sh --targets homebrew --url-base "$URL_BASE" --skip-gui --cpu-flavors generic
-        shell: bash
-      - name: Install GitHub CLI
-        run: brew install gh
-        continue-on-error: true
-      - name: Open PR to Homebrew Tap
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAP_REPO: ${{ secrets.HOMEBREW_TAP_REPO }}
-        run: |
-          if [[ -z "${TAP_REPO}" || -z "${GH_TOKEN}" ]]; then
-            echo "::warning::Homebrew Tap secrets not set; skipping PR creation."
-            exit 0
-          fi
-          git config --global user.email "actions@github.com"
-          git config --global user.name "GitHub Actions"
-          gh repo clone "$TAP_REPO" taprepo
-          cd taprepo
-          BR="update-hyperdu-${GITHUB_REF_NAME}"
-          git checkout -b "$BR"
-          mkdir -p Formula
-          cp ../dist/brew/hyperdu.rb Formula/hyperdu.rb
-          git add Formula/hyperdu.rb
-          git commit -m "hyperdu ${GITHUB_REF_NAME}"
-          git push -u origin "$BR"
-          gh pr create -R "$TAP_REPO" -t "hyperdu ${GITHUB_REF_NAME}" -b "Automated formula update" -B main
-        shell: bash
-        continue-on-error: true
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-artifacts
-          path: |
-            dist/*
-      - name: Create GitHub Release (upload assets)
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             dist/*
 
@@ -239,7 +183,11 @@ jobs:
           $base = Join-Path 'manifests' ($org.Substring(0,1).ToUpper())
           $dir = Join-Path $base "$org\HyperDU\$ver"
           New-Item -ItemType Directory -Path $dir -Force | Out-Null
-          Copy-Item ..\dist\winget\manifest.yaml (Join-Path $dir "$org.HyperDU.yaml") -Force
+          # winget.ps1 emits the three-file ManifestVersion 1.12.0 set
+          # (version / installer / locale), all named $org.HyperDU*.yaml.
+          # The single manifest.yaml this used to copy has not existed since
+          # that rewrite, so copy whatever the generator actually produced.
+          Copy-Item ..\dist\winget\*.yaml $dir -Force
           git add .
           git commit -m "Add HyperDU $ver"
           git push -u origin $BR
@@ -254,5 +202,23 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             dist/*
+
+  # Both build jobs each upload to the same tag as a DRAFT. Without this,
+  # whichever job finished first published the release, so a user could see a
+  # "release" carrying only Linux assets while Windows was still compiling --
+  # and a failing job would leave that partial release public. Publishing once,
+  # here, makes the release atomic: it appears only after both platforms
+  # succeeded. GitHub keeps the pre-release flag set by the upload steps.
+  publish:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Publish the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false -R "$GITHUB_REPOSITORY"

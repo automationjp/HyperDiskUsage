@@ -227,7 +227,7 @@ RUSTFLAGS="-C target-cpu=native" cargo build --release -p hyperdu-cli
 |---|---|---|
 | Windows | **Tested** | NTFS、CI、native directory enumeration、optional MFT path |
 | Linux | **Tested** | Amazon Linux 2023 / XFS、WSL2 / ext4、CI |
-| macOS | Build supported / **not hardware-tested** | `getattrlistbulk` implementationあり、実機検証は未完了 |
+| macOS | CLI: **未検証** / GUI: **ビルド不可** | `getattrlistbulk` implementationあり。GUI は `eframe` が推移的に引く `webbrowser` が macOS でコンパイルできないため、現状ビルドできません。release workflow も macOS を対象外にしています |
 
 Minimum Rust versions:
 

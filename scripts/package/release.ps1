@@ -53,7 +53,13 @@ function Build-And-Capture([string]$Package, [string]$Rustflags) {
   $psi.FileName = "cargo"
   $psi.Arguments = "build -p $Package --release --message-format=json"
   $psi.RedirectStandardOutput = $true
-  $psi.RedirectStandardError  = $true
+  # stderr is deliberately NOT redirected. This loop only drains stdout, and it
+  # reads to EOF before WaitForExit; cargo writes its "Compiling ..." progress to
+  # stderr, so on a cold CI build that pipe fills its buffer, cargo blocks on the
+  # write, stdout stops, and both sides wait forever -- the windows job would sit
+  # there until the 6-hour Actions ceiling. Letting stderr inherit the console
+  # also puts cargo's progress straight into the Actions log.
+  $psi.RedirectStandardError  = $false
   $psi.UseShellExecute = $false
   if ($Rustflags) { $psi.EnvironmentVariables["RUSTFLAGS"] = $Rustflags }
   $p = [System.Diagnostics.Process]::Start($psi)
@@ -83,8 +89,9 @@ function Build-And-Capture([string]$Package, [string]$Rustflags) {
   }
   $p.WaitForExit()
   if ($p.ExitCode -ne 0) {
-    $err = $p.StandardError.ReadToEnd()
-    throw "cargo build failed: $err"
+    # No captured stderr to quote any more: it went to the console, where the
+    # Actions log already shows cargo's own diagnostics above this line.
+    throw "cargo build failed for $Package (exit $($p.ExitCode))"
   }
   $last = ($paths | Sort-Object | Select-Object -Last 1)
   if (-not $last) { throw "Failed to capture binary for $Package" }
@@ -92,7 +99,16 @@ function Build-And-Capture([string]$Package, [string]$Rustflags) {
 }
 
 $osTag = 'windows'
-$arch = $env:PROCESSOR_ARCHITECTURE
+# PROCESSOR_ARCHITECTURE says "AMD64"; every other part of the project says
+# "x86_64". Left raw, this produced hyperdu-cli-windows-AMD64-generic.zip while
+# scripts/package/scoop.ps1 built an autoupdate URL pointing at
+# hyperdu-cli-windows-x86_64-generic.zip, and the Linux artifacts from
+# release.sh used x86_64 too. Normalize once, here, before any name is built.
+$arch = switch ($env:PROCESSOR_ARCHITECTURE) {
+  'AMD64' { 'x86_64' }
+  'ARM64' { 'aarch64' }
+  default { "$($env:PROCESSOR_ARCHITECTURE)".ToLower() }
+}
 $Dist = Join-Path $Root 'dist'
 if (Test-Path $Dist) { Remove-Item $Dist -Recurse -Force }
 New-Item -ItemType Directory -Path $Dist | Out-Null
