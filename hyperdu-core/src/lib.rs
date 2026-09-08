@@ -608,8 +608,7 @@ fn prepare_scan(
         compiled.dir_yield_every.store(0, Ordering::Relaxed);
     }
     // Report the worker count that actually runs, not the one that was asked
-    // for: the profile may have capped it, and the runtime throttle must not
-    // be allowed to re-raise it past that cap.
+    // for: the profile may have capped it.
     compiled.threads = threads;
     let workers = Scheduler::make_workers(threads);
     let sched = Arc::new(Scheduler::new(&workers));

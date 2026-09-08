@@ -823,7 +823,6 @@ fn main() -> Result<()> {
         opt.visited_dirs = Some(std::sync::Arc::new(dashmap::DashMap::with_capacity(1024)));
     }
 
-    // Live tuning enabled even without progress printing
     fn short_path(p: &std::path::Path) -> String {
         let name = p.file_name().and_then(|s| s.to_str());
         if let Some(n) = name {

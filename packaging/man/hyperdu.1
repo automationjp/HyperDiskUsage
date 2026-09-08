@@ -1,4 +1,4 @@
-.TH hyperdu 1 "HyperDU" "0.4.0" "User Commands"
+.TH hyperdu 1 "HyperDU" "0.5.0-beta.2" "User Commands"
 .SH NAME
 hyperdu \- ultra-fast disk usage analyzer
 .SH SYNOPSIS
@@ -47,9 +47,9 @@ Use logical size for du-like output.
 Performance profile: turbo, balanced (default), strict.
 .TP
 .B turbo
-Fastest profile. Uses logical sizes only (no physical size calc), enables approximate sizes,
-and does not deduplicate hardlinks. On Linux, applies
-stronger initial batch/depth (auto-tuned at runtime).
+Fastest profile. Uses logical sizes only (no physical size calc) and does not
+deduplicate hardlinks. On Linux, applies stronger initial batch/depth; the
+filesystem auto strategy may further adjust buffer sizes (see --no-fs-auto).
 .TP
 .B balanced
 Default balanced behavior.
@@ -62,7 +62,6 @@ Print progress lines during scan to standard output.
 .TP
 .BR --progress-every=NUM
 Emit progress every NUM files (default 8192). A final line is printed on completion.
-.TP
 .TP
 .BR --getdents-buf-kb=KiB
 Linux: set getdents64 buffer size in KiB.
@@ -79,12 +78,6 @@ Linux: pin worker threads to CPUs.
 .BR --win-ntquery
 Windows: force the NtQueryDirectoryFile enumeration path (default on MSVC builds).
 Set HYPERDU_WIN_USE_NTQUERY=0 to fall back to FindFirstFileExW.
-.TP
-.BR --tune
-Enable live tuning.
-.TP
-.BR --tune-interval-ms=MS
-Set live tune interval in milliseconds.
 .TP
 .BR --no-fs-auto
 Disable filesystem auto strategy.
