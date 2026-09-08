@@ -43,7 +43,15 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
             // in which case there is no boundary to enforce.
             let leaves_root_fs =
                 opt.one_file_system && opt.root_fs_id != 0 && dev != opt.root_fs_id;
-            if leaves_root_fs || check_visited_directory(opt, dev, st_cur.st_ino) {
+            // `check_visited_directory` claims the directory as it tests it, so
+            // it must not run for a resume job. A resume is this scan returning
+            // to a directory it already claimed after `dir_yield_every` split
+            // it; asking again finds that first claim, reports "seen", and
+            // everything past the first chunk is dropped without a word. With
+            // `--follow-links --dir-yield-every 5000` a 20k-file directory
+            // reported 5000 files.
+            let already_seen = resume.is_none() && check_visited_directory(opt, dev, st_cur.st_ino);
+            if leaves_root_fs || already_seen {
                 unsafe { libc::close(fd) };
                 return;
             }
