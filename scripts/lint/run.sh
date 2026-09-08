@@ -116,4 +116,10 @@ fi
 echo "==> script path references"
 bash scripts/lint/paths.sh
 
+# Also unconditional, and for the same reason: the snap manifest and the man
+# page both shipped a stale version because nothing compared them to the
+# workspace.
+echo "==> version strings"
+bash scripts/lint/versions.sh
+
 echo "OK"

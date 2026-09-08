@@ -16,10 +16,17 @@ root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/../.. && pwd)"
 snap_dir="$root_dir/snap"
 mkdir -p "$snap_dir"
 
+# The crate inherits its version from [workspace.package], so the literal is
+# not in hyperdu-cli/Cargo.toml. pkgid prints `<url>#<version>`. This was the
+# one packaging script still hardcoding it, and it drifted to 0.4.0 while the
+# workspace moved on; every sibling already derives it this way.
+VER=$(cd "$root_dir" && cargo pkgid -p hyperdu-cli | sed 's/.*[#@]//')
+if [[ -z "$VER" ]]; then echo "error: could not determine hyperdu-cli version" >&2; exit 1; fi
+
 cat > "$snap_dir/snapcraft.yaml" <<'YAML'
 name: hyperdu
 base: core22
-version: '0.4.0'
+version: '__VERSION__'
 summary: Hyper-fast disk usage analyzer
 description: |
   HyperDU is a cross-platform, high-performance disk usage analyzer.
@@ -42,7 +49,10 @@ parts:
       - bin/hyperdu
 YAML
 
-echo "Wrote $snap_dir/snapcraft.yaml"
+sed -i.bak -e "s/__VERSION__/$VER/" "$snap_dir/snapcraft.yaml"
+rm -f "$snap_dir/snapcraft.yaml.bak"
+
+echo "Wrote $snap_dir/snapcraft.yaml (version $VER)"
 
 if [[ $gen_only -eq 0 ]]; then
   if command -v snapcraft >/dev/null 2>&1; then

@@ -18,7 +18,8 @@
     winget puts a shim on PATH and can uninstall it again.
 
 .PARAMETER Version
-    Package version. Defaults to the version in hyperdu-cli/Cargo.toml.
+    Package version. Defaults to `cargo pkgid -p hyperdu-cli`; the crate
+    inherits version.workspace, so the literal is not in its Cargo.toml.
 
 .PARAMETER InstallerUrl
     Download URL for the x64 executable. Omitted in a local dry run.
