@@ -72,8 +72,8 @@ maintainer-scripts = "../packaging/deb"
 # Same source path as [package.metadata.generate-rpm] below, for the same reason.
 assets = [
   ["../target/release/hyperdu", "/usr/bin/hyperdu", "755"],
-  ["../README.md", "/usr/share/doc/hyperdu/README.md", "644"],
-  ["../LICENSE", "/usr/share/doc/hyperdu/LICENSE", "644"],
+  ["../README.md", "/usr/share/doc/hyperdu-cli/README.md", "644"],
+  ["../LICENSE", "/usr/share/doc/hyperdu-cli/LICENSE", "644"],
   ["../packaging/man/hyperdu.1", "/usr/share/man/man1/hyperdu.1", "644"],
   ["../packaging/completions/hyperdu.bash", "/usr/share/bash-completion/completions/hyperdu", "644"],
   ["../packaging/completions/hyperdu.zsh", "/usr/share/zsh/site-functions/_hyperdu", "644"],
@@ -100,8 +100,8 @@ group = "Applications/System"
 auto-req = "auto"
 assets = [
   { source = "../target/release/hyperdu", dest = "/usr/bin/hyperdu", mode = "755" },
-  { source = "../README.md", dest = "/usr/share/doc/hyperdu/README.md", mode = "644" },
-  { source = "../LICENSE", dest = "/usr/share/doc/hyperdu/LICENSE", mode = "644" },
+  { source = "../README.md", dest = "/usr/share/doc/hyperdu-cli/README.md", mode = "644" },
+  { source = "../LICENSE", dest = "/usr/share/doc/hyperdu-cli/LICENSE", mode = "644" },
   { source = "../packaging/man/hyperdu.1", dest = "/usr/share/man/man1/hyperdu.1", mode = "644" },
   { source = "../packaging/completions/hyperdu.bash", dest = "/usr/share/bash-completion/completions/hyperdu", mode = "644" },
   { source = "../packaging/completions/hyperdu.zsh", dest = "/usr/share/zsh/site-functions/_hyperdu", mode = "644" },

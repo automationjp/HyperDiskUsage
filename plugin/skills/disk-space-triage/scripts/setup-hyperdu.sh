@@ -23,9 +23,28 @@ set -eu
 REPO_URL="https://github.com/automationjp/HyperDiskUsage"
 # The crate is `hyperdu-cli`; the command it installs is `hyperdu`, declared
 # by a [[bin]] section. That matches what the deb and rpm packages install.
+#
+# The two names have to be tracked separately. We look for `hyperdu` on PATH, but
+# cargo only understands `hyperdu-cli` -- passing it the command name made every
+# install fail: `--path <root>/hyperdu` points at a directory that does not exist,
+# and `--git <url> hyperdu` reports `could not find hyperdu`. Nothing in this
+# workspace is called `hyperdu`, so the script could never install the CLI at all.
 CLI_BIN="hyperdu"
+CLI_CRATE="hyperdu-cli"
 MCP_BIN="hyperdu-mcp"
+MCP_CRATE="hyperdu-mcp"
 MCP_NAME="hyperdu"
+
+crate_for() {
+    case "$1" in
+        "$CLI_BIN") printf '%s' "$CLI_CRATE" ;;
+        "$MCP_BIN") printf '%s' "$MCP_CRATE" ;;
+        *)
+            echo "internal error: no crate known for binary '$1'" >&2
+            return 1
+            ;;
+    esac
+}
 
 MODE="install"
 
@@ -116,13 +135,14 @@ EOF
     fi
 
     for bin in $missing; do
+        crate=$(crate_for "$bin")
         echo
         if [ "$from_checkout" -eq 1 ]; then
-            echo "==> cargo install --path $root/$bin"
-            cargo install --path "$root/$bin"
+            echo "==> cargo install --path $root/$crate"
+            cargo install --path "$root/$crate"
         else
-            echo "==> cargo install --git $REPO_URL $bin"
-            cargo install --git "$REPO_URL" "$bin"
+            echo "==> cargo install --git $REPO_URL $crate"
+            cargo install --git "$REPO_URL" "$crate"
         fi
     done
 

@@ -42,9 +42,22 @@ $ErrorActionPreference = 'Stop'
 $RepoUrl = 'https://github.com/automationjp/HyperDiskUsage'
 # The crate is `hyperdu-cli`; the command it installs is `hyperdu`, declared
 # by a [[bin]] section. That matches what the deb and rpm packages install.
+#
+# The two names have to be tracked separately. We look for `hyperdu` on PATH, but
+# cargo only understands `hyperdu-cli` -- passing it the command name made every
+# install fail: `--path <root>\hyperdu` points at a directory that does not exist,
+# and `--git <url> hyperdu` reports `could not find hyperdu`. Nothing in this
+# workspace is called `hyperdu`, so the script could never install the CLI at all.
 $CliBin = 'hyperdu'
+$CliCrate = 'hyperdu-cli'
 $McpBin = 'hyperdu-mcp'
+$McpCrate = 'hyperdu-mcp'
 $McpName = 'hyperdu'
+
+$CrateFor = @{
+    $CliBin = $CliCrate
+    $McpBin = $McpCrate
+}
 
 function Test-Installed {
     param([string]$Name)
@@ -120,15 +133,20 @@ with -Check. CLI archives are listed here:
     }
 
     foreach ($bin in $missing) {
+        $crate = $CrateFor[$bin]
+        if (-not $crate) {
+            Write-Error "internal error: no crate known for binary '$bin'"
+            exit 1
+        }
         Write-Host ''
         if ($root) {
-            $crateDir = Join-Path $root $bin
+            $crateDir = Join-Path $root $crate
             Write-Host "==> cargo install --path $crateDir"
             & cargo install --path $crateDir
         }
         else {
-            Write-Host "==> cargo install --git $RepoUrl $bin"
-            & cargo install --git $RepoUrl $bin
+            Write-Host "==> cargo install --git $RepoUrl $crate"
+            & cargo install --git $RepoUrl $crate
         }
         if ($LASTEXITCODE -ne 0) {
             Write-Error "cargo install failed for $bin"
