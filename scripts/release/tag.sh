@@ -97,6 +97,22 @@ if [[ $ALLOW_DIRTY -eq 0 ]]; then
   fi
 fi
 
+# The shape check above only proves the tag is a version; it says nothing about
+# whether it is *this* version. A tag that disagrees with the tree produces a
+# release whose man page, snap and winget manifest are all labelled something
+# else, because every one of them takes its version from cargo, not the tag.
+# cargo answers from Cargo.lock, so a bump that forgot to update the lock is
+# caught here too.
+if command -v cargo >/dev/null 2>&1; then
+  VER=$(cargo pkgid -p hyperdu-cli | sed 's/.*[#@]//')
+  if [[ -n "$VER" && "$TAG" != "v$VER" ]]; then
+    echo "error: $TAG does not name the workspace version (v$VER)." >&2
+    echo "       Bump [workspace.package] version in Cargo.toml, run 'cargo update -w'," >&2
+    echo "       then 'bash scripts/lint/versions.sh --fix' before tagging." >&2
+    exit 1
+  fi
+fi
+
 BRANCH="${PUSH_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 
 if [[ $VERBOSE -eq 1 ]]; then
