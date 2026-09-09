@@ -80,9 +80,11 @@ jobs:
         with:
           components: clippy
       - uses: mozilla-actions/sccache-action@v0.0.11
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-targets: "false"
+      # No rust-cache here, unlike test-linux. Restoring it cost 25s on this
+      # runner against 3s on Linux -- Windows unpacks the same registry far more
+      # slowly -- while sccache was already serving 72% of the compilations that
+      # cache exists to avoid. It is why this job, not test-linux, ended up on
+      # the critical path.
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test core and CLI on a fixed NTFS volume
