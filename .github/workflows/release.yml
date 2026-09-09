@@ -8,6 +8,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  # Inherited from windows-msi.yml, which is gone: it ran this same
+  # scripts/package/release.ps1 on every tag and uploaded a second copy of the
+  # artifacts the `windows` job below already produces. A manual run here builds
+  # without publishing -- every upload step is guarded by
+  # `startsWith(github.ref, 'refs/tags/')`, and so is `publish`.
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -21,11 +27,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      # cargo-deb was compiled from source on every tag, inside a step that took
+      # 2m48s. install-action fetches a prebuilt binary instead. cargo-wix and
+      # cargo-generate-rpm cannot follow: neither publishes release binaries
+      # (checked at 0.3.9 and v0.21.0) and install-action carries no manifest
+      # for either, so they stay source builds -- here and in the windows job.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
       - name: Install build dependencies
         run: |
           sudo apt-get update -y
           sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu mingw-w64 zip jq rpm
-          cargo install cargo-deb || true
           cargo install cargo-generate-rpm || true
       - name: Lint (fmt + clippy)
         run: bash scripts/lint/run.sh
