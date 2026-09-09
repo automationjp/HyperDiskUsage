@@ -1,9 +1,14 @@
 #!/bin/sh
 # Install the HyperDU binaries this skill needs, and register the MCP server.
 #
-# HyperDU has no published release and is not on crates.io, so `cargo install`
-# from source is the only way in. That is worth stating plainly rather than
-# leaving someone to discover it after a failed `apt install`.
+# This builds from source with `cargo`, so a Rust toolchain is required. That is
+# worth stating plainly rather than leaving someone to discover it after a failed
+# `apt install`.
+#
+# Prebuilt archives and published crates both exist -- the repository README
+# lists them -- but this script installs two binaries on whichever platform it
+# lands on, and choosing the right archive for each, then verifying it, is more
+# than a setup script should decide on its owner's behalf.
 #
 # Registering an MCP server rewrites an agent's configuration, so this prints
 # the command by default and only runs it when asked with --register. Installing
@@ -30,7 +35,10 @@ for arg in "$@"; do
         --check) MODE="check" ;;
         --register) MODE="register" ;;
         -h | --help)
-            sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+            # The whole header block, however long it happens to be. The fixed
+            # line range this replaces dropped the three usage lines silently
+            # the moment the comment above it grew by a paragraph.
+            awk 'NR > 1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0"
             exit 0
             ;;
         *)
@@ -84,13 +92,17 @@ have "$MCP_BIN" || missing="$missing $MCP_BIN"
 
 if [ -n "$missing" ]; then
     if ! have cargo; then
-        cat >&2 <<'EOF'
-error: cargo not found, and HyperDU has no prebuilt release to fall back on.
+        cat >&2 <<EOF
+error: cargo not found, and this script installs by building from source.
 
 Install a Rust toolchain first:
   https://rustup.rs
 
 Then run this script again.
+
+Or install the two binaries yourself and re-run with --check: prebuilt archives
+are attached to each release, and the crates are published.
+  $REPO_URL/releases
 EOF
         exit 1
     fi

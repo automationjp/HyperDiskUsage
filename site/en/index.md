@@ -75,18 +75,27 @@ Prereleases are not selected by default, so `--version` is required. **The crate
 is `hyperdu-cli`; the command it installs is `hyperdu`** — the same shape as
 ripgrep installing `rg`.
 
-### Windows (not yet available)
+### Windows
 
-> **Not available yet.** There is no published release. Even after one exists,
-> winget needs a pull request to
-> [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) and Scoop
-> needs a bucket entry; neither has been submitted. Use the crates.io route
-> above until then.
+This repository doubles as a Scoop bucket.
 
 ```powershell
-winget install automationjp.HyperDU
+scoop bucket add hyperdu https://github.com/{{ site.repository }}
 scoop install hyperdu
 ```
+
+winget is not available yet. The submission to
+[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) is open but
+still waiting on a CLA signature.
+
+### Prebuilt binaries
+
+Zips for Windows and Linux (glibc, musl, aarch64) and a `.deb` for Debian and
+Ubuntu are attached to each
+[release](https://github.com/{{ site.repository }}/releases). Unpack and run.
+
+These are pre-releases, so `releases/latest` does not resolve — GitHub does not
+treat a pre-release as latest. Pick the version from the list above.
 
 ### From source
 

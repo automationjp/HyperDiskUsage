@@ -2,7 +2,7 @@
 name: disk-space-triage
 description: Find out why a disk is full and what can safely be freed, using the HyperDU scanner. Use when a drive is out of space, a build fails with "no space left on device", or the user asks what is using their disk, which directories are largest, or what is safe to delete. Covers per-volume free space, largest-directory scans, and separating regenerable build output (Cargo target, node_modules, virtualenvs) from data that cannot be rebuilt.
 license: MIT
-compatibility: Requires the hyperdu binary. Run scripts/setup-hyperdu.sh (or setup-hyperdu.ps1 on Windows) to install it; that needs a Rust toolchain, because HyperDU has no prebuilt release. Works on Windows, Linux, and macOS.
+compatibility: Requires the hyperdu binary. Run scripts/setup-hyperdu.sh (or setup-hyperdu.ps1 on Windows) to install it; that builds from source, so a Rust toolchain is needed. Prebuilt archives and crates.io packages exist too, listed in the repository README. Works on Windows, Linux, and macOS.
 metadata:
   project: HyperDiskUsage
   repository: https://github.com/automationjp/HyperDiskUsage
@@ -40,9 +40,12 @@ command to register the MCP server with Claude Code or Codex. It only performs
 that registration when passed `--register`, because rewriting an agent's
 configuration should be something the user asked for.
 
-HyperDU has no prebuilt release and is not on crates.io, so the script builds
-from source and needs a Rust toolchain. If `cargo` is missing it will say so and
-point at <https://rustup.rs> rather than failing halfway through.
+The script builds from source and needs a Rust toolchain. If `cargo` is missing
+it will say so and point at <https://rustup.rs> rather than failing halfway
+through. Prebuilt archives and published crates do exist — the repository README
+lists both — but the script needs two binaries on whatever platform it finds
+itself on, and picking the right archive for each is not something it should
+guess at.
 
 To check without installing anything, use `--check`.
 

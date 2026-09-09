@@ -3,9 +3,14 @@
     Install the HyperDU binaries this skill needs, and register the MCP server.
 
 .DESCRIPTION
-    HyperDU has no published release and is not on crates.io, so `cargo install`
-    from source is the only way in. That is worth stating plainly rather than
-    leaving someone to discover it after a failed `winget install`.
+    This builds from source with `cargo`, so a Rust toolchain is required. That
+    is worth stating plainly rather than leaving someone to discover it after a
+    failed `winget install`.
+
+    Prebuilt archives and published crates both exist -- the repository README
+    lists them -- but this script installs two binaries on whichever platform it
+    lands on, and choosing the right archive for each, then verifying it, is
+    more than a setup script should decide on its owner's behalf.
 
     Registering an MCP server rewrites an agent's configuration, so this prints
     the command by default and only runs it when asked with -Register.
@@ -91,14 +96,18 @@ $missing = @($CliBin, $McpBin) | Where-Object { -not (Test-Installed $_) }
 
 if ($missing.Count -gt 0) {
     if (-not (Test-Installed 'cargo')) {
-        Write-Error @'
-cargo not found, and HyperDU has no prebuilt release to fall back on.
+        Write-Error @"
+cargo not found, and this script installs by building from source.
 
 Install a Rust toolchain first:
   https://rustup.rs
 
 Then run this script again.
-'@
+
+Or install the two binaries yourself and re-run with -Check: prebuilt archives
+are attached to each release, and the crates are published.
+  $RepoUrl/releases
+"@
         exit 1
     }
 
