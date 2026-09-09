@@ -11,11 +11,7 @@ readme = "README.md"
 keywords = ["disk-usage", "du", "filesystem", "cli", "performance"]
 categories = ["command-line-utilities", "filesystem"]
 
-# The command is `hyperdu`, not `hyperdu-cli`. Without this, cargo names the
-# binary after the package, and `cargo install hyperdu-cli` left users with a
-# command nobody expects -- the deb and rpm packages already renamed it on the
-# way in, so the two install paths disagreed. A crate name that differs from its
-# command is ordinary; ripgrep installs `rg`.
+# The package and installed command share the public name `hyperdu`.
 [[bin]]
 name = "hyperdu"
 path = "src/main.rs"

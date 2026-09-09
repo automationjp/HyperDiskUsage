@@ -142,7 +142,7 @@ impl From<IoProfileArg> for hyperdu_core::IoProfile {
       Start the MCP server over stdio\n\
         hyperdu mcp\n\
       Scan a directory literally named mcp\n\
-        hyperdu ./mcp\n\
+        hyperdu -- mcp (or hyperdu ./mcp)\n\
     "
 )]
 struct Args {

@@ -139,3 +139,22 @@ fn mcp_stdio_handshake_lists_tools_and_scans_a_path() -> TestResult {
 
     stop_server(child, stdin, reader)
 }
+
+#[test]
+fn a_directory_named_mcp_can_be_scanned_with_option_terminator() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    std::fs::create_dir(dir.path().join("mcp"))?;
+    std::fs::write(dir.path().join("mcp/data.bin"), [0_u8; 512])?;
+    for args in [["--", "mcp"].as_slice(), ["./mcp"].as_slice()] {
+        let output = Command::new(env!("CARGO_BIN_EXE_hyperdu"))
+            .current_dir(dir.path())
+            .args(args)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "literal mcp scan failed: {output:?}"
+        );
+        assert!(String::from_utf8(output.stdout)?.contains("files=1"));
+    }
+    Ok(())
+}
