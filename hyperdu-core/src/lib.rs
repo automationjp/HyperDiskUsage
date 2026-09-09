@@ -356,6 +356,97 @@ pub fn default_getdents_buf_bytes() -> usize {
         .unwrap_or(128 * 1024) // NVMe/SSD friendly default
 }
 
+/// The `n` largest entries by physical size, descending.
+///
+/// `n == 0` means all of them. Ties break on the path, ascending, which is what
+/// makes this reproducible: a `StatMap` is a `HashMap`, so equal-sized entries
+/// came out in whatever order the iteration happened to take. Thirty
+/// same-sized directories printed six different orderings across six runs of
+/// the same command, which no caller can diff or script against.
+///
+/// The front-ends had drifted to two implementations of this, and only one of
+/// them avoided sorting the whole map to find a handful of rows.
+pub fn top_by_physical(map: StatMap, n: usize) -> Vec<(PathBuf, Stat)> {
+    // Descending by size, then ascending by path.
+    fn order(a: &(PathBuf, Stat), b: &(PathBuf, Stat)) -> std::cmp::Ordering {
+        b.1.physical.cmp(&a.1.physical).then_with(|| a.0.cmp(&b.0))
+    }
+
+    let mut v: Vec<(PathBuf, Stat)> = map.into_iter().collect();
+    if n == 0 || v.len() <= n {
+        v.sort_unstable_by(order);
+        return v;
+    }
+    // Partition first so only the rows that will be printed get ordered; the
+    // rest never need to be compared against each other.
+    v.select_nth_unstable_by(n - 1, order);
+    v.truncate(n);
+    v.sort_unstable_by(order);
+    v
+}
+
+/// Whether `opt`'s exclude configuration covers `path`.
+///
+/// The backends only test the children of a directory they are processing, never
+/// the root they were handed. A front-end that enumerates a root itself has to
+/// ask this before treating one of its entries as a new scan root, or the
+/// exclusion silently does not apply at the top level: the GUI listed the root
+/// with `read_dir` and passed each child directory to `scan_directory`, so
+/// `--exclude node_modules` dropped a nested `node_modules` but scanned one
+/// sitting directly under the root.
+///
+/// This is the rule the backends use: match the entry's own name unless a filter
+/// genuinely needs the full path, so a root whose own path contains a pattern
+/// does not exclude everything beneath it.
+pub fn is_excluded(path: &std::path::Path, opt: &Options) -> bool {
+    filters::entry_excluded(path, opt)
+}
+
+/// The `Stat` a scan backend records for one file, looked up by path.
+///
+/// For a caller that enumerates a directory itself and needs the same numbers
+/// the scan would have produced. Deriving them from `std::fs::Metadata` does not
+/// work: the allocated size is not on `Metadata` on Windows, and `len()` is the
+/// logical size. Substituting the logical size reported a 10 KiB file at the
+/// root as 10 KiB, next to the same file one level down at its allocated 64 KiB.
+///
+/// Returns `None` when the path cannot be stat'd or is not a regular file.
+pub fn file_stat(path: &std::path::Path, opt: &Options) -> Option<Stat> {
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    let logical = meta.len();
+    let physical = if !opt.compute_physical {
+        logical
+    } else {
+        allocated_size(path, &meta).unwrap_or(logical)
+    };
+    Some(Stat {
+        logical,
+        physical,
+        files: 1,
+    })
+}
+
+#[cfg(unix)]
+fn allocated_size(_path: &std::path::Path, meta: &std::fs::Metadata) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    // Zero blocks is a real answer, not a missing one: a fully punched sparse
+    // file occupies nothing and GNU du reports it as zero.
+    Some(meta.blocks().saturating_mul(512))
+}
+
+#[cfg(windows)]
+fn allocated_size(path: &std::path::Path, _meta: &std::fs::Metadata) -> Option<u64> {
+    platform::allocated_size(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn allocated_size(_path: &std::path::Path, _meta: &std::fs::Metadata) -> Option<u64> {
+    None
+}
+
 pub fn default_threads() -> usize {
     let cpus = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -425,8 +516,15 @@ impl<'a> ScanContext<'a> {
     }
 }
 
+/// Turn the exclude patterns on `opt` into the matchers the scan uses.
+///
+/// [`scan_directory`] does this to its own copy, so a caller that only scans
+/// never needs it. A caller that also asks [`is_excluded`] does: the matchers
+/// and `needs_path_filter` are what that answer is read from, and on a
+/// hand-built `Options` they are still empty. [`OptionsBuilder::build`] already
+/// calls this, so options built that way are ready.
 #[inline]
-fn compile_filters_in_place(opt: &mut Options) {
+pub fn compile_filters_in_place(opt: &mut Options) {
     // Empty patterns must be dropped: an empty needle matches at every position,
     // which would exclude the whole tree.
     let pats: Vec<&str> = opt

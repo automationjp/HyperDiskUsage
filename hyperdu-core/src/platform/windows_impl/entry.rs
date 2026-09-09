@@ -7,9 +7,10 @@ use windows::{
     Win32::{
         Foundation::{CloseHandle, HANDLE},
         Storage::FileSystem::{
-            CreateFileW, GetCompressedFileSizeW, GetFileInformationByHandle,
-            BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE,
-            FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+            CreateFileW, FileStandardInfo, GetCompressedFileSizeW, GetFileInformationByHandle,
+            GetFileInformationByHandleEx, BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO,
+            OPEN_EXISTING,
         },
     },
 };
@@ -280,7 +281,31 @@ fn open_for_attributes(wide_nul: &[u16]) -> Option<HANDLE> {
 }
 
 /// Physical size via `GetCompressedFileSizeW` (Win32 fallback only).
-fn compressed_size_by_path(wide_nul: &[u16]) -> Option<u64> {
+/// Allocated size of one file, by path.
+///
+/// Not `GetCompressedFileSizeW`: that reports the *compressed* size, which for
+/// an ordinary uncompressed file is the logical size with no cluster rounding.
+/// Using it here made [`crate::file_stat`] report a 10240-byte file as 10240
+/// bytes of disk on a volume with 64 KiB clusters, where the enumeration
+/// backend reports 65536. `FILE_STANDARD_INFO.AllocationSize` is the same
+/// number the backend reads out of `FILE_ID_FULL_DIR_INFORMATION`.
+pub(super) fn allocation_size_by_path(wide_nul: &[u16]) -> Option<u64> {
+    let h = open_for_attributes(wide_nul)?;
+    let mut info = FILE_STANDARD_INFO::default();
+    let r = unsafe {
+        GetFileInformationByHandleEx(
+            h,
+            FileStandardInfo,
+            std::ptr::addr_of_mut!(info).cast(),
+            std::mem::size_of::<FILE_STANDARD_INFO>() as u32,
+        )
+    };
+    let _ = unsafe { CloseHandle(h) };
+    r.ok()?;
+    Some(info.AllocationSize.max(0) as u64)
+}
+
+pub(super) fn compressed_size_by_path(wide_nul: &[u16]) -> Option<u64> {
     let mut high: u32 = 0;
     let low = unsafe { GetCompressedFileSizeW(PCWSTR(wide_nul.as_ptr()), Some(&mut high)) };
     if low == u32::MAX && std::io::Error::last_os_error().raw_os_error() != Some(0) {

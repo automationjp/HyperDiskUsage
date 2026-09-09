@@ -222,7 +222,10 @@ impl HyperDuServer {
         })?;
 
         let total_directories = stats.len();
-        let mut entries: Vec<ScanEntry> = stats
+        // Ranked by core so this agrees with the CLI, including the order equal
+        // sizes come out in. Sorting the whole map here to keep `top_n` rows
+        // also did more work than the selection core does.
+        let entries: Vec<ScanEntry> = hyperdu_core::top_by_physical(stats, top_n)
             .into_iter()
             .map(|(path, stat)| ScanEntry {
                 path: path.display().to_string(),
@@ -231,9 +234,6 @@ impl HyperDuServer {
                 files: stat.files,
             })
             .collect();
-
-        entries.sort_by_key(|e| std::cmp::Reverse(e.physical_bytes));
-        entries.truncate(top_n);
 
         Ok(Json(ScanOutput {
             root: root.display().to_string(),
