@@ -1105,23 +1105,11 @@ fn main() -> Result<()> {
         let auto_json = args.verbose.then(|| PathBuf::from("hyperdu-report.json"));
         let auto_csv = args.verbose.then(|| PathBuf::from("hyperdu-report.csv"));
         if let Some(csv_path) = args.csv.as_ref().or(auto_csv.as_ref()) {
-            let mut wtr = csv::Writer::from_path(csv_path)?;
-            wtr.write_record(["path", "logical", "physical", "files"])?;
-            for (p, s) in &v {
-                wtr.write_record([
-                    p.to_string_lossy().as_ref(),
-                    &s.logical.to_string(),
-                    &s.physical.to_string(),
-                    &s.files.to_string(),
-                ])?;
-            }
-            wtr.flush()?;
+            hyperdu_core::report::write_csv(File::create(csv_path)?, &v)?;
             println!("wrote CSV: {}", csv_path.display());
         }
         if let Some(json_path) = args.json.as_ref().or(auto_json.as_ref()) {
-            let mut file = File::create(json_path)?;
-            let json = serde_json::to_string_pretty(&v.iter().map(|(p, s)| serde_json::json!({"path": p, "logical": s.logical, "physical": s.physical, "files": s.files})).collect::<Vec<_>>())?;
-            file.write_all(json.as_bytes())?;
+            hyperdu_core::report::write_json(File::create(json_path)?, &v)?;
             println!("wrote JSON: {}", json_path.display());
         }
         // Optional classification after scan
