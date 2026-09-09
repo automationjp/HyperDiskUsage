@@ -1,13 +1,15 @@
 //! Shared directory-report formats for CLI and GUI.
-use crate::Stat;
-use serde::{
-    ser::{SerializeSeq, Serializer},
-    Serialize,
-};
 use std::{
     io::Write,
     path::{Path, PathBuf},
 };
+
+use serde::{
+    ser::{SerializeSeq, Serializer},
+    Serialize,
+};
+
+use crate::Stat;
 
 #[derive(Serialize)]
 struct Row<'a> {

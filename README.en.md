@@ -17,6 +17,8 @@
 
 ## Quick start
 
+See the [CLI parameter reference (Japanese)](docs/cli-reference.md) for defaults, output modes, and platform restrictions. The `--time` options require the `time-format` feature, enabled by default.
+
 > **0.5.0-beta.3 is being prepared for publication.** On this branch, install it with `cargo install --locked --path hyperdu-cli`. The crates.io commands and newly named distribution artifacts below become available after the release is published.
 
 ```bash
@@ -50,22 +52,9 @@ HyperDU is focused on **fast disk usage analysis**.
 
 Rather than simply rewriting `du` in Rust, it optimizes the hot path for OS-specific directory enumeration, metadata retrieval, parallel traversal, and physical-size accounting.
 
-### Benchmark status: Windows / Linux remeasured
+### HyperDU compared with du
 
-2026-09-09 / `0a089c90c0e2`
-
-| Platform / Dataset | HyperDU | Baseline | Ratio |
-|---|---:|---:|---:|
-| Windows / wide | 30.7 ms | 57.4 ms | 1.87x |
-| Windows / deep | 77.1 ms | 72.0 ms | 0.93x |
-| Windows / flat | 34.1 ms | 42.8 ms | 1.26x |
-| Windows / registry | 332.2 ms | 1838.5 ms | 5.53x |
-| Linux / wide | 47.3 ms | 208.6 ms | 4.41x |
-| Linux / deep | 89.1 ms | 143.4 ms | 1.61x |
-| Linux / flat | 130.5 ms | 184.4 ms | 1.41x |
-| Linux / registry | 144.6 ms | 978.9 ms | 6.77x |
-
-Warm median of 8 runs. Windows: NTFS / robocopy. Linux: WSL2 / ext4 / uutils du 0.8.0. GNU du, cold-cache and XFS were not measured. [Details](docs/en/benchmarks.md)
+A fresh AWS EC2 benchmark is being prepared. Only results with directly matching GNU du directory totals will be published: allocated bytes, no symlink following, hardlink deduplication, one filesystem and all directory rows. The previous WSL2 timings required an accounting adjustment and have been withdrawn as evidence of comparative speed. [Details](docs/en/benchmarks.md)
 
 ### Why it is fast
 

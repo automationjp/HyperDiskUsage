@@ -13,14 +13,18 @@
 
 use std::path::PathBuf;
 
+mod progress;
+
 use anyhow::{Context, Result};
-use hyperdu_core::{scan_directory, volume, Options};
+use hyperdu_core::volume;
 use rmcp::{
     handler::server::wrapper::{Json, Parameters},
     model::{Implementation, ServerCapabilities, ServerInfo},
-    schemars, tool, tool_handler, tool_router,
+    schemars,
+    service::RequestContext,
+    tool, tool_handler, tool_router,
     transport::io::stdio,
-    ErrorData, ServerHandler, ServiceExt,
+    ErrorData, RoleServer, ServerHandler, ServiceExt,
 };
 use serde::{Deserialize, Serialize};
 
@@ -198,30 +202,21 @@ impl HyperDuServer {
     async fn scan_path(
         &self,
         Parameters(params): Parameters<ScanParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<ScanOutput>, ErrorData> {
+        self.scan_path_impl(params, Some(context)).await
+    }
+
+    async fn scan_path_impl(
+        &self,
+        params: ScanParams,
+        context: Option<RequestContext<RoleServer>>,
     ) -> Result<Json<ScanOutput>, ErrorData> {
         let root = PathBuf::from(&params.path);
         let top_n = params.top_n.max(1);
         let max_depth = params.max_depth;
 
-        let scan_root = root.clone();
-        let (stats, elapsed_ms) = run_blocking(move || {
-            let opt = Options {
-                max_depth,
-                ..Options::default()
-            };
-            let started = std::time::Instant::now();
-            let result = scan_directory(&scan_root, &opt);
-            let elapsed = started.elapsed();
-            (
-                result,
-                u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
-            )
-        })
-        .await?;
-
-        let stats = stats.map_err(|e| {
-            ErrorData::internal_error(format!("scan of {} failed: {e}", root.display()), None)
-        })?;
+        let (stats, elapsed_ms) = progress::scan(root.clone(), max_depth, context).await?;
 
         let total_directories = stats.len();
         // Ranked by core so this agrees with the CLI, including the order equal
@@ -439,11 +434,14 @@ mod tests {
         }
 
         let out = HyperDuServer::new()
-            .scan_path(Parameters(ScanParams {
-                path: dir.path().display().to_string(),
-                top_n: 2,
-                max_depth: 0,
-            }))
+            .scan_path_impl(
+                ScanParams {
+                    path: dir.path().display().to_string(),
+                    top_n: 2,
+                    max_depth: 0,
+                },
+                None,
+            )
             .await
             .expect("scan_path");
 
@@ -461,11 +459,14 @@ mod tests {
     #[tokio::test]
     async fn scan_path_reports_an_error_for_a_missing_directory() {
         let out = HyperDuServer::new()
-            .scan_path(Parameters(ScanParams {
-                path: "/hyperdu-nonexistent-scan-probe-71ac".to_owned(),
-                top_n: 5,
-                max_depth: 0,
-            }))
+            .scan_path_impl(
+                ScanParams {
+                    path: "/hyperdu-nonexistent-scan-probe-71ac".to_owned(),
+                    top_n: 5,
+                    max_depth: 0,
+                },
+                None,
+            )
             .await;
         assert!(
             out.is_err(),
@@ -479,11 +480,14 @@ mod tests {
         std::fs::write(dir.path().join("f.bin"), vec![0u8; 512]).expect("write");
 
         let out = HyperDuServer::new()
-            .scan_path(Parameters(ScanParams {
-                path: dir.path().display().to_string(),
-                top_n: 0,
-                max_depth: 0,
-            }))
+            .scan_path_impl(
+                ScanParams {
+                    path: dir.path().display().to_string(),
+                    top_n: 0,
+                    max_depth: 0,
+                },
+                None,
+            )
             .await
             .expect("scan_path");
         assert_eq!(out.0.entries.len(), 1);

@@ -24,10 +24,12 @@ MSVC/SDK 及 Linux 依赖见[环境配置](../docs/zh-CN/setup.md)。
 
 ## 使用
 
+默认值、支持的平台、进度和输出模式见 [CLI 参数参考（日语）](../docs/cli-reference.md)。`--time` 系列参数需要默认启用的 `time-format` feature。
+
 ```bash
 hyperdu /path --top 20
 hyperdu /path --json out.json
-hyperdu --compat gnu -sh /var/log
+hyperdu --compat gnu -k /var/log
 hyperdu mcp
 hyperdu -- mcp
 ```

@@ -42,11 +42,11 @@ Windows 的标准路径使用 `NtQueryDirectoryFile`，并从 `FileIdFullDirecto
 
 ### 可选的 NTFS `$MFT` 路径
 
-在 Windows 上指定 `--mft`，并满足管理员权限、NTFS、volume root 等条件时，可以使用直接读取 `$MFT` 的路径。
+在Windows MSVC上，`--mft`需要管理员权限和NTFS卷根。排除条件、深度／最小大小、追踪链接或单独计算硬链接等不支持的设置会转为普通枚举。参见[适用条件](../cli-reference.md)。
 
 该路径并非始终启用。如果无法安全解析所需的 DATA extent，或不满足条件，HyperDU 会 fallback 到普通 directory enumeration。
 
-优先保证的边界是：**不会为了加速而返回不完整的结果**。
+无法完成解析时拒绝结果；解析完成不保证与枚举完全一致，MFT仍为实验功能。
 
 ## Parallel traversal
 
@@ -74,7 +74,7 @@ HyperDU 允许其他 worker 窃取尚未处理的 work，即使处理集中在�
 
 ## 性能声明状态
 
-Windows / NTFS 和 Linux / WSL2 / ext4 的热缓存测量见[基准测试结果](benchmarks.md)。冷缓存及 XFS 尚未测量。
+正在准备AWS EC2上的最新版测量，要求每个目录总量与GNU du直接一致。旧WSL2比较需要统计补正，已撤回，不再作为速度依据。参见[测量条件与状态](benchmarks.md)。
 
 ## 发布速度声明前
 

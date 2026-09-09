@@ -42,11 +42,11 @@ Set the environment variable `HYPERDU_WIN_USE_NTQUERY=0` to switch to the `FindF
 
 ### Optional NTFS `$MFT` path
 
-On Windows, specifying `--mft` enables a path that reads `$MFT` directly when the administrator, NTFS, volume-root, and other required conditions are satisfied.
+On Windows MSVC, `--mft` requests direct reading at an NTFS volume root with administrator privileges. Unsupported filters, depth/minimum-size settings, link following or separate hardlink counting select enumeration instead. See the [eligibility conditions](../cli-reference.md).
 
 This path is not always enabled. If the required DATA extents cannot be resolved safely, or if the conditions are not met, HyperDU falls back to ordinary directory enumeration.
 
-The priority boundary is **never returning incomplete results for the sake of speed**.
+Incomplete parsing is rejected. Completed parsing does not guarantee exact equality with enumeration; MFT remains experimental.
 
 ## Parallel traversal
 
@@ -74,7 +74,7 @@ For this reason, the README does not use a single ratio as the performance basis
 
 ## Performance claim status
 
-See [benchmark results](benchmarks.md) for Windows / NTFS and Linux / WSL2 / ext4 warm measurements. Cold cache and XFS remain unmeasured.
+Fresh AWS EC2 measurements will require direct GNU du parity for every directory total. The older WSL2 comparison required accounting corrections and is withdrawn as speed evidence. See the [measurement protocol and status](benchmarks.md).
 
 ## Before publishing a speed claim
 

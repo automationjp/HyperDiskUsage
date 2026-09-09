@@ -6,6 +6,7 @@ Installation, scan-engine design, and verification guidance.
 
 | Goal | Document |
 |---|---|
+| CLI defaults, output modes, and platform restrictions | [CLI parameter reference (Japanese)](../cli-reference.md) |
 | Install, prepare Rust/OS dependencies, build and test | [Setup](setup.md) |
 | Understand optimizations and tradeoffs | [Performance design](performance.md) |
 | Inspect Windows/Linux results, every sample and conditions | [Benchmarks](benchmarks.md) |
@@ -23,11 +24,7 @@ for commands and verification boundaries.
 
 ## Read performance results
 
-The engine uses native enumeration APIs, fewer metadata queries, and work stealing.
-An optional NTFS `$MFT` path is available when its conditions are met. Results apply
-only to the measured environment, data, and cache state. Published Linux results use
-WSL2 / ext4 / uutils du, and Windows uses NTFS / robocopy. They do not measure GNU du,
-cold cache, or XFS. Read [all samples and limitations](benchmarks.md).
+See [performance design](performance.md) for native enumeration and parallel traversal. Fresh AWS EC2 measurements will compare directly equal directory totals with GNU du. Older WSL2 ratios are not current speed evidence. See the [comparison protocol and status](benchmarks.md).
 
 ## Current documentation and historical records
 

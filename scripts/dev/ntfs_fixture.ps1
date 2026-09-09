@@ -80,7 +80,7 @@ try {
     $env:HYPERDU_MFT_PARITY_FIXTURE = '1'
     $env:HYPERDU_MFT_DIAG = '1'
     Write-Host "Testing actual MFT and enumeration on read-only fixture $root"
-    & cargo test -p hyperdu-core -p hyperdu -- --nocapture
+    & cargo test -p hyperdu-core -p hyperdu -p hyperdu-gui -- --nocapture
     if ($LASTEXITCODE -ne 0) { throw "Core/CLI tests failed ($LASTEXITCODE)." }
 } finally {
     foreach ($key in $previous.Keys) {

@@ -30,10 +30,12 @@ Windows MSVC/SDK requirements, Linux native build tools, and development setup, 
 
 ## Use
 
+See the [CLI parameter reference (Japanese)](../docs/cli-reference.md) for defaults, platform restrictions, progress, and output modes. The `--time` options require the `time-format` feature, enabled by default.
+
 ```bash
 hyperdu /path --top 20            # largest directories
 hyperdu /path --json out.json     # structured output
-hyperdu --compat gnu -sh /var/log # du compatibility mode
+hyperdu --compat gnu -k /var/log # du compatibility mode
 hyperdu mcp                     # MCP server over stdio
 hyperdu -- mcp                  # scan a directory literally named mcp
 ```

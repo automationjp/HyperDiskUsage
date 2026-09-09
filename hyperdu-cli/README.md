@@ -24,10 +24,12 @@ cargo install hyperdu --version 0.5.0-beta.3
 
 ## 使い方
 
+引数の既定値・対応OS・進捗と出力先は [CLIパラメータリファレンス](../docs/cli-reference.md) を参照してください。`--time` 系引数は既定で有効な `time-format` featureが必要です。
+
 ```bash
 hyperdu /path --top 20
 hyperdu /path --json out.json
-hyperdu --compat gnu -sh /var/log
+hyperdu --compat gnu -k /var/log
 hyperdu mcp
 hyperdu -- mcp
 ```

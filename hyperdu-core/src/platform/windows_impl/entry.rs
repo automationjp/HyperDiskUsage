@@ -59,7 +59,13 @@ impl DirState {
         Self {
             paths: ChildPathBuilder::new(dir),
             files: 0,
-            volume: 0,
+            volume: if !crate::follows_links(opt) {
+                opt.windows_root_volume.as_ref().map_or(0, |volume| {
+                    volume.load(std::sync::atomic::Ordering::Acquire)
+                })
+            } else {
+                0
+            },
             dedupe: !opt.count_hardlinks && opt.inode_cache.is_some(),
             sample: opt
                 .progress_sample_callback
@@ -71,7 +77,7 @@ impl DirState {
     /// Whether the backend must resolve the directory's own identity
     /// (volume serial, plus file id when cycle detection is active).
     pub fn needs_identity(&self, opt: &Options) -> bool {
-        self.dedupe || opt.one_file_system || crate::follows_links(opt)
+        crate::follows_links(opt) || (self.dedupe && self.volume == 0)
     }
 
     /// Hand the directory's file tally to the shared progress counter. The
@@ -158,8 +164,8 @@ fn handle_dir(
     if opt.max_depth != 0 && depth >= opt.max_depth {
         return;
     }
-    // Only a followed link can leave the volume, and resolving it costs a handle
-    // open, so check just those. Cycles are caught when the target is opened for
+    // Resolve followed links for the existing one-filesystem policy. Cycles
+    // are caught when the target is opened for
     // enumeration and registers its own id (see `visited_before`).
     //
     // The comparison is against the scan root, not the parent: `-x` means "stay
@@ -174,7 +180,19 @@ fn handle_dir(
         }
     }
     let child = child.unwrap_or_else(|| st.paths.path(e.name));
+    disable_volume_reuse_for_reparse(opt, e.attrs);
     ctx.enqueue_dir(child, depth + 1);
+}
+
+// DFS and filesystem-defined reparse directories can cross volumes without
+// being name surrogates. Invalidate before publishing their jobs; descendants
+// must resolve their own volume, while already-open local directories stay valid.
+fn disable_volume_reuse_for_reparse(opt: &Options, attrs: u32) {
+    if attrs & FILE_ATTRIBUTE_REPARSE_POINT_BIT != 0 {
+        if let Some(volume) = &opt.windows_root_volume {
+            volume.store(0, std::sync::atomic::Ordering::Release);
+        }
+    }
 }
 
 /// Record `(vol, id)` as visited; returns true if it was already there.
@@ -322,4 +340,151 @@ pub(super) fn report_nt_status(opt: &Options, dir: &Path, call: &str, status: i3
         dir,
         &format!("{call} failed (NTSTATUS {:#010X})", status as u32),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{atomic::AtomicU64, Arc};
+
+    use dashmap::DashMap;
+
+    use super::*;
+
+    fn dedupe_options() -> Options {
+        Options {
+            inode_cache: Some(Arc::new(DashMap::new())),
+            ..Options::default()
+        }
+    }
+
+    #[test]
+    fn no_follow_reuses_known_root_volume_for_dedupe() {
+        let mut opt = dedupe_options();
+        opt.root_fs_id = 7;
+        opt.windows_root_volume = Some(Arc::new(AtomicU64::new(7)));
+
+        let state = DirState::new(Path::new("."), &opt);
+
+        assert!(state.dedupe);
+        assert_eq!(state.volume, 7);
+        assert!(!state.needs_identity(&opt));
+    }
+
+    #[test]
+    fn unknown_root_volume_keeps_dedupe_identity_lookup() {
+        let opt = dedupe_options();
+
+        let state = DirState::new(Path::new("."), &opt);
+
+        assert_eq!(state.volume, 0);
+        assert!(state.needs_identity(&opt));
+    }
+
+    #[test]
+    fn followed_links_keep_per_directory_identity() {
+        let mut opt = dedupe_options();
+        opt.root_fs_id = 7;
+        opt.windows_root_volume = Some(Arc::new(AtomicU64::new(7)));
+        opt.follow_links = true;
+        opt.visited_dirs = Some(Arc::new(DashMap::new()));
+
+        let state = DirState::new(Path::new("."), &opt);
+
+        assert_eq!(state.volume, 0);
+        assert!(state.needs_identity(&opt));
+    }
+
+    #[test]
+    fn count_hardlinks_bypasses_directory_identity_lookup() {
+        let mut opt = Options {
+            count_hardlinks: true,
+            ..Options::default()
+        };
+        opt.one_file_system = true;
+        opt.root_fs_id = 7;
+        opt.windows_root_volume = Some(Arc::new(AtomicU64::new(7)));
+
+        let state = DirState::new(Path::new("."), &opt);
+
+        assert!(!state.dedupe);
+        assert!(!state.needs_identity(&opt));
+    }
+
+    #[test]
+    fn known_root_id_without_local_eligibility_keeps_identity_lookup() {
+        let mut opt = dedupe_options();
+        opt.root_fs_id = 7;
+        let state = DirState::new(Path::new("."), &opt);
+        assert_eq!(state.volume, 0);
+        assert!(state.needs_identity(&opt));
+    }
+
+    #[test]
+    fn a_reparse_directory_disables_reuse_for_later_descendants() {
+        let mut opt = dedupe_options();
+        opt.windows_root_volume = Some(Arc::new(AtomicU64::new(7)));
+        let ancestor = DirState::new(Path::new("."), &opt);
+        disable_volume_reuse_for_reparse(&opt, FILE_ATTRIBUTE_DIRECTORY_BIT);
+        assert_eq!(DirState::new(Path::new("plain"), &opt).volume, 7);
+        disable_volume_reuse_for_reparse(
+            &opt,
+            FILE_ATTRIBUTE_DIRECTORY_BIT | FILE_ATTRIBUTE_REPARSE_POINT_BIT,
+        );
+        let descendant = DirState::new(Path::new("dfs/child"), &opt);
+        assert_eq!(ancestor.volume, 7);
+        assert_eq!(descendant.volume, 0);
+        assert!(descendant.needs_identity(&opt));
+        disable_volume_reuse_for_reparse(&opt, FILE_ATTRIBUTE_DIRECTORY_BIT);
+        assert_eq!(DirState::new(Path::new("later"), &opt).volume, 0);
+    }
+
+    #[test]
+    fn volume_is_part_of_hardlink_dedupe_identity() {
+        let opt = dedupe_options();
+
+        assert!(!check_hardlink_duplicate(&opt, 11, 42));
+        assert!(!check_hardlink_duplicate(&opt, 12, 42));
+        assert!(check_hardlink_duplicate(&opt, 11, 42));
+    }
+
+    #[test]
+    fn known_name_surrogate_reparse_tags_are_links() {
+        assert!(is_link(
+            FILE_ATTRIBUTE_REPARSE_POINT_BIT,
+            IO_REPARSE_TAG_SYMLINK
+        ));
+        assert!(is_link(
+            FILE_ATTRIBUTE_REPARSE_POINT_BIT,
+            IO_REPARSE_TAG_MOUNT_POINT
+        ));
+    }
+
+    #[test]
+    fn other_reparse_tags_keep_existing_traversal_semantics() {
+        // LX symlinks occur in real Windows checkouts. This optimization must
+        // preserve their pre-existing accounting rather than dropping entries.
+        for tag in [0xA000_0042, 0xA000_001D, 0x8000_000A] {
+            assert!(!is_link(FILE_ATTRIBUTE_REPARSE_POINT_BIT, tag));
+        }
+    }
+
+    #[test]
+    fn cloud_and_wof_reparse_tags_are_not_links() {
+        const IO_REPARSE_TAG_WOF: u32 = 0x8000_0017;
+        const IO_REPARSE_TAG_CLOUD: u32 = 0x9000_001A;
+
+        assert!(!is_link(
+            FILE_ATTRIBUTE_REPARSE_POINT_BIT,
+            IO_REPARSE_TAG_WOF
+        ));
+        assert!(!is_link(
+            FILE_ATTRIBUTE_REPARSE_POINT_BIT,
+            IO_REPARSE_TAG_CLOUD
+        ));
+    }
+
+    #[test]
+    fn name_surrogate_tag_without_reparse_attribute_is_not_a_link() {
+        assert!(!is_link(0, IO_REPARSE_TAG_SYMLINK));
+    }
 }

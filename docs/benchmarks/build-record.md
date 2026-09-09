@@ -1,6 +1,6 @@
 # Benchmark build record
 
-Source commit: `0a089c90c0e2995ef702ff053820d129265c3659`. Both release binaries were built from this commit; the Linux source was extracted from `git archive HEAD`. Core and CLI source plus Cargo.lock were clean at build time. Later changes affect GUI, packaging, documentation, site, benchmark argument validation and CLI help wording only; the measured core and CLI scan/output algorithms are unchanged.
+Source commit: `0a089c90c0e2995ef702ff053820d129265c3659`. Both release binaries were built from this commit; the Linux source was extracted from `git archive HEAD`. Core and CLI source plus Cargo.lock were clean at build time. Measured on 2026-09-09 (Asia/Tokyo). This is a historical snapshot: subsequent core and CLI changes are not covered by these binaries or timings.
 
 | Platform | Compiler | Build | SHA-256 |
 |---|---|---|---|

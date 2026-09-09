@@ -54,6 +54,32 @@ root 直下的文件会以 core 应用 filter 后得到的汇总值进行报告�
 
 两种模式中的 hardlink 总量一致，但重复名称的大小归属到哪个文件夹取决于扫描顺序。因此，一次性扫描与按子文件夹划分的明细不保证在每个细节上都一致。
 
+### GUI 后台处理与显示
+
+专用的 `hyperdu-gui-scan` 线程调用核心，并准备目录索引、缓存的汇总值和四种排序。接收扫描结果和切换显示顺序时，不把文件枚举或全部结果的重新排序放在UI线程上。
+
+```text
+core ScanEvent -> background index / sorting
+                       |
+                node chunks (256)
+                       |
+                 bounded queue (2)
+                       |
+           UI ingestion budget -> tree / visible table rows
+
+core progress counter -----------------> status / elapsed time
+```
+
+节点更新按最多256个节点分块，队列容量为2条消息。UI 每帧最多处理1024个更新工作单位，并以3ms为时间预算，将剩余工作留到后续帧。时间检查发生在更新之间，因此是协作式限制；单次内存分配或旧模型销毁不保证在3ms内完成。后台线程也保留完整索引，总内存不会仅由队列容量决定。
+
+父目录的排序索引在其引用的节点发送后才发布，避免引用不存在的ID；但这也意味着第一块数据到达时，表格不一定立即增加行。表格只绘制可见行，树视图有深度和行数预算。更深的目录仍可通过表格和面包屑导航访问。
+
+开始扫描时立即显示工作状态。共享计数器独立于结果队列更新进度和经过时间，事件到达时请求重绘，扫描中也会定期刷新。取消通过共享标志传递给核心和索引准备过程，不会把部分结果标记为完成。同步I/O或已经开始的单次排序不能保证立即中断。接收端被释放时，等待队列的发送端会被解除阻塞；更换扫描句柄也会隔离旧扫描的结果。
+
+终止事件在之前的更新处理完毕后才处理。读取错误、取消、没有终止事件的发送端断开，均与成功完成区分。用户触发的JSON/CSV导出会复制所有行并按路径排序。这些操作以及模型替换等仍在UI线程同步执行。
+
+实现位置：[GUI传输与索引](../../hyperdu-gui/src/scan.rs)、[UI接收与绘制](../../hyperdu-gui/src/app.rs)、[核心模式与事件](../../hyperdu-core/src/lib.rs)。
+
 ## Platform boundary
 
 ### Linux
@@ -86,20 +112,43 @@ Directory
 ### Optional MFT path
 
 ```text
---mft + supported NTFS volume root
-              |
-              v
-        read / parse $MFT
-              |
-       complete + valid ?
-          /          \
-        yes           no
-         |             |
-         v             v
-      result      directory enumeration
+shared eligibility guard
+ Windows MSVC / volume root / administrator / supported options
+                         |
+                   open NTFS volume
+                         |
+       extent-limited raw window -> copied record -> fixups / parse
+                         |
+              parent-record-ID aggregation
+                         |
+               directory paths / rollup
+
+ineligible or incomplete required read/parse -> directory enumeration
 ```
 
-MFT backend 是 optional fast path。对于无法解析的 layout，不会强行进行部分汇总，而是 fallback 到普通路径。
+MFT是Windows MSVC上的实验性可选路径。CLI、GUI和核心直接API共用资格检查。除了卷根目录与管理员权限，原始或已编译的排除条件、深度限制、最小文件大小、链接跟随、硬链接单独计数、近似大小、外部传入的去重缓存也会使MFT路径被拒绝。普通扫描API此时回退到目录枚举，直接API返回 `None`，使验证程序能够区分实际MFT扫描与回退。
+
+reader通过默认上限1MiB的原始字节窗口批量读取连续MFT记录。预读限制在物理extent内；跨extent边界的记录由必需片段组成。fixup只应用于记录副本，因此重新读取和扩展记录查询不会把已修改的缓存字节当作原始数据。预读失败时清空缓存，并仅重试必需片段；不会接受必需读取或解析不完整的结果。
+
+集计先按父记录ID累加大小，再生成目录路径并在核心中向父级汇总。硬链接身份、缺失父级和循环父级的处理保留已有集计规则。读取窗口有上限，但所有条目和汇总结果仍保存在内存中，并非对整个MFT使用固定内存的流式扫描。
+
+reader在开始前、最多每256条记录、正常结束时检查进度和取消。记录数包含未使用的slot，与最终文件数或完成百分比不同。同步扩展记录读取不能保证立即中断。Interactive模式请求的MFT扫描成功后，通过 `BatchFallback(Mft)` 和 `BatchCompleted` 明确表示结果批量交付；这与MFT失败后回退到普通枚举是不同的情况。
+
+满足资格条件并成功解析必需记录，并不能证明与目录枚举完全一致。仍存在已知集计差异，性能验证必须分别记录实际使用的路径和集计差异。
+
+实现位置：[共用资格检查](../../hyperdu-core/src/platform/windows_impl/mod.rs)、[reader](../../hyperdu-core/src/platform/windows_impl/mft_reader.rs)、[原始字节窗口](../../hyperdu-core/src/platform/windows_impl/mft_reader/window.rs)、[ID集计](../../hyperdu-core/src/platform/windows_impl/mft_aggregate.rs)。
+
+## CLI / MCP 进度通知
+
+普通CLI把结果写入stdout，把进度和诊断写入stderr。stderr连接终端时自动显示工作状态；重定向时可用 `--progress` 显式开启。开始后立即显示状态，结束时唤醒等待中的状态线程，无需等待下一个刷新周期。
+
+`hyperdu mcp` 是基于rmcp的stdio服务器。`scan_path` 收到MCP的 `_meta.progressToken` 时，通过标准 `notifications/progress` 发送初始值0以及后续递增的文件数。没有token时不发送进度通知。每个请求独立保存token和取消状态，不混淆并发调用。
+
+核心同步扫描通过 `spawn_blocking` 执行。回调只更新watch channel中的最新计数，不让扫描线程等待协议传输。异步发送端合并更新，将中途通知限制为大约250ms一次。如果最终计数尚未发送，则在结果前发送该计数。计数不是百分比；成功完成应以最终工具结果为准。
+
+请求取消、请求销毁或通知传输失败会传递到核心的取消标志。这是协作式取消，并不保证立即中断操作系统的同步I/O。这个进度adapter用于 `scan_path`，并不代表所有MCP工具都提供进度通知。
+
+实现位置：[CLI](../../hyperdu-cli/src/main.rs)、[MCP工具](../../hyperdu-cli/src/mcp.rs)、[MCP进度adapter](../../hyperdu-cli/src/mcp/progress.rs)。参数和输出条件见 [CLI参考（日语）](../cli-reference.md)。
 
 ## 并发模型
 

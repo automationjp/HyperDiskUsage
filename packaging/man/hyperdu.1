@@ -17,6 +17,8 @@ codex mcp add hyperdu -- hyperdu mcp
 .PP
 Use ./mcp to scan a directory named mcp.
 .SH OPTIONS
+Only options supported by the current platform and build are accepted.
+Run hyperdu --help for the available options; unavailable options are rejected.
 .TP
 .BR --top=NUM
 Show top NUM entries by physical size (default 30).
@@ -43,7 +45,7 @@ Do not cross filesystem boundaries (mount points).
 Use logical size only (skip physical size queries where possible).
 .TP
 .BR --approximate
-Approximate regular file sizes when logical-only to avoid slow system calls.
+Unix except macOS: approximate regular file sizes when logical-only to avoid slow system calls.
 .TP
 .BR --compat=MODE
 Compatibility mode: hyperdu (default), gnu, gnu-strict, posix-strict.
@@ -56,7 +58,7 @@ Performance profile: turbo, balanced (default), strict.
 .TP
 .B turbo
 Fastest profile. Uses logical sizes only (no physical size calc) and does not
-deduplicate hardlinks. On Linux, applies stronger initial batch/depth; the
+deduplicate hardlinks. The
 filesystem auto strategy may further adjust buffer sizes (see --no-fs-auto).
 .TP
 .B balanced
@@ -66,19 +68,16 @@ Default balanced behavior.
 Compatibility-first (du-compatible output stricter, deduplicate hardlinks, stricter error handling).
 .TP
 .BR --progress
-Print progress lines during scan to standard output.
+Print progress lines during scan to standard error.
 .TP
 .BR --progress-every=NUM
 Emit progress every NUM files (default 8192). A final line is printed on completion.
 .TP
-.BR --getdents-buf-kb=KiB
-Linux: set getdents64 buffer size in KiB.
-.TP
 .BR --dir-yield-every=N
-Split large directories every N entries.
+Unix except macOS: split large directories every N entries.
 .TP
 .BR --prefetch
-Linux: enable posix_fadvise/readahead hints.
+Linux x86_64: enable posix_fadvise/readahead hints.
 .TP
 .BR --pin-threads
 Linux: pin worker threads to CPUs.
@@ -106,6 +105,10 @@ Write classification CSV report to PATH.
 Verbose mode: detailed logs and auto-save reports to default filenames
 in current directory (hyperdu-report.json, hyperdu-report.csv,
 class-report.json, class-report.csv).
+.TP
+.BR --time " / " --time-kind=KIND " / " --time-style=STYLE
+Add and format a time column in du-compatible output. Available only in builds
+with the time-format feature (enabled by default).
 .SH EXAMPLES
 .TP
 Scan current directory and show top 30 entries:

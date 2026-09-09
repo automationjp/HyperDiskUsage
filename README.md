@@ -17,6 +17,8 @@
 
 ## Quick start
 
+CLI引数の既定値・出力条件・対応OSは [CLIパラメータリファレンス](docs/cli-reference.md) を参照してください。`--time` 系引数は既定で有効な `time-format` featureが必要です。
+
 > **0.5.0-beta.3 は公開準備中です。** このブランチでは `cargo install --locked --path hyperdu-cli` で導入できます。下記の crates.io コマンドと新しい名前の配布物は、リリース公開後に利用できます。
 
 ```bash
@@ -48,22 +50,9 @@ HyperDU の主題は **高速なディスク使用量解析**です。
 
 単に `du` を Rust で書き直すのではなく、OS ごとの directory enumeration、metadata 取得、並列走査、physical-size accounting まで含めて hot path を最適化しています。
 
-### Benchmark status: Windows / Linux 再計測済み
+### HyperDU と du の比較
 
-2026-09-09、`0a089c90c0e2`。warm・各8回の中央値。
-
-| Platform / Dataset | HyperDU | Baseline | Ratio |
-|---|---:|---:|---:|
-| Windows / wide | 30.7 ms | 57.4 ms | 1.87x |
-| Windows / deep | 77.1 ms | 72.0 ms | 0.93x |
-| Windows / flat | 34.1 ms | 42.8 ms | 1.26x |
-| Windows / registry | 332.2 ms | 1838.5 ms | 5.53x |
-| Linux / wide | 47.3 ms | 208.6 ms | 4.41x |
-| Linux / deep | 89.1 ms | 143.4 ms | 1.61x |
-| Linux / flat | 130.5 ms | 184.4 ms | 1.41x |
-| Linux / registry | 144.6 ms | 978.9 ms | 6.77x |
-
-WindowsはNTFS / robocopy、LinuxはWSL2 / ext4 / uutils du 0.8.0です。GNU du・cold・XFSは未測定。[環境・全試行・照合結果・限界](docs/benchmarks.md)も併記しています。
+最新版のAWS EC2ベンチマークを準備中です。GNU `du` と同じ条件（物理割当量・リンク非追跡・ハードリンク重複排除・同一filesystem・全ディレクトリ出力）で、各ディレクトリの表示バイト数が直接一致した結果だけを掲載します。以前のWSL2測定は補正を要する異なる集計条件だったため、速度の根拠から外しました。 [Details](docs/benchmarks.md)
 
 ### Why it is fast
 

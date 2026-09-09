@@ -1,13 +1,10 @@
 #compdef hyperdu
 _hyperdu() {
   local -a opts
-  opts=(
-    '--top[Show top N entries]' '--exclude[Exclude substrings]' '--exclude-from[Exclude file]'
-    '--max-depth[Max depth]' '--min-file-size[Min file size]' '--follow-links'
-    '--one-file-system' '--logical-only' '--approximate' '--compat[Compatibility mode]'
-    '--apparent-size' '--perf[Performance profile]' '--time' '--time-kind' '--time-style'
-    '--csv[Write CSV]' '--json[Write JSON]' '--progress'
-  )
+  local help
+  # Read this binary's options so platform/build-only switches stay in sync.
+  help=$(command "${words[1]}" --help 2>/dev/null) || return
+  opts=("${(@f)$(printf '%s\n' "$help" | awk '/^[[:space:]]+(-[^,[:space:]]+,[[:space:]]+)?--/ { for (i = 1; i <= NF; i++) if ($i ~ /^--/) { print $i; break } }')}")
   _arguments '*:: :->args' ${opts}
 }
 _hyperdu "$@"

@@ -1,19 +1,20 @@
 //! Desktop controls and bounded result rendering over the shared core scan API.
 
-use crate::{fonts, scan};
-use egui::{Align, Layout, RichText};
-use egui_extras::TableBuilder;
-use humansize::{format_size, BINARY};
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
     sync::atomic::Ordering,
     time::Instant,
 };
-/// Messages drained per frame. Each one folds a subtree into the model, which
-/// re-sorts the affected parents, so an unbounded drain would let a burst of
-/// small subtrees stall a frame.
-const MSGS_PER_FRAME: usize = 32;
+
+use egui::{Align, Layout, RichText};
+use egui_extras::TableBuilder;
+use humansize::{format_size, BINARY};
+
+use crate::{fonts, scan};
+/// Bound display ingestion by nodes and elapsed time, not subtree message count.
+const NODES_PER_FRAME: usize = 1024;
+const INGEST_MS: u64 = 3;
 /// How often to wake while a scan is running, so rows appear as they land.
 const REFRESH_MS: u64 = 250;
 /// Bound recursive tree rendering. Deeper directories remain accessible in the table.
@@ -35,10 +36,7 @@ pub struct App {
     error_details: Vec<String>,
     export_message: String,
     sort: u8,
-    table_sort: u8,
-    table_revision: u64,
-    table_root: PathBuf,
-    table_indices: Vec<u32>,
+    pending: Option<scan::Msg>,
 }
 
 impl Default for App {
@@ -60,10 +58,7 @@ impl Default for App {
             error_details: Vec::new(),
             export_message: String::new(),
             sort: 0,
-            table_sort: 0,
-            table_revision: u64::MAX,
-            table_root: PathBuf::new(),
-            table_indices: Vec::new(),
+            pending: None,
         }
     }
 }
@@ -76,11 +71,16 @@ impl App {
         cc.egui_ctx.set_visuals(visuals);
         Self::default()
     }
-    fn start_scan(&mut self, root: PathBuf) {
+    fn start_scan(&mut self, root: PathBuf, ctx: &egui::Context) {
         if self.scanning() {
             return;
         }
-        match scan::start(root.clone(), self.params.clone()) {
+        let context = ctx.clone();
+        match scan::start(
+            root.clone(),
+            self.params.clone(),
+            std::sync::Arc::new(move || context.request_repaint()),
+        ) {
             Ok(handle) => {
                 self.model = scan::Model::new(root.clone());
                 self.current = root.clone();
@@ -96,7 +96,8 @@ impl App {
                 self.error_details.clear();
                 self.export_message.clear();
                 self.state = "スキャン中".into();
-                self.table_revision = u64::MAX;
+                self.pending = None;
+                ctx.request_repaint();
             }
             Err(error) => {
                 self.state = format!("開始できません: {error} — 表示中の結果は前回の走査です");
@@ -107,32 +108,35 @@ impl App {
     fn scanning(&self) -> bool {
         self.scan.is_some()
     }
-    fn drain(&mut self) {
+    fn drain(&mut self, ctx: &egui::Context) {
         let Some(handle) = &self.scan else { return };
         let mut done = false;
-        for _ in 0..MSGS_PER_FRAME {
-            match handle.rx.try_recv() {
-                Ok(scan::Msg::Core(hyperdu_core::ScanEvent::RootListed {
-                    directories,
-                    direct_files,
-                    ..
-                })) => {
-                    self.model.direct_files = direct_files;
-                    self.model.expect(directories);
-                }
-                Ok(scan::Msg::Core(hyperdu_core::ScanEvent::ChildCompleted { root, map })) => {
-                    self.model.absorb(&root, map)
-                }
-                Ok(scan::Msg::Core(hyperdu_core::ScanEvent::BatchCompleted { map })) => {
-                    self.model.replace_batch(map)
+        let frame_start = Instant::now();
+        let mut work = 0;
+        while work < NODES_PER_FRAME && frame_start.elapsed().as_millis() < u128::from(INGEST_MS) {
+            let message = match self.pending.take() {
+                Some(message) => Ok(message),
+                None => handle.rx.try_recv(),
+            };
+            match message {
+                Ok(scan::Msg::Update(update)) => {
+                    let cost = update.work();
+                    if work + cost > NODES_PER_FRAME {
+                        self.pending = Some(scan::Msg::Update(update));
+                        break;
+                    }
+                    work += cost;
+                    self.model.apply(update);
                 }
                 Ok(scan::Msg::Core(hyperdu_core::ScanEvent::BatchFallback { .. })) => {
                     self.state = "MFT: 一括結果を受信中".into()
                 }
                 Ok(scan::Msg::Core(hyperdu_core::ScanEvent::Finished)) => {
                     self.errors = handle.errors.load(Ordering::Relaxed);
-                    self.complete = self.errors == 0;
-                    self.state = if self.complete {
+                    self.complete = self.errors == 0 && !self.cancelling;
+                    self.state = if self.cancelling {
+                        "中断しました — 表示は部分結果です".into()
+                    } else if self.complete {
                         "完了".into()
                     } else {
                         format!("一部を読み取れませんでした ({} 件)", self.errors)
@@ -141,7 +145,12 @@ impl App {
                     break;
                 }
                 Ok(scan::Msg::Core(hyperdu_core::ScanEvent::Cancelled)) => {
-                    self.state = "中断しました — 表示は完了済みフォルダの部分結果です".into();
+                    self.state = "中断しました — 表示は部分結果です".into();
+                    done = true;
+                    break;
+                }
+                Ok(scan::Msg::Core(_)) => {
+                    self.state = "表示データの受信形式が不正です".into();
                     done = true;
                     break;
                 }
@@ -158,6 +167,9 @@ impl App {
                 }
             }
         }
+        if work > 0 || self.pending.is_some() {
+            ctx.request_repaint();
+        }
         self.errors = handle.errors.load(Ordering::Relaxed);
         self.error_details = handle
             .error_details
@@ -167,6 +179,7 @@ impl App {
         if done {
             self.finished_in = self.started_at.map(|t| t.elapsed().as_secs_f64());
             self.scan = None;
+            self.pending = None;
             self.cancelling = false;
         }
     }
@@ -193,7 +206,7 @@ impl App {
 ui.add(egui::TextEdit::singleline(&mut self.root_input).desired_width(430.0).hint_text("C:\\ またはフォルダのパス"));
                 if ui.button("選択…").clicked() {if let Some(path)=rfd::FileDialog::new().pick_folder() {self.root_input=path.display().to_string();
 }}
-                if ui.add_enabled(!self.root_input.trim().is_empty(),egui::Button::new("スキャン開始")).clicked() {self.start_scan(PathBuf::from(self.root_input.trim()));
+                if ui.add_enabled(!self.root_input.trim().is_empty(),egui::Button::new("スキャン開始")).clicked() {self.start_scan(PathBuf::from(self.root_input.trim()), ui.ctx());
 }
             });
             ui.horizontal_wrapped(|ui|{
@@ -456,26 +469,6 @@ ui.add(egui::DragValue::new(&mut self.params.dir_yield).range(0..=1_000_000));
             ui.selectable_value(&mut self.sort, 2, "ファイル数");
             ui.selectable_value(&mut self.sort, 3, "名前");
         });
-        if self.table_root != current
-            || self.table_revision != self.model.revision
-            || self.table_sort != self.sort
-        {
-            self.table_indices = self.model.children_of(&current).to_vec();
-            self.table_indices.sort_unstable_by(|a, b| {
-                let (pa, sa) = self.model.entry(*a);
-                let (pb, sb) = self.model.entry(*b);
-                match self.sort {
-                    1 => sb.logical.cmp(&sa.logical),
-                    2 => sb.files.cmp(&sa.files),
-                    3 => pa.cmp(pb),
-                    _ => sb.physical.cmp(&sa.physical),
-                }
-                .then_with(|| pa.cmp(pb))
-            });
-            self.table_root = current.clone();
-            self.table_revision = self.model.revision;
-            self.table_sort = self.sort;
-        }
         let direct = self.model.direct_files_of(&current);
         if direct.files > 0 {
             let s = direct;
@@ -486,7 +479,7 @@ ui.add(egui::DragValue::new(&mut self.params.dir_yield).range(0..=1_000_000));
                 format_size(s.logical, BINARY)
             ));
         }
-        let indices = &self.table_indices;
+        let indices = self.model.children_sorted(&current, self.sort);
         if indices.is_empty() {
             ui.label(if self.scanning() {
                 "スキャン中…"
@@ -544,9 +537,9 @@ ui.add(egui::DragValue::new(&mut self.params.dir_yield).range(0..=1_000_000));
     }
 }
 
-impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.drain();
+impl App {
+    fn show_ui(&mut self, ctx: &egui::Context) {
+        self.drain(ctx);
         egui::TopBottomPanel::top("controls").show(ctx, |ui| {
             self.controls(ui);
             self.status(ui);
@@ -580,5 +573,83 @@ impl eframe::App for App {
         if self.scanning() {
             ctx.request_repaint_after(std::time::Duration::from_millis(REFRESH_MS));
         }
+    }
+}
+
+impl eframe::App for App {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.show_ui(ctx);
+    }
+}
+
+#[cfg(test)]
+mod ui_tests;
+
+#[cfg(test)]
+mod tests {
+    use hyperdu_core::{ScanEvent, Stat};
+
+    use super::*;
+
+    #[test]
+    fn start_sets_working_state_before_any_result_is_drained() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = App::default();
+        app.start_scan(root.path().to_path_buf(), &egui::Context::default());
+        assert!(app.scanning() && !app.complete);
+        assert!(app.started_at.is_some() && app.finished_in.is_none());
+        assert_eq!(app.state, "スキャン中");
+        assert_eq!(app.model.entry_count(), 0);
+    }
+
+    #[test]
+    fn large_result_is_bounded_and_finished_waits_for_all_chunks() {
+        let (tx, handle) = scan::test_handle(8);
+        let root = PathBuf::from("root");
+        for chunk in 0..5 {
+            let nodes = (0..scan::CHUNK_NODES)
+                .map(|n| {
+                    let index = (chunk * scan::CHUNK_NODES + n) as u32;
+                    (index, root.join(index.to_string()), Stat::default(), false)
+                })
+                .collect();
+            tx.send(scan::Msg::Update(scan::Update::Nodes(nodes)))
+                .unwrap();
+        }
+        tx.send(scan::Msg::Core(ScanEvent::Finished)).unwrap();
+        let mut app = App {
+            scan: Some(handle),
+            model: scan::Model::new(root),
+            ..App::default()
+        };
+        let ctx = egui::Context::default();
+        app.drain(&ctx);
+        assert!(app.model.entry_count() <= NODES_PER_FRAME);
+        assert!(app.scanning() && !app.complete);
+        for _ in 0..20 {
+            if !app.scanning() {
+                break;
+            }
+            app.drain(&ctx);
+        }
+        assert_eq!(app.model.entry_count(), 5 * scan::CHUNK_NODES);
+        assert!(app.complete && !app.scanning());
+    }
+
+    #[test]
+    fn cancel_overrides_queued_finished_and_replaced_handles_isolate_events() {
+        let (old, handle) = scan::test_handle(1);
+        let (new, replacement) = scan::test_handle(1);
+        let mut app = App {
+            scan: Some(handle),
+            ..App::default()
+        };
+        app.scan = Some(replacement);
+        assert!(old.send(scan::Msg::Failed("stale".into())).is_err());
+        new.send(scan::Msg::Core(ScanEvent::Finished)).unwrap();
+        app.cancelling = true;
+        app.drain(&egui::Context::default());
+        assert!(!app.complete && !app.scanning());
+        assert!(app.state.starts_with("中断"));
     }
 }

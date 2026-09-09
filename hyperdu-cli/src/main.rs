@@ -1,11 +1,8 @@
 use std::{
     fs::File,
-    io::Write,
+    io::{IsTerminal, Write},
     path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::Arc,
     thread,
     time::Duration,
 };
@@ -18,7 +15,7 @@ use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use humansize::{format_size, BINARY};
 
 struct KeepAlive {
-    done: Arc<AtomicBool>,
+    stop: Option<std::sync::mpsc::SyncSender<()>>,
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -30,30 +27,30 @@ impl KeepAlive {
         if !enabled {
             return None;
         }
-        let done = Arc::new(AtomicBool::new(false));
-        let done_c = done.clone();
+        eprintln!("scanning …");
+        let (stop, stopped) = std::sync::mpsc::sync_channel(1);
         let handle = thread::spawn(move || {
-            let keep_secs: u64 = std::env::var("HYPERDU_PROGRESS_KEEPALIVE_SECS")
+            let keep_secs = std::env::var("HYPERDU_PROGRESS_KEEPALIVE_SECS")
                 .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(10);
-            loop {
-                if done_c.load(Ordering::Relaxed) {
-                    break;
-                }
-                thread::sleep(Duration::from_secs(5));
-                if done_c.load(Ordering::Relaxed) {
-                    break;
-                }
-                let (n, t) = *last.lock().unwrap();
-                let dt = std::time::Instant::now().duration_since(t).as_secs();
-                if dt >= keep_secs {
-                    println!("still scanning … processed {n} files (last update {dt}s ago)");
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(1)
+                .max(1);
+            let started = std::time::Instant::now();
+            // Completion wakes the wait immediately, including a very short scan.
+            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+                stopped.recv_timeout(Duration::from_secs(keep_secs))
+            {
+                let (n, t) = *last.lock().unwrap_or_else(|e| e.into_inner());
+                if t.elapsed().as_secs() >= keep_secs {
+                    eprintln!(
+                        "still scanning … processed {n} files | elapsed {:.1}s",
+                        started.elapsed().as_secs_f64()
+                    );
                 }
             }
         });
         Some(Self {
-            done,
+            stop: Some(stop),
             handle: Some(handle),
         })
     }
@@ -61,13 +58,14 @@ impl KeepAlive {
 
 impl Drop for KeepAlive {
     fn drop(&mut self) {
-        self.done.store(true, Ordering::Relaxed);
-        if let Some(h) = self.handle.take() {
-            let _ = h.join();
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
         }
     }
 }
-
 // Cross-platform filesystem stats (total/free) for a given path's volume.
 //
 // The platform `cfg` blocks this used to carry now live in
@@ -154,8 +152,8 @@ struct Args {
         value_name = "ROOTS",
         long_help = "スキャン対象のルートディレクトリ（複数指定可）。\n\
         省略時はカレントディレクトリ '.' を使用します。\n\
-        互換モード（--compat gnu/posix など）では複数ルートをアルファベット順に列挙します。\n\
-        HyperDU標準出力モードでは最初の1つに対して集計レポートを表示します。"
+        互換モードでは各ルート内の行をパス順に列挙します。\n\
+        HyperDU標準出力モードでも全ルートを走査し、各ルートの集計と合計を表示します。"
     )]
     roots: Vec<PathBuf>,
 
@@ -230,34 +228,35 @@ struct Args {
     logical_only: bool,
 
     /// Approximate file sizes (e.g., 4KiB for regular files) to avoid statx when logical-only
-    #[arg(
+    #[cfg_attr(all(unix, not(target_os = "macos")), arg(
         long = "approximate",
         action = ArgAction::SetTrue,
         long_help = "概算サイズを使用します（例: 通常ファイルは4KiB相当とみなすなど）。\n\
     compute_physical=false（--logical-onlyや--perf turbo等）時に有効です。"
-    )]
+    ))]
+    #[cfg_attr(not(all(unix, not(target_os = "macos"))), arg(skip))]
     approximate: bool,
 
     /// Read the NTFS $MFT directly (Windows, volume root, administrator)
-    #[arg(
+    #[cfg_attr(all(windows, target_env = "msvc"), arg(
         long = "mft",
         action = ArgAction::SetTrue,
-        long_help = "【実験的】通常の列挙と結果が一致しません（#15、#37）。\n\
-    実測では MFT 側の値が fsutil の報告する MFT サイズと一致しており、\n\
-    列挙側が約 9 倍に過大計上している可能性が高い状況です。\n\
-    どちらを信じるべきかが未確定なので、当面は実験的な扱いとします。\n\
-    \n\
-    NTFS の $MFT を直接読んでボリューム全体を走査します（Windows のみ）。\n\
-    以下のいずれかに当てはまる場合は自動的に通常の列挙へ切り替わります。\n\
-      - 管理者権限で実行していない\n\
-      - 走査対象がボリュームのルート（例: C:\\）でない\n\
-      - NTFS でない、または $MFT の解析に失敗した\n\
-    切り替わっても結果は正しく、遅くなるだけです。"
-    )]
+        long_help = "【実験的】通常の列挙との集計差が確認されており、完全一致は保証しません。\n\
+    Windows MSVCビルドでNTFSの$MFTを直接読み、ボリューム全体を走査します。\n\
+    管理者権限とボリュームのルート（例: C:\\）が必要です。\n\
+    利用条件を満たさない場合や、ボリュームの読取・解析を完了できない場合は通常の列挙へ切り替わります。\n\
+    除外・深さ制限・最小サイズ・リンク追従・ハードリンク別計上・概算・共有重複排除キャッシュなど、\n\
+    MFTで扱えない設定がある場合も、指定条件を維持する通常の列挙へ切り替わります。"
+    ))]
+    #[cfg_attr(not(all(windows, target_env = "msvc")), arg(skip))]
     mft: bool,
 
-    /// Number of threads (defaults to CPU count)
-    #[arg(long, long_help = "スレッド数。省略時は論理CPU数。")]
+    /// Worker count (default: available CPUs * 4, clamped to 4..=32)
+    #[arg(
+        long,
+        long_help = "要求スレッド数。省略時は利用可能CPU数の4倍を4〜32に制限します（CPU数取得失敗時は16）。\n\
+    filesystem自動設定により調整される場合があります。明示指定はその推奨値より優先しますが、gentleでは最大2です。"
+    )]
     threads: Option<usize>,
 
     /// Write CSV to path
@@ -298,11 +297,12 @@ struct Args {
     )]
     class_report_csv: Option<PathBuf>,
 
-    /// Print intermittent progress to stderr
+    /// Show progress on stderr (automatic for an interactive terminal)
     #[arg(
         long,
         action = ArgAction::SetTrue,
-        long_help = "処理件数や一部のサンプルパスを定期的にstderrへ表示します。"
+        long_help = "スキャン開始時に処理中表示を出し、件数・一部のサンプルパスをstderrへ定期表示します。\n\
+    stderrが端末の場合は自動で有効です。リダイレクト時も表示するには --progress を指定します。"
     )]
     progress: bool,
     /// Progress emission frequency (files). Default 8192
@@ -322,110 +322,61 @@ struct Args {
     )]
     verbose: bool,
 
-    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
-    #[arg(
-        long = "uring-batch",
-        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
-    )]
-    uring_batch: Option<usize>,
-
-    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
-    #[arg(
-        long = "uring-depth",
-        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
-    )]
-    uring_depth: Option<usize>,
-
     /// How hard the scan is allowed to hit the storage device
     #[arg(
         long = "io-profile",
         value_enum,
-        long_help = "ストレージへの負荷レベルを選びます。
-        throughput: 先読みを有効にし最大スループットを狙います（他のI/Oを圧迫します）。
-        balanced (既定): 先読みなしで並列度は通常どおり。
-        gentle: スレッド数を2に抑え、先読みを無効化します。正確さは変わりません。"
+        long_help = "ストレージへの負荷レベルを選びます。\n\
+    throughput: 最大スループットを狙い、Linux x86_64では先読みを既定で有効にします。\n\
+    balanced (既定): 先読みは既定で無効。通常の並列度を使用します。\n\
+    gentle: ワーカー数の上限を2に抑え、先読みを既定で無効にします。\n\
+    ワーカー数は要求スレッド数・filesystem自動設定にも依存し、gentleでは最大2です。\n\
+    先読みの設定はLinux x86_64で有効な明示指定で上書きできます。サイズを概算する設定ではありません。"
     )]
     io_profile: Option<IoProfileArg>,
 
-    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
-    #[arg(
-        long = "no-uring",
-        action = ArgAction::SetTrue,
-        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
-    )]
-    no_uring: bool,
-
-    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
-    #[arg(
-        long = "uring-sqpoll",
-        action = ArgAction::SetTrue,
-        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
-    )]
-    uring_sqpoll: bool,
-
-    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
-    #[arg(
-        long = "uring-sqpoll-idle-ms",
-        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
-    )]
-    uring_sqpoll_idle_ms: Option<u32>,
-
-    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
-    #[arg(
-        long = "uring-sqpoll-cpu",
-        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
-    )]
-    uring_sqpoll_cpu: Option<u32>,
-
-    /// Deprecated: the io_uring backend was removed. Accepted and ignored.
-    #[arg(
-        long = "uring-coop",
-        action = ArgAction::SetTrue,
-        long_help = "非推奨。io_uring バックエンドは削除されました。指定しても無視されます。"
-    )]
-    uring_coop: bool,
-
-    /// Linux: getdents64 buffer size in KiB (overrides env HYPERDU_GETDENTS_BUF_KB)
-    #[arg(
-        long = "getdents-buf-kb",
-        value_name = "KiB",
-        long_help = "Linuxのgetdents64で使用するバッファサイズ（KiB）。環境変数HYPERDU_GETDENTS_BUF_KBを上書きします。"
-    )]
-    getdents_buf_kb: Option<usize>,
-
     /// Split large directories every N entries (overrides env HYPERDU_DIR_YIELD_EVERY)
-    #[arg(
-        long = "dir-yield-every",
-        value_name = "N",
-        long_help = "巨大ディレクトリをN件ごとに分割スケジュールします。環境変数HYPERDU_DIR_YIELD_EVERYを上書きします。"
+    #[cfg_attr(
+        all(unix, not(target_os = "macos")),
+        arg(
+            long = "dir-yield-every",
+            value_name = "N",
+            long_help = "巨大ディレクトリをN件ごとに分割スケジュールします。環境変数HYPERDU_DIR_YIELD_EVERYを上書きします。"
+        )
     )]
+    #[cfg_attr(not(all(unix, not(target_os = "macos"))), arg(skip))]
     dir_yield_every: Option<usize>,
 
     /// Linux: force prefetch advise (posix_fadvise/readahead) on or off
-    #[arg(
+    #[cfg_attr(all(target_os = "linux", target_arch = "x86_64"), arg(
         long = "prefetch",
         num_args = 0..=1,
         default_missing_value = "true",
         long_help = "Linuxでposix_fadvise/readaheadヒントを強制的に有効/無効にします。--io-profile の既定を上書きします（--prefetch=false で先読みを止められます）。"
-    )]
+    ))]
+    #[cfg_attr(not(all(target_os = "linux", target_arch = "x86_64")), arg(skip))]
     prefetch: Option<bool>,
 
     /// Linux: pin worker threads to CPUs (sets HYPERDU_PIN_THREADS=1)
-    #[arg(
+    #[cfg_attr(target_os = "linux", arg(
         long = "pin-threads",
         action = ArgAction::SetTrue,
         long_help = "ワーカースレッドをCPUにピン固定します（Linux）。HYPERDU_PIN_THREADS=1 相当。"
-    )]
+    ))]
+    #[cfg_attr(not(target_os = "linux"), arg(skip))]
+    #[cfg(target_os = "linux")]
     pin_threads: bool,
 
     /// Windows: force the NtQueryDirectoryFile path (default on MSVC builds; HYPERDU_WIN_USE_NTQUERY=0 selects FindFirstFileExW)
-    #[arg(
+    #[cfg_attr(all(windows, target_env = "msvc"), arg(
         long = "win-ntquery",
         action = ArgAction::SetTrue,
         long_help = "WindowsでNtQueryDirectoryFileベースの列挙経路を明示的に有効化します（MSVCビルドでは既定で有効）。\n\
     物理サイズとファイルIDを列挙結果から直接取得するため、ファイル毎の追加システムコールが不要です。\n\
     無効化して FindFirstFileExW 経路に切り替えるには環境変数 HYPERDU_WIN_USE_NTQUERY=0 を設定します。"
-    )]
+    ))]
+    #[cfg_attr(not(all(windows, target_env = "msvc")), arg(skip))]
+    #[cfg(all(windows, target_env = "msvc"))]
     win_ntquery: bool,
 
     /// Disable filesystem auto strategy (sets HYPERDU_FS_AUTO=0)
@@ -437,11 +388,16 @@ struct Args {
     no_fs_auto: bool,
 
     /// macOS: getattrlistbulk buffer size in KiB (overrides env HYPERDU_GALB_BUF_KB)
-    #[arg(
-        long = "galb-buf-kb",
-        value_name = "KiB",
-        long_help = "macOSのgetattrlistbulkバッファサイズ（KiB）。環境変数HYPERDU_GALB_BUF_KBを上書きします。"
+    #[cfg_attr(
+        target_os = "macos",
+        arg(
+            long = "galb-buf-kb",
+            value_name = "KiB",
+            long_help = "macOSのgetattrlistbulkバッファサイズ（KiB）。環境変数HYPERDU_GALB_BUF_KBを上書きします。"
+        )
     )]
+    #[cfg_attr(not(target_os = "macos"), arg(skip))]
+    #[cfg(target_os = "macos")]
     galb_buf_kb: Option<usize>,
 
     /// Compatibility mode: hyperdu (default), gnu, gnu-strict, posix-strict
@@ -519,24 +475,33 @@ struct Args {
     gib: bool,
 
     /// Print time column (default: mtime). Use --time-kind to choose
-    #[arg(
+    #[cfg_attr(feature = "time-format", arg(
         long = "time",
         action = ArgAction::SetTrue,
         long_help = "時刻列を出力に追加します（既定はmtime）。--time-kind と併用可。du互換出力で有効。"
-    )]
+    ))]
+    #[cfg_attr(not(feature = "time-format"), arg(skip))]
     time: bool,
     /// Time kind for --time: mtime, atime, ctime
-    #[arg(
-        long = "time-kind",
-        value_enum,
-        long_help = "--time で出力する時刻の種類: mtime, atime, ctime。"
+    #[cfg_attr(
+        feature = "time-format",
+        arg(
+            long = "time-kind",
+            value_enum,
+            long_help = "--time で出力する時刻の種類: mtime, atime, ctime。"
+        )
     )]
+    #[cfg_attr(not(feature = "time-format"), arg(skip))]
     time_kind: Option<TimeKindArg>,
     /// Time style: iso, long-iso, full-iso (default: iso)
-    #[arg(
-        long = "time-style",
-        long_help = "時刻のフォーマット: iso, long-iso, full-iso または '+<strftimeパターン>'。"
+    #[cfg_attr(
+        feature = "time-format",
+        arg(
+            long = "time-style",
+            long_help = "時刻のフォーマット: iso, long-iso, full-iso または '+<strftimeパターン>'。"
+        )
     )]
+    #[cfg_attr(not(feature = "time-format"), arg(skip))]
     time_style: Option<String>,
 
     /// Performance profile: turbo (fastest), balanced (default), strict (max compatibility)
@@ -546,8 +511,7 @@ struct Args {
         default_value_t = PerfArg::Balanced,
         long_help = "性能プロファイルを選択。\n\
     turbo: 最速。論理サイズのみ（物理計算オフ）/ハードリンク重複排除なし。\n\
-            サイズは正確です。概算にする場合は --approximate を明示してください\n\
-            （合計が実測で -95%〜+149% 外れます）。\n\
+            サイズは正確です。\n\
     balanced: 既定（バランス重視）。\n\
     strict: 互換性最優先（du互換を厳格化/ハードリンク重複排除/エラー出力など）。"
     )]
@@ -726,14 +690,6 @@ fn main() -> Result<()> {
             // --approximate rather than implied here. See #29.
             opt.compute_physical = false;
             opt.count_hardlinks = true; // do not dedupe
-                                        // keep compat in HyperDU unless明示
-                                        // io_uring のチューニングはオプトインのままにする。
-                                        // SQPOLL はワーカーごとに ring を持つ設計と噛み合わず、
-                                        // カーネル側の polling スレッドが CPU を奪うため、
-                                        // 小さなツリーや CPU 数の少ない環境では逆効果になる。
-                                        // 必要なら --uring-sqpoll で明示的に有効化する。
-                                        // 初期バッチ/深さを強めに（ライブチューナが追従）
-                                        // 簡易ヒューリスティクス（環境変数で上書き可）
         }
         PerfArg::Balanced => {
             // keep defaults (current behavior)
@@ -748,25 +704,8 @@ fn main() -> Result<()> {
             opt.count_hardlinks = false; // dedupe
         }
     }
-    // The io_uring backend was removed; its flags are still accepted so
-    // existing scripts keep working, but they no longer do anything.
-    if args.no_uring
-        || args.uring_sqpoll
-        || args.uring_coop
-        || args.uring_batch.is_some()
-        || args.uring_depth.is_some()
-        || args.uring_sqpoll_idle_ms.is_some()
-        || args.uring_sqpoll_cpu.is_some()
-    {
-        eprintln!(
-            "warning: io_uring バックエンドは削除されました。--uring-* / --no-uring は無視されます。"
-        );
-    }
     #[cfg(target_os = "linux")]
     {
-        if let Some(kb) = args.getdents_buf_kb {
-            std::env::set_var("HYPERDU_GETDENTS_BUF_KB", kb.to_string());
-        }
         if args.pin_threads {
             std::env::set_var("HYPERDU_PIN_THREADS", "1");
         }
@@ -777,7 +716,7 @@ fn main() -> Result<()> {
             std::env::set_var("HYPERDU_GALB_BUF_KB", kb.to_string());
         }
     }
-    #[cfg(target_os = "windows")]
+    #[cfg(all(windows, target_env = "msvc"))]
     {
         if args.win_ntquery {
             std::env::set_var("HYPERDU_WIN_USE_NTQUERY", "1");
@@ -857,7 +796,7 @@ fn main() -> Result<()> {
             .store(n, std::sync::atomic::Ordering::Relaxed);
     }
     opt.progress_every = args.progress_every.unwrap_or(8192);
-    let print_progress = args.progress;
+    let print_progress = args.progress || std::io::stderr().is_terminal();
     let t_start = std::time::Instant::now();
     let last = std::sync::Arc::new(std::sync::Mutex::new((0u64, t_start)));
     let last_cb = last.clone();
@@ -871,17 +810,17 @@ fn main() -> Result<()> {
         let recent_rate = (delta_n as f64) / delta_dt;
         *last_cb.lock().unwrap() = (n, now);
         if print_progress {
-            println!(
+            eprintln!(
                 "progress: processed {n} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)"
             );
         }
     }));
     // Keep-alive: emit periodic status if no progress callback fired recently
     let _keepalive = KeepAlive::start(print_progress, last.clone());
-    if args.progress {
+    if print_progress {
         opt.progress_sample_callback = Some(std::sync::Arc::new(
             move |s: &hyperdu_core::ProgressSample<'_>| {
-                println!(
+                eprintln!(
                     "  sample: {} (size: {})",
                     short_path(s.path),
                     format_size(s.logical, BINARY)
@@ -1015,7 +954,7 @@ fn main() -> Result<()> {
                 let delta_n = total_stat.files.saturating_sub(prev_n);
                 let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
                 let recent_rate = (delta_n as f64) / delta_dt;
-                println!(
+                eprintln!(
                     "progress: processed {files} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)",
                     files = total_stat.files
                 );
@@ -1217,7 +1156,7 @@ fn main() -> Result<()> {
                             let delta_n = total_files.saturating_sub(prev_n);
                             let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
                             let recent_rate = (delta_n as f64) / delta_dt;
-                            println!(
+                            eprintln!(
                                 "progress: processed {total_files} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)"
                             );
                             *last.lock().unwrap() = (total_files, now);
@@ -1270,7 +1209,7 @@ fn main() -> Result<()> {
                             let delta_n = total_files.saturating_sub(prev_n);
                             let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
                             let recent_rate = (delta_n as f64) / delta_dt;
-                            println!(
+                            eprintln!(
                                 "progress: processed {total_files} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)"
                             );
                             *last.lock().unwrap() = (total_files, now);
@@ -1330,7 +1269,7 @@ fn main() -> Result<()> {
                             let delta_n = total_files.saturating_sub(prev_n);
                             let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
                             let recent_rate = (delta_n as f64) / delta_dt;
-                            println!(
+                            eprintln!(
                                 "progress: processed {total_files} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)"
                             );
                             *last.lock().unwrap() = (total_files, now);

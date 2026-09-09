@@ -158,3 +158,83 @@ fn a_directory_named_mcp_can_be_scanned_with_option_terminator() -> TestResult {
     }
     Ok(())
 }
+
+#[test]
+fn scan_progress_precedes_result_and_keeps_the_request_token() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    std::fs::write(dir.path().join("data.bin"), [1u8; 512])?;
+    let (child, mut stdin, mut reader) = spawn_server()?;
+    send_json(
+        &mut stdin,
+        &json!({
+            "jsonrpc":"2.0", "id":1, "method":"initialize", "params":{
+                "protocolVersion":"2024-11-05", "capabilities":{},
+                "clientInfo":{"name":"progress-test","version":"0"}
+            }
+        }),
+    )?;
+    read_response(&mut reader, 1)?;
+    send_json(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+    )?;
+    for (id, token) in [(2u64, Some("scan-one")), (3, Some("scan-two")), (4, None)] {
+        let mut params = json!({"name":"scan_path", "arguments":{
+            "path":dir.path().display().to_string(),"top_n":1,"max_depth":0
+        }});
+        if let Some(token) = token {
+            params["_meta"] = json!({"progressToken":token});
+        }
+        send_json(
+            &mut stdin,
+            &json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":params}),
+        )?;
+        let mut notifications = Vec::new();
+        let response = loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line)? == 0 {
+                return Err("server exited during progress test".into());
+            }
+            let message: Value = serde_json::from_str(line.trim())?;
+            if message.get("id").and_then(Value::as_u64) == Some(id) {
+                break message;
+            }
+            if message["method"] == "notifications/progress" {
+                notifications.push(message["params"].clone());
+            }
+        };
+        assert!(response.get("error").is_none(), "{response}");
+        assert_eq!(
+            response["result"]["structuredContent"]["entries"][0]["files"],
+            1
+        );
+        if let Some(token) = token {
+            assert!(
+                !notifications.is_empty(),
+                "start must arrive before the result"
+            );
+            assert_eq!(notifications[0]["progress"], 0.0);
+            assert!(notifications[0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Scanning"));
+            let mut previous = -1.0;
+            for notification in notifications {
+                assert_eq!(notification["progressToken"], token);
+                assert!(
+                    notification.get("total").is_none(),
+                    "unknown totals must not invent a percentage"
+                );
+                let current = notification["progress"].as_f64().unwrap();
+                assert!(current > previous, "progress must increase");
+                previous = current;
+            }
+        } else {
+            assert!(
+                notifications.is_empty(),
+                "no unsolicited progress without a token"
+            );
+        }
+    }
+    stop_server(child, stdin, reader)
+}

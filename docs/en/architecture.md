@@ -54,6 +54,32 @@ Files directly under the root are reported as the aggregate total after the core
 
 The total for hardlinks is consistent in both modes, but which folder receives the size of a duplicated name depends on scan order. The results of a batch scan and a per-child-folder breakdown therefore do not always match in every detail.
 
+### GUI background work and display
+
+A dedicated `hyperdu-gui-scan` thread calls the core and prepares the directory index, cached totals, and four sort orders. Result ingestion and display-order changes do not move file enumeration or a full-result sort onto the UI thread.
+
+```text
+core ScanEvent -> background index / sorting
+                       |
+                node chunks (256)
+                       |
+                 bounded queue (2)
+                       |
+           UI ingestion budget -> tree / visible table rows
+
+core progress counter -----------------> status / elapsed time
+```
+
+Node updates contain at most 256 nodes, and the queue holds two messages. The UI ingests at most 1,024 units of update work per frame, with a 3 ms time budget, and defers remaining work to later frames. Time is checked cooperatively between updates; a single allocation or destruction of an old model is not guaranteed to finish within 3 ms. The worker also retains a full index, so total memory is not bounded by the queue capacity alone.
+
+A parent's sorted index is published after its referenced nodes have been sent. This avoids references to missing IDs, but does not guarantee that table rows appear with the first chunk. The table renders visible rows, and tree rendering has depth and row budgets. Deeper directories remain accessible through the table and breadcrumbs.
+
+Starting a scan immediately sets a working state. A shared counter updates progress and elapsed time independently of the result queue. Incoming events request repainting, with periodic refreshes while scanning. Cancellation reaches the core and index preparation through a shared flag; partial results are not labeled complete. It cannot immediately interrupt synchronous I/O or an individual sort already in progress. Dropping the receiver releases a sender blocked on the queue, and replacing the scan handle isolates old results from the next scan.
+
+Terminal events are handled after preceding updates. Read errors, cancellation, and a disconnected sender without a terminal event are distinguished from successful completion. User-triggered JSON/CSV export copies all rows and sorts them by path. This and some other operations, including model replacement, still run synchronously on the UI thread.
+
+Implementation: [GUI transport / index](../../hyperdu-gui/src/scan.rs), [UI ingestion / rendering](../../hyperdu-gui/src/app.rs), and [core modes / events](../../hyperdu-core/src/lib.rs).
+
 ## Platform boundary
 
 ### Linux
@@ -86,20 +112,43 @@ On Windows, one batch enumeration obtains sizes and file IDs as well, so reducin
 ### Optional MFT path
 
 ```text
---mft + supported NTFS volume root
-              |
-              v
-        read / parse $MFT
-              |
-       complete + valid ?
-          /          \
-        yes           no
-         |             |
-         v             v
-      result      directory enumeration
+shared eligibility guard
+ Windows MSVC / volume root / administrator / supported options
+                         |
+                   open NTFS volume
+                         |
+       extent-limited raw window -> copied record -> fixups / parse
+                         |
+              parent-record-ID aggregation
+                         |
+               directory paths / rollup
+
+ineligible or incomplete required read/parse -> directory enumeration
 ```
 
-The MFT backend is an optional fast path. It does not force partial aggregation for a layout it cannot parse; it falls back to the normal path.
+MFT is an experimental, optional Windows MSVC path. The CLI, GUI, and direct core API use the same eligibility check. Besides a volume root and administrator privileges, the guard rejects raw/compiled exclusions, depth limits, minimum sizes, link following, separate hardlink counting, approximate sizes, and an externally supplied deduplication cache. Normal scan APIs then use directory enumeration. The direct API returns `None`, allowing validation to distinguish an actual MFT scan from a fallback.
+
+The reader batches sequential MFT records through a raw-byte window whose default limit is 1 MiB. Read-ahead stays inside a physical extent; a record crossing an extent boundary is assembled from the required segments. Fixups are applied to a copied record, so rereads and extension-record lookups cannot mistake already-patched cached bytes for raw data. Failed read-ahead clears the cache and retries the required segment. Incomplete required reads or parsing are not accepted as a result.
+
+Aggregation adds sizes to parent record IDs before constructing directory paths and rolling totals up in the core. Hardlink identities and the handling of missing or cyclic parents retain the existing accounting rules. The read window is bounded, but the reader keeps all entries and aggregate results in memory; this is not a constant-memory scan of the entire MFT.
+
+The reader checks progress and cancellation before iteration, at intervals of at most 256 records, and at a successful end. Record counts include inactive slots and differ from final file counts or completion percentages. Synchronous extension reads cannot be interrupted immediately. A successful MFT scan requested through Interactive mode emits `BatchFallback(Mft)` and `BatchCompleted` to identify batched delivery. This is distinct from falling back to enumeration after MFT failure.
+
+Eligibility and successful parsing of required records do not prove complete parity with enumeration. Known accounting differences remain, so performance validation must report the path actually used and accounting differences separately.
+
+Implementation: [shared eligibility](../../hyperdu-core/src/platform/windows_impl/mod.rs), [reader](../../hyperdu-core/src/platform/windows_impl/mft_reader.rs), [raw window](../../hyperdu-core/src/platform/windows_impl/mft_reader/window.rs), and [ID aggregation](../../hyperdu-core/src/platform/windows_impl/mft_aggregate.rs).
+
+## CLI / MCP progress delivery
+
+The ordinary CLI writes results to stdout and progress/diagnostics to stderr. A terminal on stderr enables the working indicator automatically; use `--progress` for redirected stderr. It reports a working state immediately and wakes the waiting status thread on completion instead of waiting for its refresh interval.
+
+`hyperdu mcp` is an rmcp stdio server. When `scan_path` receives MCP `_meta.progressToken`, it sends standard `notifications/progress` messages with an initial value of zero followed by increasing file counts. No token means no progress notifications. Tokens and cancellation state belong to each request, keeping concurrent calls separate.
+
+The synchronous core scan runs through `spawn_blocking`. Its callback only updates the latest count in a watch channel, so the scanner does not wait for protocol transport. The async sender coalesces updates and throttles intermediate notifications to approximately 250 ms intervals. It sends the final count before the result when that count has not already been sent. Counts are not percentages; the final tool result establishes successful completion.
+
+Request cancellation, request destruction, or a notification transport failure propagates to the core cancellation flag. This is cooperative cancellation, not an immediate interruption of synchronous OS I/O. This progress adapter serves `scan_path`; it does not promise progress for every MCP tool.
+
+Implementation: [CLI](../../hyperdu-cli/src/main.rs), [MCP tools](../../hyperdu-cli/src/mcp.rs), and [MCP progress adapter](../../hyperdu-cli/src/mcp/progress.rs). See the [CLI reference (Japanese)](../cli-reference.md) for argument and output conditions.
 
 ## Concurrency model
 

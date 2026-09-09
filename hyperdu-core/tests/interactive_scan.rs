@@ -1,4 +1,3 @@
-use hyperdu_core::{scan_directory, scan_directory_mode, Options, ScanEvent, ScanMode, StatMap};
 use std::{
     path::{Path, PathBuf},
     sync::{
@@ -6,6 +5,8 @@ use std::{
         Arc,
     },
 };
+
+use hyperdu_core::{scan_directory, scan_directory_mode, Options, ScanEvent, ScanMode, StatMap};
 
 fn collect(root: &Path, opt: &Options) -> anyhow::Result<(StatMap, Vec<&'static str>)> {
     let mut map = StatMap::default();
@@ -252,4 +253,22 @@ fn one_file_system_rejects_a_link_into_another_filesystem() {
         normalized(&interactive).get(dir.path())
     );
     assert_eq!(interactive.get(dir.path()).unwrap().files, 5);
+}
+
+#[test]
+fn cancellation_from_batch_result_has_no_false_completion() {
+    let dir = fixture();
+    let opt = Options::default();
+    let mut events = Vec::new();
+    scan_directory_mode(dir.path(), &opt, ScanMode::Batch, |event| match event {
+        ScanEvent::BatchCompleted { .. } => {
+            events.push("batch");
+            opt.cancel.store(true, Ordering::Relaxed);
+        }
+        ScanEvent::Cancelled => events.push("cancelled"),
+        ScanEvent::Finished => events.push("finished"),
+        _ => panic!("unexpected event"),
+    })
+    .unwrap();
+    assert_eq!(events, ["batch", "cancelled"]);
 }

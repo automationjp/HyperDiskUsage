@@ -33,8 +33,8 @@ jobs:
           cargo +nightly fmt --all -- --check --config group_imports=StdExternalCrate --config imports_granularity=Crate
       - name: Build
         run: cargo build --workspace --release
-      - name: Test core and CLI
-        run: cargo test -p hyperdu-core -p hyperdu -- --nocapture
+      - name: Test core, CLI and GUI
+        run: cargo test -p hyperdu-core -p hyperdu -p hyperdu-gui -- --nocapture
 
   # Native enumeration and MFT I/O need Windows. A fresh, owned NTFS VHDX is
   # populated and remounted read-only; parity must use MFT, never its fallback.
@@ -47,7 +47,7 @@ jobs:
           components: clippy
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Test core and CLI on a fixed NTFS volume
+      - name: Test core, CLI and GUI on a fixed NTFS volume
         run: .\scripts\dev\ntfs_fixture.ps1
 
   # Note: artifact packaging is handled in release.yml on tags. CI only builds and tests.

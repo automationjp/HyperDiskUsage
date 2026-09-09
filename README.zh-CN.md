@@ -17,6 +17,8 @@
 
 ## 快速开始
 
+参数默认值、输出模式及平台限制见 [CLI 参数参考（日语）](docs/cli-reference.md)。`--time` 系列参数需要默认启用的 `time-format` feature。
+
 > **0.5.0-beta.3 正在准备发布。** 在当前分支可以使用 `cargo install --locked --path hyperdu-cli` 安装。下方的 crates.io 命令和新名称发行文件将在版本正式发布后可用。
 
 ```bash
@@ -50,22 +52,9 @@ HyperDU 的核心目标是 **高速磁盘使用量分析**。
 
 它并非只是用 Rust 重写 `du`，而是针对各操作系统的目录枚举、元数据获取、并行遍历以及物理大小统计等热路径进行优化。
 
-### Benchmark status: Windows / Linux 已重新测量
+### HyperDU 与 du 比较
 
-2026-09-09 / `0a089c90c0e2`
-
-| Platform / Dataset | HyperDU | Baseline | Ratio |
-|---|---:|---:|---:|
-| Windows / wide | 30.7 ms | 57.4 ms | 1.87x |
-| Windows / deep | 77.1 ms | 72.0 ms | 0.93x |
-| Windows / flat | 34.1 ms | 42.8 ms | 1.26x |
-| Windows / registry | 332.2 ms | 1838.5 ms | 5.53x |
-| Linux / wide | 47.3 ms | 208.6 ms | 4.41x |
-| Linux / deep | 89.1 ms | 143.4 ms | 1.61x |
-| Linux / flat | 130.5 ms | 184.4 ms | 1.41x |
-| Linux / registry | 144.6 ms | 978.9 ms | 6.77x |
-
-每项预热后运行8次的中位数。Windows：NTFS / robocopy；Linux：WSL2 / ext4 / uutils du 0.8.0。未测量 GNU du、冷缓存或 XFS。 [Details](docs/zh-CN/benchmarks.md)
+正在准备最新版AWS EC2测量。只发布与GNU du直接一致的目录字节总量：物理分配量、不追踪符号链接、硬链接去重、单一filesystem、输出全部目录行。旧WSL2测量需要外部统计补正，已撤回，不再作为速度比较依据。 [Details](docs/zh-CN/benchmarks.md)
 
 ### Why it is fast
 

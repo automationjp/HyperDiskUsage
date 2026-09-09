@@ -1,5 +1,8 @@
 use std::sync::atomic::Ordering;
 
+#[cfg(not(target_env = "musl"))]
+mod strict;
+
 use crate::{
     common_ops::{
         calculate_physical_size, check_hardlink_duplicate, check_visited_directory,
@@ -15,6 +18,11 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let depth = dctx.depth;
     let resume = dctx.resume;
     let opt = ctx.options;
+    let strict_accounting = cfg!(not(target_env = "musl"))
+        && matches!(
+            opt.compat_mode,
+            crate::CompatMode::GnuStrict | crate::CompatMode::PosixStrict
+        );
     use std::{ffi::CString, os::unix::ffi::OsStrExt};
 
     const SYS_GETDENTS64: libc::c_long = 217; // x86_64
@@ -34,8 +42,10 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     // `statx` the parent issued on its behalf. One `fstat` answers both
     // questions, the identity is the real one even when we arrived through a
     // symlink, and the scan root is covered like any other directory. When
-    // neither question is asked, the syscall is skipped entirely.
-    if opt.one_file_system || crate::follows_links(opt) {
+    // Strict accounting also needs its allocated blocks; otherwise, when no
+    // boundary or cycle check is needed, the syscall is skipped entirely.
+    let mut directory_blocks = None;
+    if strict_accounting || opt.one_file_system || crate::follows_links(opt) {
         let mut st_cur: libc::stat = unsafe { std::mem::zeroed() };
         if unsafe { libc::fstat(fd, &mut st_cur as *mut _) } == 0 {
             let dev = crate::platform::linux_helpers::packed_dev(st_cur.st_dev);
@@ -55,8 +65,12 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                 unsafe { libc::close(fd) };
                 return;
             }
-        } else if opt.one_file_system {
-            // Cannot confirm which filesystem this is, so `-x` must not cross.
+            if strict_accounting && resume.is_none() {
+                directory_blocks = Some(st_cur.st_blocks.max(0) as u64);
+            }
+        } else if strict_accounting || opt.one_file_system {
+            // An unstatable directory cannot supply strict accounting or a
+            // confirmed filesystem boundary.
             record_error(opt, &last_os_error_systemcall(dir, "fstat"));
             unsafe { libc::close(fd) };
             return;
@@ -72,14 +86,23 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
         }
     }
     if let Some(off) = resume {
-        unsafe {
-            libc::lseek(fd, off as libc::off_t, libc::SEEK_SET);
+        if unsafe { libc::lseek(fd, off as libc::off_t, libc::SEEK_SET) } < 0 {
+            record_error(opt, &last_os_error_systemcall(dir, "lseek"));
+            unsafe { libc::close(fd) };
+            return;
         }
     }
 
     let mut guard = BufferGuard::borrow(opt.getdents_buf_bytes);
     let buf = guard.as_mut_slice();
     let stat_cur = map.entry(dir.to_path_buf()).or_default();
+    if let Some(blocks) = directory_blocks {
+        // A resume contributes only its remaining entries. Directory metadata
+        // belongs to the first accepted visit and is not a file/progress event.
+        // GNU du excludes directories from apparent size but includes their
+        // allocated blocks in disk usage.
+        stat_cur.physical += calculate_physical_size(opt, 0, blocks);
+    }
     // Progress is accounted once per directory. Touching the shared counter and
     // building a PathBuf for every file costs more than the scan itself once the
     // sizes come from a cheap `statx`.
@@ -97,7 +120,11 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                 buf.len(),
             )
         } as isize;
-        if nread <= 0 {
+        if nread < 0 {
+            record_error(opt, &last_os_error_systemcall(dir, "getdents64"));
+            break;
+        }
+        if nread == 0 {
             break;
         }
         let mut bpos: isize = 0;
@@ -137,12 +164,68 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                     continue;
                 }
             }
-            if is_lnk && !opt.follow_links {
+            if is_lnk && !opt.follow_links && !strict_accounting {
                 bpos += d_reclen;
                 continue;
             }
 
-            if is_dir_hint {
+            if strict_accounting {
+                #[cfg(not(target_env = "musl"))]
+                {
+                    use std::ffi::OsStr;
+                    // Directory identity and self size are read from its open
+                    // descriptor when the queued job accepts the directory.
+                    if is_dir_hint {
+                        if opt.max_depth == 0 || depth < opt.max_depth {
+                            ctx.enqueue_dir(dir.join(OsStr::from_bytes(name_slice)), depth + 1);
+                        }
+                    } else {
+                        let name_ptr =
+                            unsafe { crate::platform::linux_helpers::dirent_name_ptr(ptr) };
+                        // SAFETY: getdents64 supplied a NUL-terminated entry name
+                        // in the live buffer, which remains borrowed for this call.
+                        let name = unsafe { std::ffi::CStr::from_ptr(name_ptr) };
+                        match strict::metadata(fd, name, opt.follow_links) {
+                            Ok(metadata) if metadata.is_dir() => {
+                                if opt.max_depth == 0 || depth < opt.max_depth {
+                                    ctx.enqueue_dir(
+                                        dir.join(OsStr::from_bytes(name_slice)),
+                                        depth + 1,
+                                    );
+                                }
+                            }
+                            Ok(metadata) => {
+                                let duplicate =
+                                    crate::common_ops::hardlink_candidate(opt, metadata.nlink)
+                                        && check_hardlink_duplicate(
+                                            opt,
+                                            metadata.dev,
+                                            metadata.ino,
+                                        );
+                                if !duplicate && metadata.logical >= opt.min_file_size {
+                                    let physical = calculate_physical_size(
+                                        opt,
+                                        metadata.logical,
+                                        metadata.blocks,
+                                    );
+                                    update_file_stats(stat_cur, metadata.logical, physical);
+                                    counted.record(name_slice, metadata.logical, physical);
+                                }
+                            }
+                            Err(error) => {
+                                let child_path = dir.join(OsStr::from_bytes(name_slice));
+                                record_error(
+                                    opt,
+                                    &crate::error_handling::ScanError::IoError {
+                                        path: child_path,
+                                        source: error,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+            } else if is_dir_hint {
                 if opt.max_depth == 0 || depth < opt.max_depth {
                     // No per-child `statx` here. The filesystem-boundary and
                     // cycle checks happen when the child is opened, which is

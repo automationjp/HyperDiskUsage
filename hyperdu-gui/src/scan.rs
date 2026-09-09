@@ -1,5 +1,4 @@
 //! GUI transport and directory index. All filesystem policy lives in hyperdu-core.
-use hyperdu_core::{self as core, ScanEvent, ScanMode, Stat, StatMap};
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -9,7 +8,32 @@ use std::{
     },
 };
 
+use hyperdu_core::{self as core, ScanEvent, ScanMode, Stat, StatMap};
+
+pub const CHUNK_NODES: usize = 256;
+type Orders = [Arc<[u32]>; 4];
+type Node = (u32, PathBuf, Stat, bool);
+pub enum Update {
+    Nodes(Vec<Node>),
+    Parent(PathBuf, Orders),
+    Direct(Stat),
+    Resolved(PathBuf),
+    Reset,
+}
+impl Update {
+    pub fn work(&self) -> usize {
+        match self {
+            Self::Nodes(nodes) => nodes.len(),
+            _ => 1,
+        }
+    }
+}
+struct Prepared {
+    nodes: Vec<Node>,
+    parents: Vec<(PathBuf, Orders)>,
+}
 pub enum Msg {
+    Update(Update),
     Core(ScanEvent),
     Failed(String),
 }
@@ -130,9 +154,13 @@ impl Params {
         Ok(opt)
     }
 }
-pub fn start(root: PathBuf, params: Params) -> anyhow::Result<Handle> {
+pub fn start(
+    root: PathBuf,
+    params: Params,
+    wake: Arc<dyn Fn() + Send + Sync>,
+) -> anyhow::Result<Handle> {
     let mut opt = params.to_options()?;
-    // Bound queued subtree maps while the UI folds previous results.
+    // Queue only bounded node chunks and already-sorted parent indices.
     // Dropping the receiver unblocks a sender when the window closes.
     let (tx, rx) = mpsc::sync_channel(2);
     let files_seen = Arc::new(AtomicU64::new(0));
@@ -155,20 +183,79 @@ pub fn start(root: PathBuf, params: Params) -> anyhow::Result<Handle> {
     std::thread::Builder::new()
         .name("hyperdu-gui-scan".into())
         .spawn(move || {
+            let mut model = Model::new(root.clone());
+            model.cancel = Some(worker_cancel.clone());
+            let send = |message| {
+                let sent = tx.send(message).is_ok();
+                if sent {
+                    wake();
+                } else {
+                    worker_cancel.store(true, Ordering::Relaxed);
+                }
+                sent
+            };
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 core::scan_directory_mode(&root, &opt, params.mode, |event| {
-                    if tx.send(Msg::Core(event)).is_err() {
-                        worker_cancel.store(true, Ordering::Relaxed);
+                    let (prepared, resolved) = match event {
+                        ScanEvent::RootListed {
+                            directories,
+                            direct_files,
+                            ..
+                        } => {
+                            model.direct_files = direct_files;
+                            (model.expect(directories), None)
+                        }
+                        ScanEvent::ChildCompleted { root, map } => {
+                            (model.absorb(&root, map), Some(root))
+                        }
+                        ScanEvent::BatchCompleted { map } => {
+                            let prepared = model.replace_batch(map);
+                            if !send(Msg::Update(Update::Reset)) {
+                                return;
+                            }
+                            (prepared, None)
+                        }
+                        event => {
+                            send(Msg::Core(event));
+                            return;
+                        }
+                    };
+                    if !send(Msg::Update(Update::Direct(model.direct_files))) {
+                        return;
+                    }
+                    let mut nodes = prepared.nodes.into_iter();
+                    loop {
+                        if worker_cancel.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        let chunk: Vec<_> = nodes.by_ref().take(CHUNK_NODES).collect();
+                        if chunk.is_empty() {
+                            break;
+                        }
+                        if !send(Msg::Update(Update::Nodes(chunk))) {
+                            return;
+                        }
+                    }
+                    // FIFO guarantees all referenced IDs exist before publication.
+                    for (parent, orders) in prepared.parents {
+                        if worker_cancel.load(Ordering::Relaxed)
+                            || !send(Msg::Update(Update::Parent(parent, orders)))
+                        {
+                            return;
+                        }
+                    }
+                    if let Some(root) = resolved {
+                        send(Msg::Update(Update::Resolved(root)));
                     }
                 })
             }));
             match result {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => {
-                    let _ = tx.send(Msg::Failed(e.to_string()));
+                    send(Msg::Failed(e.to_string()));
                 }
                 Err(_) => {
-                    let _ = tx.send(Msg::Failed("走査スレッドが異常終了しました".into()));
+                    send(Msg::Failed("走査スレッドが異常終了しました".into()));
                 }
             }
         })?;
@@ -183,11 +270,12 @@ pub fn start(root: PathBuf, params: Params) -> anyhow::Result<Handle> {
 
 #[derive(Default)]
 pub struct Model {
-    pub revision: u64,
     pub root: PathBuf,
+    cancel: Option<Arc<AtomicBool>>,
     entries: Vec<(PathBuf, Stat)>,
     paths: HashMap<PathBuf, u32>,
-    children: HashMap<PathBuf, Vec<u32>>,
+    children: HashMap<PathBuf, Orders>,
+    child_sums: HashMap<PathBuf, Stat>,
     pending: HashSet<PathBuf>,
     pub direct_files: Stat,
 }
@@ -198,9 +286,9 @@ impl Model {
             ..Self::default()
         }
     }
-    pub fn expect(&mut self, dirs: Vec<PathBuf>) {
+    fn expect(&mut self, dirs: Vec<PathBuf>) -> Prepared {
         self.pending = dirs.iter().cloned().collect();
-        self.insert_all(dirs.into_iter().map(|p| (p, Stat::default())));
+        self.insert_all(dirs.into_iter().map(|p| (p, Stat::default())))
     }
     pub fn is_pending(&self, path: &Path) -> bool {
         self.pending.contains(path)
@@ -211,11 +299,11 @@ impl Model {
     pub fn entry_count(&self) -> usize {
         self.entries.len()
     }
-    pub fn absorb(&mut self, root: &Path, map: StatMap) {
+    fn absorb(&mut self, root: &Path, map: StatMap) -> Prepared {
         self.pending.remove(root);
-        self.insert_all(map.into_iter());
+        self.insert_all(map.into_iter())
     }
-    pub fn replace_batch(&mut self, mut map: StatMap) {
+    fn replace_batch(&mut self, mut map: StatMap) -> Prepared {
         let total = map.remove(&self.root).unwrap_or_default();
         let children = map
             .iter()
@@ -229,49 +317,128 @@ impl Model {
         self.entries.clear();
         self.paths.clear();
         self.children.clear();
+        self.child_sums.clear();
         self.pending.clear();
         self.direct_files = Stat {
             logical: total.logical.saturating_sub(children.logical),
             physical: total.physical.saturating_sub(children.physical),
             files: total.files.saturating_sub(children.files),
         };
-        self.insert_all(map.into_iter());
+        self.insert_all(map.into_iter())
     }
-    fn insert_all(&mut self, items: impl Iterator<Item = (PathBuf, Stat)>) {
-        self.revision += 1;
-        let mut touched = HashSet::new();
+    fn insert_all(&mut self, items: impl Iterator<Item = (PathBuf, Stat)>) -> Prepared {
+        let mut touched: HashMap<PathBuf, Vec<u32>> = HashMap::new();
+        let mut nodes = Vec::new();
         for (path, stat) in items {
+            if nodes.len() % CHUNK_NODES == 0
+                && self
+                    .cancel
+                    .as_ref()
+                    .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                break;
+            }
             let Some(parent) = path.parent().map(Path::to_path_buf) else {
                 continue;
             };
-            if let Some(&index) = self.paths.get(&path) {
-                self.entries[index as usize].1 = stat;
-            } else {
-                let index = self.entries.len() as u32;
-                self.paths.insert(path.clone(), index);
-                self.entries.push((path, stat));
-                self.children.entry(parent.clone()).or_default().push(index);
+            let indices = touched
+                .entry(parent)
+                .or_insert_with(|| self.children_of(path.parent().unwrap()).to_vec());
+            let existing = self.paths.get(&path).copied();
+            let index = existing.unwrap_or(self.entries.len() as u32);
+            let pending = self.pending.contains(&path);
+            self.set_node(index, path.clone(), stat, pending);
+            if existing.is_none() {
+                indices.push(index);
             }
-            touched.insert(parent);
+            nodes.push((index, path, stat, pending));
         }
-        for parent in touched {
-            if let Some(indices) = self.children.get_mut(&parent) {
-                indices.sort_unstable_by(|a, b| {
-                    self.entries[*b as usize]
-                        .1
-                        .physical
-                        .cmp(&self.entries[*a as usize].1.physical)
-                        .then_with(|| {
-                            self.entries[*a as usize]
-                                .0
-                                .cmp(&self.entries[*b as usize].0)
-                        })
-                });
+        let mut parents = Vec::with_capacity(touched.len());
+        for (parent, indices) in touched {
+            if self
+                .cancel
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                break;
             }
+            let orders: Orders = std::array::from_fn(|sort| {
+                if self
+                    .cancel
+                    .as_ref()
+                    .is_some_and(|flag| flag.load(Ordering::Relaxed))
+                {
+                    return Arc::from([]);
+                }
+                let mut sorted = indices.clone();
+                sorted.sort_unstable_by(|a, b| {
+                    let (pa, sa) = self.entry(*a);
+                    let (pb, sb) = self.entry(*b);
+                    match sort {
+                        1 => sb.logical.cmp(&sa.logical),
+                        2 => sb.files.cmp(&sa.files),
+                        3 => pa.cmp(pb),
+                        _ => sb.physical.cmp(&sa.physical),
+                    }
+                    .then_with(|| pa.cmp(pb))
+                });
+                Arc::from(sorted)
+            });
+            self.children.insert(parent.clone(), orders.clone());
+            parents.push((parent, orders));
+        }
+        Prepared { nodes, parents }
+    }
+    fn set_node(&mut self, index: u32, path: PathBuf, stat: Stat, pending: bool) {
+        let old = if (index as usize) < self.entries.len() {
+            std::mem::replace(&mut self.entries[index as usize].1, stat)
+        } else {
+            assert_eq!(
+                index as usize,
+                self.entries.len(),
+                "ordered display node IDs"
+            );
+            self.paths.insert(path.clone(), index);
+            self.entries.push((path.clone(), stat));
+            Stat::default()
+        };
+        if let Some(parent) = path.parent() {
+            let sum = self.child_sums.entry(parent.to_path_buf()).or_default();
+            sum.files = sum.files.saturating_sub(old.files) + stat.files;
+            sum.logical = sum.logical.saturating_sub(old.logical) + stat.logical;
+            sum.physical = sum.physical.saturating_sub(old.physical) + stat.physical;
+        }
+        if pending {
+            self.pending.insert(path);
+        } else {
+            self.pending.remove(&path);
         }
     }
+    pub fn apply(&mut self, update: Update) {
+        match update {
+            Update::Nodes(nodes) => {
+                for (index, path, stat, pending) in nodes {
+                    self.set_node(index, path, stat, pending);
+                }
+            }
+            Update::Parent(parent, orders) => {
+                self.children.insert(parent, orders);
+            }
+            Update::Direct(stat) => self.direct_files = stat,
+            Update::Resolved(path) => {
+                self.pending.remove(&path);
+            }
+            Update::Reset => *self = Self::new(self.root.clone()),
+        }
+    }
+    pub fn children_sorted(&self, dir: &Path, sort: u8) -> &[u32] {
+        self.children
+            .get(dir)
+            .map(|orders| orders[usize::from(sort.min(3))].as_ref())
+            .unwrap_or(&[])
+    }
     pub fn children_of(&self, dir: &Path) -> &[u32] {
-        self.children.get(dir).map(Vec::as_slice).unwrap_or(&[])
+        self.children_sorted(dir, 0)
     }
     pub fn entry(&self, index: u32) -> (&Path, &Stat) {
         let (p, s) = &self.entries[index as usize];
@@ -282,16 +449,11 @@ impl Model {
     }
     pub fn total_of(&self, dir: &Path) -> Stat {
         if dir == self.root {
-            return self
-                .children_of(dir)
-                .iter()
-                .fold(self.direct_files, |mut a, &i| {
-                    let s = self.entry(i).1;
-                    a.logical += s.logical;
-                    a.physical += s.physical;
-                    a.files += s.files;
-                    a
-                });
+            let mut total = self.child_sums.get(dir).copied().unwrap_or_default();
+            total.files += self.direct_files.files;
+            total.logical += self.direct_files.logical;
+            total.physical += self.direct_files.physical;
+            return total;
         }
         self.paths
             .get(dir)
@@ -303,12 +465,10 @@ impl Model {
             return self.direct_files;
         }
         let mut total = self.total_of(dir);
-        for &index in self.children_of(dir) {
-            let s = self.entry(index).1;
-            total.logical = total.logical.saturating_sub(s.logical);
-            total.physical = total.physical.saturating_sub(s.physical);
-            total.files = total.files.saturating_sub(s.files);
-        }
+        let children = self.child_sums.get(dir).copied().unwrap_or_default();
+        total.logical = total.logical.saturating_sub(children.logical);
+        total.physical = total.physical.saturating_sub(children.physical);
+        total.files = total.files.saturating_sub(children.files);
         total
     }
     pub fn rows(&self) -> Vec<(PathBuf, Stat)> {
@@ -317,6 +477,21 @@ impl Model {
         rows.sort_by(|a, b| a.0.cmp(&b.0));
         rows
     }
+}
+
+#[cfg(test)]
+pub fn test_handle(capacity: usize) -> (mpsc::SyncSender<Msg>, Handle) {
+    let (tx, rx) = mpsc::sync_channel(capacity);
+    (
+        tx,
+        Handle {
+            rx,
+            files_seen: Arc::default(),
+            errors: Arc::default(),
+            error_details: Arc::default(),
+            cancel: Arc::default(),
+        },
+    )
 }
 
 #[cfg(test)]
@@ -400,7 +575,16 @@ mod tests {
                 };
                 let expected =
                     core::scan_directory(temp.path(), &params.to_options().unwrap()).unwrap();
-                let handle = start(temp.path().to_path_buf(), params).unwrap();
+                let wakes = Arc::new(AtomicUsize::new(0));
+                let observed = wakes.clone();
+                let handle = start(
+                    temp.path().to_path_buf(),
+                    params,
+                    Arc::new(move || {
+                        observed.fetch_add(1, Ordering::Relaxed);
+                    }),
+                )
+                .unwrap();
                 let mut model = Model::new(temp.path().to_path_buf());
                 loop {
                     match handle
@@ -408,22 +592,15 @@ mod tests {
                         .recv_timeout(std::time::Duration::from_secs(10))
                         .unwrap()
                     {
-                        Msg::Core(ScanEvent::RootListed {
-                            directories,
-                            direct_files,
-                            ..
-                        }) => {
-                            model.expect(directories);
-                            model.direct_files = direct_files;
-                        }
-                        Msg::Core(ScanEvent::ChildCompleted { root, map }) => {
-                            model.absorb(&root, map)
-                        }
-                        Msg::Core(ScanEvent::BatchCompleted { map }) => model.replace_batch(map),
+                        Msg::Update(update) => model.apply(update),
                         Msg::Core(ScanEvent::Finished) => break,
                         _ => panic!("unexpected scan event"),
                     }
                 }
+                assert!(
+                    wakes.load(Ordering::Relaxed) > 0,
+                    "event arrival requests repaint"
+                );
                 let total = model.total_of(temp.path());
                 let expected = expected.get(temp.path()).unwrap();
                 assert_eq!(
@@ -435,5 +612,75 @@ mod tests {
                 assert!(!json.is_empty());
             }
         }
+    }
+
+    #[test]
+    fn worker_orders_and_cached_totals_match_after_bounded_updates() {
+        let root = PathBuf::from("root");
+        let mut worker = Model::new(root.clone());
+        let mut ui = Model::new(root.clone());
+        let prepared = worker.insert_all(
+            [("a", 10, 1, 3), ("b", 3, 9, 1), ("c", 6, 5, 2)]
+                .into_iter()
+                .map(|(name, logical, physical, files)| {
+                    (
+                        root.join(name),
+                        Stat {
+                            logical,
+                            physical,
+                            files,
+                        },
+                    )
+                }),
+        );
+        for node in prepared.nodes {
+            ui.apply(Update::Nodes(vec![node]));
+        }
+        for (parent, orders) in prepared.parents {
+            ui.apply(Update::Parent(parent, orders));
+        }
+        for (sort, names) in ["bca", "acb", "acb", "abc"].into_iter().enumerate() {
+            let actual: String = ui
+                .children_sorted(&root, sort as u8)
+                .iter()
+                .map(|id| {
+                    ui.entry(*id)
+                        .0
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect();
+            assert_eq!(actual, names);
+        }
+        assert_eq!(ui.total_of(&root).files, 6);
+        assert_eq!(ui.total_of(&root).physical, 15);
+        let unchanged = ui.children[&root][0].clone();
+        let other = worker.insert_all(std::iter::once((root.join("a/deep"), Stat::default())));
+        for node in other.nodes {
+            ui.apply(Update::Nodes(vec![node]));
+        }
+        for (parent, orders) in other.parents {
+            ui.apply(Update::Parent(parent, orders));
+        }
+        assert!(
+            Arc::ptr_eq(&unchanged, &ui.children[&root][0]),
+            "unrelated parent order remains shared"
+        );
+    }
+
+    #[test]
+    fn disconnect_releases_a_blocked_sender_and_cancels_its_handle() {
+        let (tx, handle) = test_handle(0);
+        let flag = handle.cancel.clone();
+        let (done, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            done.send(tx.send(Msg::Core(ScanEvent::Finished)).is_err())
+                .unwrap();
+        });
+        drop(handle);
+        assert!(flag.load(Ordering::Relaxed));
+        assert!(rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap());
     }
 }

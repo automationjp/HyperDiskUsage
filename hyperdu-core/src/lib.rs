@@ -201,6 +201,10 @@ pub struct Options {
     /// against each parent, which is what GNU du means by "the starting point".
     #[doc(hidden)]
     pub root_fs_id: u64,
+    /// Scan-local volume shortcut; zero disables reuse after a reparse directory.
+    #[cfg(windows)]
+    #[doc(hidden)]
+    pub windows_root_volume: Option<Arc<AtomicU64>>,
     /// How much I/O the scan may cause. See [`IoProfile`].
     pub io_profile: IoProfile,
     /// Ask the kernel to read ahead of the scan. `None` lets the profile decide.
@@ -293,6 +297,8 @@ impl Default for Options {
             exclude_contains_w: Vec::new(),
             needs_path_filter: false,
             root_fs_id: 0,
+            #[cfg(windows)]
+            windows_root_volume: None,
             compat_mode: CompatMode::HyperDU,
             count_hardlinks: false,
             inode_cache: None,
@@ -716,7 +722,8 @@ pub fn mft_backend_applies(root: impl AsRef<Path>, opt: &Options) -> bool {
 ///
 /// `Some` contains the MFT result, with the same child-to-parent rollup as
 /// [`scan_directory`]. `None` means the backend is disabled, unavailable for
-/// this platform/root/privilege level, or could not complete its volume parse.
+/// this platform/root/privilege level, uses unsupported enumeration options,
+/// or could not complete its volume parse.
 /// In particular, a successful eligibility check does not guarantee `Some`.
 ///
 /// Set [`Options::use_mft`] to request this backend. This exposes the existing
@@ -733,6 +740,10 @@ pub fn scan_directory(root: impl AsRef<Path>, opt: &Options) -> Result<StatMap> 
     if let Some(map) = try_scan_directory_via_mft(root, opt) {
         return Ok(map);
     }
+    if opt.cancel.load(Ordering::Relaxed) {
+        return Ok(StatMap::default());
+    }
+
     let scanner = Arc::new(crate::scanner::platform_scanner());
     scan_directory_with(root, opt, scanner)
 }
@@ -761,7 +772,11 @@ pub fn scan_directory_mode(
             emit(ScanEvent::Cancelled);
         } else {
             emit(ScanEvent::BatchCompleted { map });
-            emit(ScanEvent::Finished);
+            emit(if opt.cancel.load(Ordering::Relaxed) {
+                ScanEvent::Cancelled
+            } else {
+                ScanEvent::Finished
+            });
         }
         return Ok(());
     }
@@ -773,8 +788,16 @@ pub fn scan_directory_mode(
                 reason: BatchFallbackReason::Mft,
             });
             emit(ScanEvent::BatchCompleted { map });
-            emit(ScanEvent::Finished);
+            emit(if opt.cancel.load(Ordering::Relaxed) {
+                ScanEvent::Cancelled
+            } else {
+                ScanEvent::Finished
+            });
         }
+        return Ok(());
+    }
+    if opt.cancel.load(Ordering::Relaxed) {
+        emit(ScanEvent::Cancelled);
         return Ok(());
     }
     if !root.exists() {
@@ -931,6 +954,21 @@ fn prepare_options(root: &Path, opt: &Options, threads: usize) -> Arc<Options> {
     if !compiled.count_hardlinks && compiled.inode_cache.is_none() {
         compiled.inode_cache = Some(Arc::new(DashMap::with_capacity(1024)));
     }
+    #[cfg(windows)]
+    if !compiled.count_hardlinks || compiled.one_file_system {
+        compiled.root_fs_id = platform::filesystem_id(root);
+    }
+    #[cfg(windows)]
+    {
+        // Never inherit another scan's serial or invalidation state.
+        compiled.windows_root_volume = if !compiled.count_hardlinks && !follows_links(&compiled) {
+            platform::local_root_volume_for_reuse(root)
+                .map(|volume| Arc::new(AtomicU64::new(volume)))
+        } else {
+            None
+        };
+    }
+    #[cfg(not(windows))]
     if compiled.one_file_system {
         compiled.root_fs_id = platform::filesystem_id(root);
     }
@@ -1234,6 +1272,41 @@ pub(crate) fn wname_matches(name: &[u16], opt: &Options) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn preparation_refreshes_volume_and_cache_for_each_scan() {
+        let root = tempfile::tempdir().unwrap();
+        let actual = platform::filesystem_id(root.path());
+        assert_ne!(actual, 0);
+        let stale = Arc::new(AtomicU64::new(u64::MAX));
+        let opt = Options {
+            root_fs_id: u64::MAX,
+            windows_root_volume: Some(stale.clone()),
+            ..Options::default()
+        };
+        for _ in 0..2 {
+            let prepared = prepare_options(root.path(), &opt, 2);
+            assert_eq!(prepared.root_fs_id, actual);
+            assert!(prepared.inode_cache.is_some());
+            if let Some(volume) = &prepared.windows_root_volume {
+                assert!(!Arc::ptr_eq(volume, &stale));
+                assert_eq!(volume.load(Ordering::Acquire), actual);
+                volume.store(0, Ordering::Release);
+            }
+        }
+        assert_eq!(stale.load(Ordering::Acquire), u64::MAX);
+        let follow = prepare_options(
+            root.path(),
+            &Options {
+                follow_links: true,
+                ..opt
+            },
+            2,
+        );
+        assert!(follow.windows_root_volume.is_none());
+        assert!(follow.visited_dirs.is_some());
+    }
 
     #[test]
     fn compile_filters_sets_needs_path_filter() {
