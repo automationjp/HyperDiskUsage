@@ -356,6 +356,35 @@ pub fn default_getdents_buf_bytes() -> usize {
         .unwrap_or(128 * 1024) // NVMe/SSD friendly default
 }
 
+/// The `n` largest entries by physical size, descending.
+///
+/// `n == 0` means all of them. Ties break on the path, ascending, which is what
+/// makes this reproducible: a `StatMap` is a `HashMap`, so equal-sized entries
+/// came out in whatever order the iteration happened to take. Thirty
+/// same-sized directories printed six different orderings across six runs of
+/// the same command, which no caller can diff or script against.
+///
+/// The front-ends had drifted to two implementations of this, and only one of
+/// them avoided sorting the whole map to find a handful of rows.
+pub fn top_by_physical(map: StatMap, n: usize) -> Vec<(PathBuf, Stat)> {
+    // Descending by size, then ascending by path.
+    fn order(a: &(PathBuf, Stat), b: &(PathBuf, Stat)) -> std::cmp::Ordering {
+        b.1.physical.cmp(&a.1.physical).then_with(|| a.0.cmp(&b.0))
+    }
+
+    let mut v: Vec<(PathBuf, Stat)> = map.into_iter().collect();
+    if n == 0 || v.len() <= n {
+        v.sort_unstable_by(order);
+        return v;
+    }
+    // Partition first so only the rows that will be printed get ordered; the
+    // rest never need to be compared against each other.
+    v.select_nth_unstable_by(n - 1, order);
+    v.truncate(n);
+    v.sort_unstable_by(order);
+    v
+}
+
 /// Whether `opt`'s exclude configuration covers `path`.
 ///
 /// The backends only test the children of a directory they are processing, never

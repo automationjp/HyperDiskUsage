@@ -1007,15 +1007,7 @@ fn main() -> Result<()> {
             }
         }
         let dirs_scanned = map.len();
-        let mut v: Vec<(PathBuf, hyperdu_core::Stat)> = map.into_iter().collect();
-        if args.top > 0 && v.len() > args.top {
-            let n = args.top.min(v.len());
-            let idx = n - 1;
-            v.select_nth_unstable_by(idx, |a, b| b.1.physical.cmp(&a.1.physical));
-            v[..n].sort_unstable_by_key(|(_, s)| std::cmp::Reverse(s.physical));
-        } else {
-            v.sort_unstable_by_key(|(_, s)| std::cmp::Reverse(s.physical));
-        }
+        let v = hyperdu_core::top_by_physical(map, args.top);
 
         println!("Top {} under {} (physical desc):", args.top, root.display());
         for (i, (p, s)) in v.iter().take(args.top).enumerate() {
