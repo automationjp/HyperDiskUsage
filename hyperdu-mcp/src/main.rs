@@ -20,7 +20,6 @@
 use anyhow::{Context, Result};
 use rmcp::{transport::io::stdio, ServiceExt};
 
-mod reclaimable;
 mod server;
 
 #[tokio::main]
