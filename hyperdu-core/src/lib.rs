@@ -32,6 +32,7 @@ pub mod index;
 pub mod memory_pool;
 mod options; // for OptionsBuilder
 mod platform;
+pub mod reclaimable;
 mod rollup;
 mod scanner; // FileSystemScanner + platform default
 mod scheduler;

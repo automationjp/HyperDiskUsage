@@ -14,7 +14,7 @@ use std::{
     time::SystemTime,
 };
 
-use hyperdu_core::{scan_directory, Options};
+use crate::{scan_directory, Options};
 
 /// A directory of regenerable output.
 #[derive(Debug, Clone, PartialEq, Eq)]

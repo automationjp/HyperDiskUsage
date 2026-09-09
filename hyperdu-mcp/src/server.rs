@@ -262,7 +262,7 @@ impl HyperDuServer {
         let max_depth = params.max_depth;
 
         let found = run_blocking(move || {
-            crate::reclaimable::find(&search_root, min_size, unused_for_days, max_depth)
+            hyperdu_core::reclaimable::find(&search_root, min_size, unused_for_days, max_depth)
         })
         .await?;
 
