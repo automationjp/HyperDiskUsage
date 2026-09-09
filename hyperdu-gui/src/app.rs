@@ -99,7 +99,7 @@ impl App {
                 self.table_revision = u64::MAX;
             }
             Err(error) => {
-                self.state = format!("開始できません: {error}");
+                self.state = format!("開始できません: {error} — 表示中の結果は前回の走査です");
                 self.complete = false;
             }
         }

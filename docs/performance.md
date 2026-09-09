@@ -1,8 +1,10 @@
 # Performance design
 
+**日本語** · [English](en/performance.md) · [简体中文](zh-CN/performance.md)
+
 HyperDU は、**ディスク使用量を正しく集計しながら、走査に必要な OS 呼び出しと待ち時間を減らすこと**を性能設計の中心に置いています。
 
-この文書は「何倍速いか」を示す benchmark report ではありません。倍率は環境依存なので、現在は再計測中です。ここでは、実装上どこで高速化しているかを説明します。
+この文書は「何倍速いか」を示す benchmark report ではありません。倍率と測定条件は[ベンチマーク](benchmarks.md)にまとめています。ここでは、実装上どこで高速化しているかを説明します。
 
 ## 結論
 
@@ -72,16 +74,7 @@ HyperDU は未処理 work を他 worker が奪えるようにし、巨大な sub
 
 ## Performance claim status
 
-新しい公開用 benchmark を取得するまで、以下は意図的に空欄です。
-
-| Scenario | HyperDU | Baseline | Ratio | Status |
-|---|---:|---:|---:|---|
-| Windows / NTFS / warm | TBD | TBD | TBD | Re-test required |
-| Windows / NTFS / cold | TBD | TBD | TBD | Re-test required |
-| Linux / ext4 / warm | TBD | TBD | TBD | Re-test required |
-| Linux / ext4 / cold | TBD | TBD | TBD | Re-test required |
-| Linux / XFS / warm | TBD | TBD | TBD | Re-test required |
-| Linux / XFS / cold | TBD | TBD | TBD | Re-test required |
+Windows / NTFS と Linux / WSL2 / ext4 のwarm測定は[ベンチマーク結果](benchmarks.md)を参照してください。cold・XFSは未測定です。
 
 ## Before publishing a speed claim
 

@@ -1,0 +1,326 @@
+{
+  "ja": {
+    "skip": "本文へ移動",
+    "performance": "性能",
+    "engine": "仕組み",
+    "agents": "AI 連携",
+    "docs": "ドキュメント",
+    "install": "使いはじめる",
+    "eyebrow": "DISK USAGE, WITHOUT THE WAIT.",
+    "hero_a": "容量の謎を、",
+    "hero_b": "待たずに解く。",
+    "intro": "何がディスクを埋めているのか。HyperDU は OS 固有の高速走査と Rust の並列処理で、その答えを見つけます。ターミナルから、デスクトップから、AI エージェントから。",
+    "source": "GitHub でソースを見る",
+    "status": "v0.5.0-beta.3 · 公開準備中 · MIT",
+    "terminal_label": "操作イメージ",
+    "terminal_caption": "大きなディレクトリを見つけ、次の一手へ。",
+    "measured": "実測で確かめる、速さ。",
+    "bench_intro": "同じマシン、同じファイル集合。両ツールを交互に 8 回実行した warm 計測の中央値です。得意なツリーも、差が縮まるツリーも、そのまま公開します。",
+    "all": "すべて",
+    "dataset": "データセット",
+    "files": "ファイル",
+    "baseline": "比較対象",
+    "ratio": "速度比",
+    "timing": "処理時間 · 短いほど高速",
+    "method": "全試行・照合結果・測定方法を見る",
+    "bench_note": "Linux は WSL2 / ext4、比較対象は uutils du 0.8.0 です。GNU du・ベアメタル Linux の結果ではありません。Windows は NTFS / ネイティブ robocopy。cold と XFS は未測定。",
+    "engine_title": "速さは、走査の中に。",
+    "engine_intro": "一つずつの呼び出しを減らす。空いたワーカーへ仕事を渡す。OS ごとの違いを活かした、一つのスキャンエンジン。",
+    "platforms": [
+      {
+        "name": "Windows",
+        "api": "NtQueryDirectoryFile",
+        "text": "名前・サイズ・割り当てサイズ・ファイル ID をまとめて取得。ファイルごとの追加問い合わせを抑えます。",
+        "tag": "NTFS · 実機検証"
+      },
+      {
+        "name": "Linux",
+        "api": "getdents64 + statx",
+        "text": "ディレクトリエントリを一括取得し、メタデータを並列集計。ツリーの偏りには work stealing で対応します。",
+        "tag": "ext4 · WSL2 で再計測"
+      },
+      {
+        "name": "macOS",
+        "api": "getattrlistbulk",
+        "text": "メタデータの bulk 取得に対応。CLI は実機未検証、GUI は現在リリース対象外です。",
+        "tag": "CLI · 実機未検証"
+      }
+    ],
+    "architecture": "アーキテクチャを読む",
+    "mft": "NTFS のボリュームルートでは、条件を満たせば --mft による直接読み取りも利用可能。安全に解析できない場合は通常の列挙へ戻ります。",
+    "interfaces_title": "いつもの作業場所で。",
+    "interfaces_intro": "CLI、GUI、MCP。どの入口からも hyperdu-core のスキャンエンジンを利用します。",
+    "cli_text": "大きい順に調べる。JSON / CSV に書き出す。GNU du 互換モードを、既存のワークフローに。",
+    "gui_text": "インタラクティブモードで子フォルダの結果を順次表示。一括走査への切り替えや詳細設定も画面から操作できます。",
+    "core_text": "Rust アプリへの組み込みには hyperdu-core。走査・集計・プラットフォーム最適化をライブラリとして利用できます。",
+    "agent_title": "エージェントに、ディスクの地図を。",
+    "agent_intro": "容量不足を、構造化データで調べる。hyperdu mcp で三つの読み取り専用ツールを有効にできます。",
+    "tools": [
+      {
+        "name": "list_volumes",
+        "text": "どのボリュームが逼迫している？"
+      },
+      {
+        "name": "scan_path",
+        "text": "その中で、何が大きい？"
+      },
+      {
+        "name": "find_reclaimable",
+        "text": "再生成可能な出力の候補は？"
+      }
+    ],
+    "agent_note": "削除するツールはありません。候補を確認し、削除は人が判断します。Skill は CLI 単独でも利用できます。",
+    "plugin": "MCP / Skill / Plugin の導入手順",
+    "install_title": "まず、一つのディレクトリから。",
+    "install_text": "現在は統合版の公開準備中です。先に試す場合は、このブランチのソースからインストールしてください。公開後は Cargo から一度に導入できます。",
+    "copy": "コピー",
+    "copied": "コピーしました",
+    "copy_failed": "選択してコピーしてください",
+    "release": "リリースを見る",
+    "setup": "環境別セットアップ",
+    "install_note": "現在の導入: cargo install --locked --path hyperdu-cli。公開後は上のコマンドが利用できます。Rust 1.88+ が必要です。",
+    "docs_title": "さらに深く知る。",
+    "doc_links": [
+      {
+        "title": "Performance",
+        "text": "高速化の設計とトレードオフ",
+        "path": "docs/performance.md"
+      },
+      {
+        "title": "Benchmarks",
+        "text": "環境、raw data、測定の限界",
+        "path": "docs/benchmarks.md"
+      },
+      {
+        "title": "Architecture",
+        "text": "一つの core と三つのインターフェース",
+        "path": "docs/architecture.md"
+      },
+      {
+        "title": "Documentation",
+        "text": "使い方・開発・配布のドキュメント",
+        "path": "docs/README.md"
+      }
+    ],
+    "footer": "何がディスクを埋めているかを、速く見つける。",
+    "back_top": "ページの先頭へ",
+    "doc_prefix": "docs/",
+    "plugin_path": "plugin/README.md"
+  },
+  "en": {
+    "skip": "Skip to content",
+    "performance": "Performance",
+    "engine": "The engine",
+    "agents": "For agents",
+    "docs": "Docs",
+    "install": "Get started",
+    "eyebrow": "DISK USAGE, WITHOUT THE WAIT.",
+    "hero_a": "Find the space.",
+    "hero_b": "Skip the wait.",
+    "intro": "Find what is filling your disk. HyperDU pairs native OS enumeration with parallel Rust to get you answers, from your terminal, your desktop, or your AI agent.",
+    "source": "Explore on GitHub",
+    "status": "v0.5.0-beta.3 · Release candidate · MIT",
+    "terminal_label": "Usage illustration",
+    "terminal_caption": "Find the biggest directories. Decide what comes next.",
+    "measured": "Speed, with the receipts.",
+    "bench_intro": "One machine. The same file set. Warm medians from 8 alternating runs per tool. We publish the trees that parallelize well alongside those where the gap narrows.",
+    "all": "All results",
+    "dataset": "Dataset",
+    "files": "Files",
+    "baseline": "Baseline",
+    "ratio": "Speed ratio",
+    "timing": "Elapsed time · shorter is faster",
+    "method": "Read every sample, workload check, and method",
+    "bench_note": "Linux runs on WSL2 / ext4 against uutils du 0.8.0, not GNU du or bare-metal Linux. Windows uses NTFS and native robocopy. Cold cache and XFS remain unmeasured.",
+    "engine_title": "Fast, from the filesystem up.",
+    "engine_intro": "Fewer calls per file. More work for idle workers. One scan engine that makes the most of each operating system.",
+    "platforms": [
+      {
+        "name": "Windows",
+        "api": "NtQueryDirectoryFile",
+        "text": "Collect names, sizes, allocations, and file IDs in a batch. Avoid opening another handle for every file.",
+        "tag": "NTFS · Tested on hardware"
+      },
+      {
+        "name": "Linux",
+        "api": "getdents64 + statx",
+        "text": "Read directory entries in bulk and aggregate metadata in parallel. Work stealing adapts to uneven trees.",
+        "tag": "ext4 · Remeasured on WSL2"
+      },
+      {
+        "name": "macOS",
+        "api": "getattrlistbulk",
+        "text": "Bulk metadata collection. CLI has not been tested on hardware; GUI is currently excluded from releases.",
+        "tag": "CLI · Not hardware-tested"
+      }
+    ],
+    "architecture": "Read the architecture",
+    "mft": "On supported NTFS volume roots, --mft can read the file table directly. If it cannot safely parse the volume, HyperDU falls back to directory enumeration.",
+    "interfaces_title": "Meet your workflow where it is.",
+    "interfaces_intro": "CLI, GUI, and MCP. Every interface uses the scan engine in hyperdu-core.",
+    "cli_text": "Rank directories. Export JSON or CSV. Bring GNU du compatibility mode to your existing workflow.",
+    "gui_text": "See child folders arrive one by one in Interactive mode, switch to batch scanning, and configure scan options from the desktop.",
+    "core_text": "Embed hyperdu-core in a Rust application. Use scanning, aggregation, and platform optimizations as a library.",
+    "agent_title": "Give your agent a map of the disk.",
+    "agent_intro": "Investigate disk pressure with structured data. Run hyperdu mcp to enable three read-only tools.",
+    "tools": [
+      {
+        "name": "list_volumes",
+        "text": "Which volume is running out of space?"
+      },
+      {
+        "name": "scan_path",
+        "text": "What is taking up that space?"
+      },
+      {
+        "name": "find_reclaimable",
+        "text": "Which outputs might be regenerated?"
+      }
+    ],
+    "agent_note": "There is no delete tool. Review the candidates and let a human decide. The Skill also works with the CLI alone.",
+    "plugin": "Set up MCP / Skill / Plugin",
+    "install_title": "Start with one directory.",
+    "install_text": "The unified release is being prepared. Try this branch from source today; once published, install the CLI and MCP together from Cargo.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copy_failed": "Select the command to copy it",
+    "release": "View releases",
+    "setup": "Platform setup guide",
+    "install_note": "Install this checkout now: cargo install --locked --path hyperdu-cli. The command above becomes available after publication. Requires Rust 1.88+.",
+    "docs_title": "Go a little deeper.",
+    "doc_links": [
+      {
+        "title": "Performance",
+        "text": "Optimization design and tradeoffs",
+        "path": "docs/en/performance.md"
+      },
+      {
+        "title": "Benchmarks",
+        "text": "Environment, raw data, and limitations",
+        "path": "docs/en/benchmarks.md"
+      },
+      {
+        "title": "Architecture",
+        "text": "One core, three interfaces",
+        "path": "docs/en/architecture.md"
+      },
+      {
+        "title": "Documentation",
+        "text": "Usage, development, and distribution",
+        "path": "docs/en/README.md"
+      }
+    ],
+    "footer": "Find what is filling your disk. Fast.",
+    "back_top": "Back to top",
+    "doc_prefix": "docs/en/",
+    "plugin_path": "plugin/README.en.md"
+  },
+  "zh-CN": {
+    "skip": "跳转到正文",
+    "performance": "性能",
+    "engine": "扫描引擎",
+    "agents": "AI 集成",
+    "docs": "文档",
+    "install": "开始使用",
+    "eyebrow": "DISK USAGE, WITHOUT THE WAIT.",
+    "hero_a": "找出空间去向，",
+    "hero_b": "无需漫长等待。",
+    "intro": "是什么占满了磁盘？HyperDU 将操作系统原生枚举与 Rust 并行处理结合起来，让你通过终端、桌面或 AI 助手快速找到答案。",
+    "source": "在 GitHub 查看源码",
+    "status": "v0.5.0-beta.3 · 准备发布 · MIT",
+    "terminal_label": "操作示意",
+    "terminal_caption": "找出最大的目录，再决定下一步。",
+    "measured": "用实测数据验证速度。",
+    "bench_intro": "同一台机器，相同的文件集合。每个工具交替运行 8 次，展示热缓存下的耗时中位数。适合并行的目录树和差距较小的场景都会公开。",
+    "all": "全部结果",
+    "dataset": "数据集",
+    "files": "文件数",
+    "baseline": "对比工具",
+    "ratio": "速度比",
+    "timing": "耗时 · 越短越快",
+    "method": "查看所有样本、工作负载校验和测量方法",
+    "bench_note": "Linux 使用 WSL2 / ext4，对比工具为 uutils du 0.8.0，并非 GNU du 或裸机 Linux。Windows 使用 NTFS 和原生 robocopy。冷缓存及 XFS 尚未测量。",
+    "engine_title": "从文件系统开始提速。",
+    "engine_intro": "减少逐文件调用，让空闲线程接手任务。一个扫描引擎，充分利用不同操作系统的能力。",
+    "platforms": [
+      {
+        "name": "Windows",
+        "api": "NtQueryDirectoryFile",
+        "text": "批量获取名称、大小、分配空间和文件 ID，减少逐文件打开句柄。",
+        "tag": "NTFS · 已在实机验证"
+      },
+      {
+        "name": "Linux",
+        "api": "getdents64 + statx",
+        "text": "批量读取目录项并并行汇总元数据，通过工作窃取适应不均匀的目录树。",
+        "tag": "ext4 · 已在 WSL2 重新测量"
+      },
+      {
+        "name": "macOS",
+        "api": "getattrlistbulk",
+        "text": "支持批量获取元数据。CLI 尚未经过实机验证，GUI 目前不在发布范围内。",
+        "tag": "CLI · 尚未实机验证"
+      }
+    ],
+    "architecture": "阅读架构文档",
+    "mft": "在满足条件的 NTFS 卷根目录上，可通过 --mft 直接读取文件表。无法安全解析时，HyperDU 会回退到常规目录枚举。",
+    "interfaces_title": "融入你的工作方式。",
+    "interfaces_intro": "CLI、GUI 和 MCP 都使用 hyperdu-core 中的同一个扫描引擎。",
+    "cli_text": "按大小查看目录，导出 JSON 或 CSV，并在现有流程中使用 GNU du 兼容模式。",
+    "gui_text": "交互模式会逐个显示子目录的扫描结果，也可选择一次性扫描。通过树状视图和扫描设置查看空间分布。",
+    "core_text": "在 Rust 应用中嵌入 hyperdu-core，以库的形式使用扫描、汇总和平台优化。",
+    "agent_title": "为 AI 助手提供磁盘地图。",
+    "agent_intro": "使用结构化数据排查空间不足。运行 hyperdu mcp 即可启用三个只读工具。",
+    "tools": [
+      {
+        "name": "list_volumes",
+        "text": "哪个卷的空间快用完了？"
+      },
+      {
+        "name": "scan_path",
+        "text": "哪些目录占用了这些空间？"
+      },
+      {
+        "name": "find_reclaimable",
+        "text": "哪些生成产物可能可以重新生成？"
+      }
+    ],
+    "agent_note": "不提供删除工具。先检查候选项，再由人决定是否删除。Skill 也可单独通过 CLI 使用。",
+    "plugin": "配置 MCP / Skill / Plugin",
+    "install_title": "从一个目录开始。",
+    "install_text": "统一版本正在准备发布。现在可从本分支源码安装；发布后即可通过 Cargo 一次安装 CLI 和 MCP。",
+    "copy": "复制",
+    "copied": "已复制",
+    "copy_failed": "请选择命令并复制",
+    "release": "查看发布版本",
+    "setup": "按平台配置环境",
+    "install_note": "现在安装本地源码：cargo install --locked --path hyperdu-cli。发布后才能使用上面的命令。需要 Rust 1.88+。",
+    "docs_title": "进一步了解 HyperDU。",
+    "doc_links": [
+      {
+        "title": "性能设计",
+        "text": "优化设计与取舍",
+        "path": "docs/zh-CN/performance.md"
+      },
+      {
+        "title": "基准测试",
+        "text": "环境、原始数据及测量限制",
+        "path": "docs/zh-CN/benchmarks.md"
+      },
+      {
+        "title": "架构",
+        "text": "一个核心，三个使用入口",
+        "path": "docs/zh-CN/architecture.md"
+      },
+      {
+        "title": "文档中心",
+        "text": "使用、开发与分发文档",
+        "path": "docs/zh-CN/README.md"
+      }
+    ],
+    "footer": "快速找出是什么占满了磁盘。",
+    "back_top": "返回顶部",
+    "doc_prefix": "docs/zh-CN/",
+    "plugin_path": "plugin/README.zh-CN.md"
+  }
+}

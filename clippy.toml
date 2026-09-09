@@ -8,6 +8,6 @@ type-complexity-threshold = 500
 
 # No `msrv` here on purpose. Clippy falls back to each package's own
 # `rust-version`, which is what we want now that the crates no longer agree:
-# core, cli and gui declare 1.75, while hyperdu-mcp needs 1.88 for rmcp.
-# Pinning one version workspace-wide would lint hyperdu-mcp against a floor it
+# core and gui declare 1.75, while hyperdu needs 1.88 for built-in MCP.
+# Pinning one version workspace-wide would lint hyperdu against a floor it
 # does not have, and clippy warns about the mismatch rather than picking one.

@@ -9,20 +9,6 @@ Param(
 
 $ErrorActionPreference = 'Stop'
 
-function Ensure-CargoWix {
-  try {
-    $exists = (Get-Command cargo-wix -ErrorAction SilentlyContinue)
-    if (-not $exists) {
-      Write-Host '==> Installing cargo-wix'
-      cargo install cargo-wix | Out-Host
-    }
-  } catch {
-    Write-Host '(warn) failed to install cargo-wix; MSI generation may fail'
-  }
-}
-
-Ensure-CargoWix
-
 function Show-Help {
   @'
 Usage: scripts/package/release.ps1 [-SkipGui] [-CpuFlavor generic|native] [-Help]
@@ -100,32 +86,37 @@ function Build-And-Capture([string]$Package, [string]$Rustflags) {
 
 $osTag = 'windows'
 # PROCESSOR_ARCHITECTURE says "AMD64"; every other part of the project says
-# "x86_64". Left raw, this produced hyperdu-cli-windows-AMD64-generic.zip while
+# "x86_64". Left raw, this produced hyperdu-windows-AMD64-generic.zip while
 # scripts/package/scoop.ps1 built an autoupdate URL pointing at
-# hyperdu-cli-windows-x86_64-generic.zip, and the Linux artifacts from
+# hyperdu-windows-x86_64-generic.zip, and the Linux artifacts from
 # release.sh used x86_64 too. Normalize once, here, before any name is built.
-$arch = switch ($env:PROCESSOR_ARCHITECTURE) {
+$hostArchitecture = $env:PROCESSOR_ARCHITECTURE
+if (-not $hostArchitecture) {
+  $hostArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+}
+$arch = switch ($hostArchitecture.ToUpperInvariant()) {
+  'X64' { 'x86_64' }
   'AMD64' { 'x86_64' }
   'ARM64' { 'aarch64' }
-  default { "$($env:PROCESSOR_ARCHITECTURE)".ToLower() }
+  default { throw "Unsupported host architecture: $hostArchitecture" }
 }
 $Dist = Join-Path $Root 'dist'
 if (Test-Path $Dist) { Remove-Item $Dist -Recurse -Force }
 New-Item -ItemType Directory -Path $Dist | Out-Null
 
-Write-Host "==> Building hyperdu-cli (release)"
+Write-Host "==> Building hyperdu (release)"
 $rustflags = if ($CpuFlavor -eq 'native') { '-C target-cpu=native' } else { '' }
 $suffix = if ($CpuFlavor -eq 'native') { 'native' } else { 'generic' }
-$cliBin = Build-And-Capture 'hyperdu-cli' $rustflags
+$cliBin = Build-And-Capture 'hyperdu' $rustflags
 Write-Host "  cli: $cliBin"
 
 if (-not $SkipGui) {
   Write-Host "==> Building hyperdu-gui (release)"
-  try { $guiBin = Build-And-Capture 'hyperdu-gui' $rustflags; Write-Host "  gui: $guiBin" }
-  catch { Write-Host "  gui: not built (skipping)"; $guiBin = $null }
+  $guiBin = Build-And-Capture 'hyperdu-gui' $rustflags
+  Write-Host "  gui: $guiBin"
 }
 
-$cliName = "hyperdu-cli-$osTag-$arch-$suffix.zip"
+$cliName = "hyperdu-$osTag-$arch-$suffix.zip"
 $guiName = "hyperdu-gui-$osTag-$arch-$suffix.zip"
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -140,7 +131,7 @@ function New-Zip($zipPath, $files) {
 Write-Host "==> Packaging CLI -> $cliName"
 New-Zip (Join-Path $Dist $cliName) @($cliBin, (Join-Path $Root 'README.md'))
 # Also drop a plain .exe for easy run
-Copy-Item $cliBin (Join-Path $Dist ("hyperdu-cli-windows-$arch-$suffix.exe")) -Force
+Copy-Item $cliBin (Join-Path $Dist ("hyperdu-windows-$arch-$suffix.exe")) -Force
 
 if ($guiBin) {
   Write-Host "==> Packaging GUI -> $guiName"
@@ -153,10 +144,10 @@ Write-Host "OK -> $Dist"
 # Optional: Build MSI installers with cargo-wix if available
 try {
   if (Get-Command cargo-wix -ErrorAction SilentlyContinue) {
-    Write-Host "==> Building MSI (cargo-wix) for hyperdu-cli"
-    cargo wix -p hyperdu-cli | Out-Host
-    $msiCli = Get-ChildItem -Path (Join-Path $Root 'target/wix') -Filter '*hyperdu-cli*.msi' -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
-    if ($msiCli) { Copy-Item $msiCli.FullName (Join-Path $Dist 'hyperdu-cli-setup.msi') -Force }
+    Write-Host "==> Building MSI (cargo-wix) for hyperdu"
+    cargo wix -p hyperdu | Out-Host
+    $msiCli = Get-ChildItem -Path (Join-Path $Root 'target/wix') -Filter '*hyperdu*.msi' -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch 'hyperdu-gui' } | Sort-Object LastWriteTime | Select-Object -Last 1
+    if ($msiCli) { Copy-Item $msiCli.FullName (Join-Path $Dist 'hyperdu-setup.msi') -Force }
     if (-not $SkipGui) {
       Write-Host "==> Building MSI (cargo-wix) for hyperdu-gui"
       cargo wix -p hyperdu-gui | Out-Host

@@ -1,4 +1,4 @@
-.TH hyperdu 1 "HyperDU" "0.5.0-beta.2" "User Commands"
+.TH hyperdu 1 "HyperDU" "0.5.0-beta.3" "User Commands"
 .SH NAME
 hyperdu \- ultra-fast disk usage analyzer
 .SH SYNOPSIS
@@ -8,6 +8,14 @@ hyperdu \- ultra-fast disk usage analyzer
 HyperDU is a cross-platform, high-performance disk usage analyzer. It can scan
 directories and report top entries by size, export CSV/JSON, and provide
 du-compatible output when requested.
+.SH MCP SERVER
+.B hyperdu mcp
+starts the built-in read-only MCP server on standard input/output.
+No separate server binary is required. Register with a client using:
+.PP
+codex mcp add hyperdu -- hyperdu mcp
+.PP
+Use ./mcp to scan a directory named mcp.
 .SH OPTIONS
 .TP
 .BR --top=NUM
@@ -110,6 +118,6 @@ GNU-compatible block reporting:
   hyperdu --compat gnu --apparent-size --block-size=1K /path
 .fi
 .SH HOMEPAGE
-Project repository: https://github.com/your-org/HyperDiskUsage
+Project repository: https://github.com/automationjp/HyperDiskUsage
 .SH AUTHOR
 HyperDU Contributors

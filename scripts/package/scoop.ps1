@@ -40,9 +40,9 @@ if (-not $Version) {
   # Ask cargo rather than regex the manifest: the crate inherits
   # `version.workspace = true`, so the literal is not in hyperdu-cli/Cargo.toml.
   # pkgid prints `<url>#<version>` (or `#<name>@<version>`).
-  $Version = (cargo pkgid -p hyperdu-cli) -replace '^.*[#@]', ''
+  $Version = (cargo pkgid -p hyperdu) -replace '^.*[#@]', ''
 }
-if (-not $Version) { throw 'could not determine hyperdu-cli version from cargo pkgid' }
+if (-not $Version) { throw 'could not determine hyperdu version from cargo pkgid' }
 
 # Placeholders only for a local dry run; a release passes both.
 if (-not $Url) { $Url = '__URL__' }
@@ -71,7 +71,7 @@ $manifest = [ordered]@{
   autoupdate   = [ordered]@{
     architecture = [ordered]@{
       '64bit' = [ordered]@{
-        url = "$repo/releases/download/v`$version/hyperdu-cli-windows-x86_64-generic.zip"
+        url = "$repo/releases/download/v`$version/hyperdu-windows-x86_64-generic.zip"
       }
     }
   }

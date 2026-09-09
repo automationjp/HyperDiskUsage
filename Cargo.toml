@@ -7,7 +7,7 @@ members = [
 resolver = "2"
 
 # Every crate inherits these with `<key>.workspace = true`, so a release bumps
-# exactly one line: `version` below. Before this, version and the metadata that
+# the package version below and the matching core dependency pin. Previously, metadata that
 # goes with it were repeated in four manifests, and the hyperdu-core dependency
 # pin in three of them, which is how a bump missed Cargo.lock once already.
 #

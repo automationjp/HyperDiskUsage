@@ -1,36 +1,42 @@
 # hyperdu-core
 
-The scanning engine behind [HyperDU](https://github.com/automationjp/HyperDiskUsage).
-Walks a directory tree in parallel and reports logical size, physical size on
-disk, and file counts per directory.
+**日本語** · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
-Most users want the [`hyperdu-cli`](https://crates.io/crates/hyperdu-cli) binary
-instead. This crate is for embedding the scan in your own program.
+[HyperDU](https://github.com/automationjp/HyperDiskUsage) の走査エンジンです。
+ディレクトリツリーを並列に走査し、各ディレクトリの論理サイズ・物理サイズ・ファイル数を返します。
+通常の利用には [`hyperdu`](https://crates.io/crates/hyperdu) コマンドを使ってください。
+このクレートはアプリケーションへ走査機能を組み込むためのライブラリです。
+
+## 一括走査
 
 ```rust
 use hyperdu_core::{scan_directory, Options};
 
 let stats = scan_directory("/path", &Options::default())?;
-// Totals roll up, so the root entry holds the whole subtree.
 let root = stats.get(std::path::Path::new("/path")).unwrap();
 println!("{} bytes across {} files", root.physical, root.files);
 # Ok::<(), anyhow::Error>(())
 ```
 
-## What it does differently
+集計値には子孫のサイズを含みます。`scan_directory_mode` の `ScanMode::Interactive` では、
+最初にルート直下の一覧と直接のファイル合計、続いて完了した子フォルダごとの結果を通知します。
+オプション・ハードリンクの重複排除・リンク循環・ファイルシステム境界・進捗・エラー・キャンセルを
+全フェーズで共有します。MFT走査が成功した場合は、一括結果になることを明示します。
+イベントの契約は[アーキテクチャ](../docs/architecture.md)を参照してください。
 
-- **Platform enumeration APIs**: `getdents64` + `statx` on Linux,
-  `NtQueryDirectoryFile` with `FileIdFullDirectoryInformation` on Windows
-  (physical size and file id arrive with the batch, so hardlink dedupe costs no
-  extra syscalls), `getattrlistbulk` on macOS
-- **NTFS `$MFT` reading** on Windows when elevated against a volume root
-- **Work-stealing** across per-worker LIFO deques, stealing from the shallow end
-  so a thief gets a large subtree
-- **Hardlink dedupe by `(device, inode)`**, matching GNU du's default
+## 実装
 
-Also exposes `volume::list()` for per-filesystem capacity, and `index` for
-directory-level aggregates with persistence.
+- Linux: `getdents64` + `statx`。
+- Windows: 割当サイズとファイルIDを含む `NtQueryDirectoryFile` の一括列挙。
+  権限とボリュームルートの条件を満たす場合はNTFS `$MFT` の直接読み取りも利用できます。
+- macOS: `getattrlistbulk`。実機検証は未実施です。
+- ワーカーごとのLIFOキューとwork stealing。
+- ファイルシステム上の識別子によるハードリンク重複排除。既定の `du` と同様に集計します。
 
-## License
+`volume::list()` はファイルシステムの容量、`index` は保存可能なディレクトリ集計を提供します。
+`reclaimable` は生成物の候補を検出しますが、更新時刻のサンプルは不使用や削除の安全性を保証しません。
+削除操作は行いません。
+
+## ライセンス
 
 MIT

@@ -34,7 +34,7 @@ jobs:
       - name: Build
         run: cargo build --workspace --release
       - name: Test core and CLI
-        run: cargo test -p hyperdu-core -p hyperdu-cli -- --nocapture
+        run: cargo test -p hyperdu-core -p hyperdu -- --nocapture
 
   # Native enumeration and MFT I/O need Windows. A fresh, owned NTFS VHDX is
   # populated and remounted read-only; parity must use MFT, never its fallback.

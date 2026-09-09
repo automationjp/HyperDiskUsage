@@ -1,12 +1,14 @@
 # HyperDU
 
+**日本語** · [English](README.en.md) · [简体中文](README.zh-CN.md)
+
 > **何がディスクを埋めているかを、速く見つける。**  
 > Rust 製の高速・クロスプラットフォームなディスク使用量アナライザー。CLI、GUI、GNU `du` 互換モード、AI エージェント向け MCP / Skill を提供します。
 
 [![CI](https://github.com/automationjp/HyperDiskUsage/actions/workflows/ci.yml/badge.svg)](https://github.com/automationjp/HyperDiskUsage/actions/workflows/ci.yml)
-[![Crates.io](https://img.shields.io/crates/v/hyperdu-cli.svg)](https://crates.io/crates/hyperdu-cli)
+[![Crates.io](https://img.shields.io/crates/v/hyperdu.svg)](https://crates.io/crates/hyperdu)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.75%2B-black?logo=rust)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.88%2B-black?logo=rust)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Windows%20%7C%20Linux-tested-blue)](#platform-status)
 
 [Setup](docs/setup.md) · [Performance](docs/performance.md) · [Benchmark plan](docs/benchmarks.md) · [Documentation](docs/README.md) · [Web site](https://automationjp.github.io/HyperDiskUsage/) · [English](https://automationjp.github.io/HyperDiskUsage/en/)
@@ -15,12 +17,14 @@
 
 ## Quick start
 
+> **0.5.0-beta.3 は公開準備中です。** このブランチでは `cargo install --locked --path hyperdu-cli` で導入できます。下記の crates.io コマンドと新しい名前の配布物は、リリース公開後に利用できます。
+
 ```bash
-cargo install hyperdu-cli --version 0.5.0-beta.2
+cargo install hyperdu --version 0.5.0-beta.3
 hyperdu . --top 20
 ```
 
-クレート名は `hyperdu-cli` ですが、インストールされるコマンド名は **`hyperdu`** です。
+クレート名も実行コマンドも **`hyperdu`**。CLI と MCP サーバを一度に導入できます。
 
 ```bash
 # カレントディレクトリを解析
@@ -33,7 +37,7 @@ hyperdu /path/to/data --top 20
 hyperdu /path/to/data --json result.json
 
 # GNU du 互換モード
-hyperdu --compat gnu -sh /var/log
+hyperdu --compat gnu -k /var/log
 ```
 
 全オプションは `hyperdu --help` で確認できます。
@@ -44,19 +48,22 @@ HyperDU の主題は **高速なディスク使用量解析**です。
 
 単に `du` を Rust で書き直すのではなく、OS ごとの directory enumeration、metadata 取得、並列走査、physical-size accounting まで含めて hot path を最適化しています。
 
-### Benchmark status: remeasurement required
+### Benchmark status: Windows / Linux 再計測済み
 
-公開用の性能値は現在再計測中です。過去の benchmark は履歴として `docs/old/` に移しました。
+2026-09-09、`0a089c90c0e2`。warm・各8回の中央値。
 
-新しい測定が完了するまで、倍率を断定しません。
+| Platform / Dataset | HyperDU | Baseline | Ratio |
+|---|---:|---:|---:|
+| Windows / wide | 30.7 ms | 57.4 ms | 1.87x |
+| Windows / deep | 77.1 ms | 72.0 ms | 0.93x |
+| Windows / flat | 34.1 ms | 42.8 ms | 1.26x |
+| Windows / registry | 332.2 ms | 1838.5 ms | 5.53x |
+| Linux / wide | 47.3 ms | 208.6 ms | 4.41x |
+| Linux / deep | 89.1 ms | 143.4 ms | 1.61x |
+| Linux / flat | 130.5 ms | 184.4 ms | 1.41x |
+| Linux / registry | 144.6 ms | 978.9 ms | 6.77x |
 
-| Scenario | Dataset | HyperDU | Baseline | Ratio |
-|---|---|---:|---:|---:|
-| Windows / NTFS | TBD | TBD | TBD | TBD |
-| Linux / ext4 | TBD | TBD | TBD | TBD |
-| Linux / XFS | TBD | TBD | TBD | TBD |
-
-再計測で必要な環境、correctness parity、warm/cold、raw result、公開条件は [Benchmark plan](docs/benchmarks.md) にまとめています。
+WindowsはNTFS / robocopy、LinuxはWSL2 / ext4 / uutils du 0.8.0です。GNU du・cold・XFSは未測定。[環境・全試行・照合結果・限界](docs/benchmarks.md)も併記しています。
 
 ### Why it is fast
 
@@ -88,14 +95,12 @@ Windows では `--mft` を指定し、NTFS volume root・権限などの条件�
 ### GNU `du` compatibility mode
 
 ```bash
-hyperdu --compat gnu -sh /var/log
-hyperdu --compat gnu -ak /home --max-depth=2
+hyperdu --compat gnu -k /var/log
+hyperdu --compat gnu -k /home --max-depth=2
 hyperdu --compat gnu -b --time /usr/share
 ```
 
-```bash
-alias du='hyperdu --compat gnu'
-```
+現状は POSIX `du` 完全互換ではありません。`--compat posix-strict` は既定の512-byte単位などを選択しますが、POSIX必須の `-a`、`-s`、`-H`、`-L` は未対応です。`du` の置換やエイリアスとして使用しないでください。
 
 互換性は継続的にテストしていますが、GNU coreutils の全挙動を無条件に完全再現することを保証するものではありません。
 
@@ -127,10 +132,10 @@ MCP server は次の 3 ツールを公開します。
 **削除ツールは意図的に提供していません。** エージェントが人間の確認なしにデータを破壊する経路を作らないためです。
 
 ```bash
-cargo install hyperdu-mcp --version 0.5.0-beta.2
-claude mcp add --transport stdio hyperdu -- hyperdu-mcp
+cargo install hyperdu --version 0.5.0-beta.3
+claude mcp add --transport stdio hyperdu -- hyperdu mcp
 # Codex:
-codex mcp add hyperdu -- hyperdu-mcp
+codex mcp add hyperdu -- hyperdu mcp
 ```
 
 Agent Skill / Plugin は [plugin/README.md](plugin/README.md) を参照してください。
@@ -139,14 +144,17 @@ Agent Skill / Plugin は [plugin/README.md](plugin/README.md) を参照してく
 
 `hyperdu-gui` は `egui` / `eframe` ベースの desktop UI です。
 
-- realtime scan
-- interactive tree view
-- directory drill-down
-- throughput 表示
-- result export
+- インタラクティブモード: 子フォルダの結果を順次表示し、走査中にも閲覧
+- 一括モード: 全体走査後に結果を表示
+- ツリー・パンくず・並べ替え可能な一覧でディレクトリを掘り下げ
+- 除外・最小サイズ・深さ・リンク・スレッド数・I/O設定を画面から指定
+- 進捗・エラー・キャンセル状態と論理/物理サイズを表示
+- JSON / CSVへの結果出力
+
+両モードの走査・集計は `hyperdu-core` が担当します。詳細は[GUIのREADME](hyperdu-gui/README.md)を参照してください。
 
 ```bash
-cargo install hyperdu-gui --version 0.5.0-beta.2
+cargo install hyperdu-gui --version 0.5.0-beta.3
 hyperdu-gui
 ```
 
@@ -157,26 +165,26 @@ hyperdu-gui
 ### crates.io
 
 ```bash
-# CLI (Rust 1.75+)
-cargo install hyperdu-cli --version 0.5.0-beta.2
+# CLI + MCP (Rust 1.88+)
+cargo install hyperdu --version 0.5.0-beta.3
 
 # GUI (Rust 1.75+)
-cargo install hyperdu-gui --version 0.5.0-beta.2
+cargo install hyperdu-gui --version 0.5.0-beta.3
 
-# MCP server (Rust 1.88+)
-cargo install hyperdu-mcp --version 0.5.0-beta.2
+# MCP を使うときだけ起動
+hyperdu mcp
 ```
 
 ### Prebuilt binaries
 
-[v0.5.0-beta.2](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.2) から取得できます。
+公開後は [Releases](https://github.com/automationjp/HyperDiskUsage/releases) から取得できます。以下は次期リリースの予定ファイル名です。
 
 | Platform | CLI | GUI |
 |---|---|---|
-| Windows x86_64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-windows-x86_64-generic.zip) / [exe](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-windows-x86_64-generic.exe) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-gui-windows-x86_64-generic.zip) |
-| Linux x86_64 (glibc) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-linux-x86_64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-gui-linux-x86_64-generic.zip) |
-| Linux x86_64 (musl) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-linux-x86_64-musl-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-gui-linux-x86_64-musl-generic.zip) |
-| Linux aarch64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-cli-linux-aarch64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.2/hyperdu-gui-linux-aarch64-generic.zip) |
+| Windows x86_64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-windows-x86_64-generic.zip) / [exe](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-windows-x86_64-generic.exe) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-gui-windows-x86_64-generic.zip) |
+| Linux x86_64 (glibc) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-linux-x86_64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-gui-linux-x86_64-generic.zip) |
+| Linux x86_64 (musl) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-linux-x86_64-musl-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-gui-linux-x86_64-musl-generic.zip) |
+| Linux aarch64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-linux-aarch64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-gui-linux-aarch64-generic.zip) |
 
 Debian / Ubuntu 向け `.deb` も同じ release にあります。
 
@@ -215,8 +223,8 @@ cargo install --path hyperdu-cli
 
 Minimum Rust versions:
 
-- `hyperdu-core`, `hyperdu-cli`, `hyperdu-gui`: **Rust 1.75+**
-- `hyperdu-mcp`: **Rust 1.88+**
+- `hyperdu-core`, `hyperdu-gui`: **Rust 1.75+**
+- `hyperdu` (CLI + MCP): **Rust 1.88+**
 - workspace 全体の build/test: **Rust 1.88+**
 
 ## Experimental: persisted Linux snapshots
@@ -276,3 +284,5 @@ performance path を変更する PR では、通常の test に加えて [Benchm
 ---
 
 **HyperDU — fast disk analysis for humans and agents.**
+
+[POSIX du compatibility audit](docs/posix-compatibility.md)

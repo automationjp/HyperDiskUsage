@@ -110,8 +110,8 @@ jobs:
           # cargo resolves the version, not a regex over the manifest: the crate
           # inherits `version.workspace = true`, so the literal is not in
           # hyperdu-cli/Cargo.toml any more. pkgid prints `<url>#<version>`.
-          $ver = (cargo pkgid -p hyperdu-cli) -replace '^.*[#@]', ''
-          if (-not $ver) { throw 'cargo pkgid returned no version for hyperdu-cli' }
+          $ver = (cargo pkgid -p hyperdu) -replace '^.*[#@]', ''
+          if (-not $ver) { throw 'cargo pkgid returned no version for hyperdu' }
           $tag = "$env:GITHUB_REF_NAME"
           $base = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag"
 
@@ -127,8 +127,8 @@ jobs:
           # Different assets on purpose. winget installs the bare executable as
           # a `portable` package; Scoop extracts the zip and resolves `bin`
           # inside it, which keeps the shim name stable.
-          $exe = Get-Asset 'dist\hyperdu-cli-windows-*.exe'
-          $zip = Get-Asset 'dist\hyperdu-cli-windows-*.zip'
+          $exe = Get-Asset 'dist\hyperdu-windows-*.exe'
+          $zip = Get-Asset 'dist\hyperdu-windows-*.zip'
 
           pwsh -File scripts/package/winget.ps1 -Version $ver `
             -InstallerUrl $exe.Url -InstallerSha256 $exe.Hash

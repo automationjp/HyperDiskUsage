@@ -1,5 +1,7 @@
 # Architecture
 
+**日本語** · [English](en/architecture.md) · [简体中文](zh-CN/architecture.md)
+
 HyperDU は、**高速な scanner core を 1 つ持ち、その上に CLI / GUI / MCP を載せる**構成です。
 
 性能に関わる処理を interface ごとに重複実装せず、`hyperdu-core` に集約することで、CLI・GUI・AI Agent が同じ走査 semantics と platform fast path を共有します。
@@ -7,39 +9,25 @@ HyperDU は、**高速な scanner core を 1 つ持ち、その上に CLI / GUI 
 ## Overview
 
 ```text
-                 +------------------+
-                 |   hyperdu-cli    |
-                 +------------------+
-                          |
-                 +------------------+
-                 |   hyperdu-gui    |
-                 +------------------+
-                          |
-                 +------------------+
-                 |   hyperdu-mcp    |
-                 +------------------+
-                          |
-                          v
-                 +------------------+
-                 |  hyperdu-core    |
-                 | scanner / model  |
-                 +------------------+
-                    /      |       \
-                   /       |        \
-                  v        v         v
-             Linux      Windows     macOS
-          getdents64   NtQuery...  getattrlistbulk
-            + statx      + MFT
+       hyperdu CLI        hyperdu mcp        hyperdu-gui
+            \                  |                  /
+             +-----------------+-----------------+
+                               |
+                         hyperdu-core
+                    scan / model / domain
+                         /     |     \
+                      Linux Windows macOS
 ```
+
 
 ## Components
 
 | Component | Responsibility | Performance role |
 |---|---|---|
 | `hyperdu-core` | tree scan、集計、platform abstraction | hot path の中心 |
-| `hyperdu-cli` | command parsing、表示、export | scanner を呼ぶ薄い interface |
+| `hyperdu` | command parsing、表示、export | scanner を呼ぶ薄い interface |
 | `hyperdu-gui` | desktop UI、drill-down | 同じ core scanner を利用 |
-| `hyperdu-mcp` | structured MCP tools | 同じ core scanner を agent 向けに公開 |
+| `hyperdu mcp` (CLI 内の subcommand) | structured MCP tools | 同じ core scanner を agent 向けに公開 |
 | `plugin/` | Agent Skill / Plugin | CLI / MCP の利用手順を提供 |
 | `scripts/bench/` | benchmark harness | performance claim の再現性を担保 |
 
@@ -56,6 +44,16 @@ HyperDU は、**高速な scanner core を 1 つ持ち、その上に CLI / GUI 
 7. hardlink 等の重複を処理する
 8. subtree totals を親へ roll up する
 9. interface が human-readable / JSON / CSV / structured MCP result に変換する
+
+## Interactive mode
+
+`hyperdu-core::scan_directory_mode` は `ScanMode::Interactive` と `ScanMode::Batch` を提供します。GUIのインタラクティブモードでは、最初にルート直下を列挙し、子フォルダを1つずつ全ワーカーで走査して結果を通知します。完了済みのフォルダは、残りの走査中にも閲覧できます。
+
+オプションは元のルートで一度だけ準備し、全フェーズでハードリンク・リンク循環の検出状態、ファイルシステム境界、進捗、エラー数、キャンセルを共有します。子フォルダの深さは1から始まるため、深さ制限も元のルート基準です。GUIにファイル列挙や重複判定の別実装を持たせません。
+
+ルート直下のファイルは、コアがフィルタを適用して集計した合計値として通知します。ディレクトリ結果と混同する仮想パスは作りません。MFT直接走査に成功した場合は、結果が一括になることをイベントで明示します。キャンセルされた子フォルダを完了として通知することはありません。
+
+ハードリンクの総量は両モードで一致しますが、重複する名前のどのフォルダにサイズを帰属させるかは走査順に依存します。一括走査と子フォルダごとの内訳まで常に一致するとは限りません。
 
 ## Platform boundary
 

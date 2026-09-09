@@ -132,7 +132,9 @@ impl Params {
 }
 pub fn start(root: PathBuf, params: Params) -> anyhow::Result<Handle> {
     let mut opt = params.to_options()?;
-    let (tx, rx) = mpsc::channel();
+    // Bound queued subtree maps while the UI folds previous results.
+    // Dropping the receiver unblocks a sender when the window closes.
+    let (tx, rx) = mpsc::sync_channel(2);
     let files_seen = Arc::new(AtomicU64::new(0));
     let counter = files_seen.clone();
     opt.progress_every = 256;

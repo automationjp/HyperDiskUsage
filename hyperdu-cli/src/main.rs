@@ -452,8 +452,8 @@ struct Args {
         long_help = "互換モードを選択。\n\
     hyperdu: 高機能な既定出力（トップ一覧+サマリ）\n\
     gnu: GNU duに近い出力（互換重視の基本設定）\n\
-    gnu-strict: GNU duの厳密互換（ハードリンク重複排除・エラー出力など）\n\
-    posix-strict: POSIX準拠の出力/ブロックサイズなど"
+    gnu-strict: GNU形式の出力（ハードリンク重複排除・エラー出力。完全互換ではありません）\n\
+    posix-strict: 512-byte単位の出力（POSIX du完全互換ではありません）"
     )]
     compat: CompatArg,
 

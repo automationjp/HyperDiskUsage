@@ -152,8 +152,8 @@ def main():
     parser.add_argument("--tree", type=Path, action="append", default=[])
     parser.add_argument("--synthetic-root", type=Path, help="Reuse the wide/deep/flat fixtures under this directory")
     args = parser.parse_args()
-    if args.runs < 3:
-        parser.error("at least three repetitions are required")
+    if args.runs < 4 or args.runs % 2:
+        parser.error("an even number of at least four repetitions is required for balanced ordering")
     if not args.bin.is_file():
         parser.error("release binary does not exist")
     args.dataset_parent.mkdir(parents=True, exist_ok=True)

@@ -20,8 +20,8 @@ mkdir -p "$snap_dir"
 # not in hyperdu-cli/Cargo.toml. pkgid prints `<url>#<version>`. This was the
 # one packaging script still hardcoding it, and it drifted to 0.4.0 while the
 # workspace moved on; every sibling already derives it this way.
-VER=$(cd "$root_dir" && cargo pkgid -p hyperdu-cli | sed 's/.*[#@]//')
-if [[ -z "$VER" ]]; then echo "error: could not determine hyperdu-cli version" >&2; exit 1; fi
+VER=$(cd "$root_dir" && cargo pkgid -p hyperdu | sed 's/.*[#@]//')
+if [[ -z "$VER" ]]; then echo "error: could not determine hyperdu version" >&2; exit 1; fi
 
 cat > "$snap_dir/snapcraft.yaml" <<'YAML'
 name: hyperdu

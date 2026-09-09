@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Generate a Homebrew formula template for hyperdu-cli.
+# Generate a Homebrew formula template for hyperdu.
 # The formula will be written under dist/brew/ with placeholders for URL/SHA256.
 
 usage() {
@@ -18,9 +18,9 @@ if [[ ${1:-} == "--version" ]]; then VER=${2:-}; fi
 if [[ -z "$VER" ]]; then
   # The crate inherits its version from [workspace.package], so the literal is
   # not in hyperdu-cli/Cargo.toml. pkgid prints `<url>#<version>`.
-  VER=$(cargo pkgid -p hyperdu-cli | sed 's/.*[#@]//')
+  VER=$(cargo pkgid -p hyperdu | sed 's/.*[#@]//')
 fi
-if [[ -z "$VER" ]]; then echo "error: could not determine hyperdu-cli version" >&2; exit 1; fi
+if [[ -z "$VER" ]]; then echo "error: could not determine hyperdu version" >&2; exit 1; fi
 
 outdir="dist/brew"
 mkdir -p "$outdir"

@@ -1,59 +1,51 @@
-# hyperdu-cli
+# hyperdu
 
-Fast cross-platform disk usage analyzer. HyperDU is designed around platform-specific
-filesystem fast paths and parallel traversal rather than being a direct rewrite of `du`.
+**日本語** · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
-## Performance status
+OS固有の高速な列挙処理と並列走査を使う、クロスプラットフォームのディスク使用量解析ツールです。
 
-Public benchmark numbers are currently being remeasured. Historical measurements are
-archived in the repository, but are not used as current performance claims.
+## 性能
 
-| Scenario | HyperDU | Baseline | Ratio |
-|---|---:|---:|---:|
-| Windows / NTFS | TBD | TBD | TBD |
-| Linux / ext4 | TBD | TBD | TBD |
-| Linux / XFS | TBD | TBD | TBD |
+Windows / NTFS と Linux / WSL2 / ext4 の[測定結果と限界](../docs/benchmarks.md)を公開します。
+coldとXFSは未測定です。実装の仕組みは[性能設計](../docs/performance.md)を参照してください。
 
-The current methodology and remeasurement checklist are in
-[docs/benchmarks.md](https://github.com/automationjp/HyperDiskUsage/blob/main/docs/benchmarks.md).
-The implementation strategy is described in
-[docs/performance.md](https://github.com/automationjp/HyperDiskUsage/blob/main/docs/performance.md).
-
-## Install
+## インストール
 
 ```bash
-cargo install hyperdu-cli --version 0.5.0-beta.2
+cargo install hyperdu --version 0.5.0-beta.3
 ```
 
-The crate is `hyperdu-cli`; the command it installs is `hyperdu`. Same shape as
-ripgrep installing `rg`, and it matches the deb, release binary, and Scoop command name.
+クレート名も実行コマンドも `hyperdu`。CLIとMCPを一度に導入し、MCPは `hyperdu mcp` を実行した
+場合だけ起動します。Rust 1.88+ が必要です。
 
-Prebuilt packages do not require a Rust toolchain. For source builds, Rust versions,
-Windows MSVC/SDK requirements, Linux native build tools, and development setup, see
-[docs/setup.md](https://github.com/automationjp/HyperDiskUsage/blob/main/docs/setup.md).
+この版は公開準備中です。現在はリポジトリのルートから
+`cargo install --locked --path hyperdu-cli` で導入してください。上のレジストリ用コマンドは公開後に利用できます。
+配布済みバイナリの実行にRustは不要です。MSVC/SDK・Linuxの依存環境は[セットアップ](../docs/setup.md)を参照してください。
 
-## Use
+## 使い方
 
 ```bash
-hyperdu /path --top 20            # largest directories
-hyperdu /path --json out.json     # structured output
-hyperdu --compat gnu -sh /var/log # du compatibility mode
+hyperdu /path --top 20
+hyperdu /path --json out.json
+hyperdu --compat gnu -sh /var/log
+hyperdu mcp
+hyperdu -- mcp
 ```
 
-## Why it is designed to be fast
+上から順に、大きいディレクトリの表示、JSON出力、GNU du互換モード、MCPサーバ起動、
+`mcp` という名前のディレクトリの走査です。
+
+## 高速走査の仕組み
 
 - Linux: `getdents64` + `statx`
-- Windows: batched `NtQueryDirectoryFile` enumeration with allocation size and file ID
+- Windows: 割当サイズとファイルIDを含む `NtQueryDirectoryFile` の一括列挙
 - macOS: `getattrlistbulk`
-- per-worker LIFO queues with work stealing
-- optional NTFS `$MFT` path when the required conditions are met
+- ワーカーごとのLIFOキューとwork stealing
+- 条件を満たす場合のNTFS `$MFT` 直接走査
 
-The MFT path is optional. If it cannot safely produce a complete result, HyperDU falls
-back to directory enumeration.
+MFTで完全な結果を安全に解析できない場合は、通常のディレクトリ列挙へ戻ります。
+インストール形式・GUI・プラットフォーム状況・制限は[プロジェクトREADME](../README.md)を参照してください。
 
-See the [project README](https://github.com/automationjp/HyperDiskUsage#readme) for
-installation options, GUI/MCP integration, platform status, and limitations.
-
-## License
+## ライセンス
 
 MIT

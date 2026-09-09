@@ -8,9 +8,9 @@ set -euo pipefail
 #   scripts/dev/build_print.sh [CARGO_BUILD_ARGS...]
 #
 # Examples:
-#   scripts/dev/build_print.sh -p hyperdu-cli --release
+#   scripts/dev/build_print.sh -p hyperdu --release
 #   scripts/dev/build_print.sh -p hyperdu-gui
-#   HYPERDU_LOG=1 scripts/dev/build_print.sh -p hyperdu-cli --release --target x86_64-unknown-linux-musl
+#   HYPERDU_LOG=1 scripts/dev/build_print.sh -p hyperdu --release --target x86_64-unknown-linux-musl
 #
 # Environment:
 #   HYPERDU_TIMINGS=1      -> pass `--timings` to cargo (report in target/cargo-timings)

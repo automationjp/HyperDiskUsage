@@ -2,7 +2,7 @@
 name: disk-space-triage
 description: Find out why a disk is full and what can safely be freed, using the HyperDU scanner. Use when a drive is out of space, a build fails with "no space left on device", or the user asks what is using their disk, which directories are largest, or what is safe to delete. Covers per-volume free space, largest-directory scans, and separating regenerable build output (Cargo target, node_modules, virtualenvs) from data that cannot be rebuilt.
 license: MIT
-compatibility: Requires the hyperdu binary. Run scripts/setup-hyperdu.sh (or setup-hyperdu.ps1 on Windows) to install it; that needs a Rust toolchain, because HyperDU has no prebuilt release. Works on Windows, Linux, and macOS.
+compatibility: Requires the hyperdu binary. Run scripts/setup-hyperdu.sh (or setup-hyperdu.ps1 on Windows) to install it; the source-install helper needs Rust 1.88 or newer. Works on Windows, Linux, and macOS.
 metadata:
   project: HyperDiskUsage
   repository: https://github.com/automationjp/HyperDiskUsage
@@ -21,7 +21,7 @@ nothing but a shell.
 
 ## Setup
 
-The command is `hyperdu` (from the `hyperdu-cli` crate). If it is not on PATH,
+The command is `hyperdu` (from the `hyperdu` crate). If it is not on PATH,
 install it before
 doing anything else:
 
@@ -35,13 +35,13 @@ On Windows:
 .\scripts\setup-hyperdu.ps1
 ```
 
-The script installs `hyperdu` and the `hyperdu-mcp` server, then prints the
+The script installs `hyperdu`, including its `mcp` subcommand, then prints the
 command to register the MCP server with Claude Code or Codex. It only performs
 that registration when passed `--register`, because rewriting an agent's
 configuration should be something the user asked for.
 
-HyperDU has no prebuilt release and is not on crates.io, so the script builds
-from source and needs a Rust toolchain. If `cargo` is missing it will say so and
+The helper builds from the current checkout or GitHub and needs Rust 1.88 or newer.
+Published binaries, when available, can also be installed from the project release page. If `cargo` is missing it will say so and
 point at <https://rustup.rs> rather than failing halfway through.
 
 To check without installing anything, use `--check`.
