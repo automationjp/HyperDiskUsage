@@ -5,12 +5,32 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  # Only main is watched on push. A branch with an open PR ran the whole matrix
+  # twice per commit -- once for the push, once for the pull_request -- for two
+  # identical results.
   push:
     branches:
-      - "**"
+      - main
   pull_request:
     branches:
       - "**"
+
+env:
+  # This workflow only asks whether the workspace compiles and passes tests; the
+  # binaries it produces are discarded, and release.yml rebuilds them from
+  # scratch on a tag. `lto = "thin"` with `codegen-units = 1` exists for those
+  # shipped binaries and bought nothing here but link time, so the release
+  # profile is relaxed for CI only. opt-level and panic=abort stay as declared,
+  # which is what a release-profile build is here to check.
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+  CARGO_PROFILE_RELEASE_DEBUG: "false"
+  # Not optional with sccache: incremental output is per-workspace state that
+  # sccache cannot key on, so it silently disables caching for those crates.
+  # Nothing is lost -- incremental artifacts never survive a runner anyway.
+  CARGO_INCREMENTAL: "0"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
   test-linux:
@@ -20,6 +40,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      # The 506 crates in Cargo.lock were compiled from zero on every single
+      # run. sccache keys on the compiler invocation, so bumping one dependency
+      # no longer invalidates the other 505 -- which is what a whole-target
+      # cache keyed on Cargo.lock does.
+      - uses: mozilla-actions/sccache-action@v0.0.11
+      # Registry and git checkouts only. Caching target/ as well would just
+      # shadow sccache with a coarser copy of the same artifacts.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: "false"
       - name: Lint (fmt + clippy)
         run: bash scripts/lint/run.sh
       - name: Shellcheck scripts
@@ -35,6 +65,10 @@ jobs:
         run: cargo build --workspace --release
       - name: Test core and CLI
         run: cargo test -p hyperdu-core -p hyperdu-cli -- --nocapture
+      # A silent drop to 0% would look exactly like the slow CI this replaced.
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   # Native enumeration and MFT I/O need Windows. A fresh, owned NTFS VHDX is
   # populated and remounted read-only; parity must use MFT, never its fallback.
@@ -45,9 +79,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - uses: mozilla-actions/sccache-action@v0.0.11
+      # No rust-cache here, unlike test-linux. Restoring it cost 25s on this
+      # runner against 3s on Linux -- Windows unpacks the same registry far more
+      # slowly -- while sccache was already serving 72% of the compilations that
+      # cache exists to avoid. It is why this job, not test-linux, ended up on
+      # the critical path.
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test core and CLI on a fixed NTFS volume
         run: .\scripts\dev\ntfs_fixture.ps1
+      # A silent drop to 0% would look exactly like the slow CI this replaced.
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   # Note: artifact packaging is handled in release.yml on tags. CI only builds and tests.
