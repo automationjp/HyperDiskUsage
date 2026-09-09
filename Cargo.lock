@@ -1712,8 +1712,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "hyperdu-cli"
-version = "0.5.0-beta.2"
+name = "hyperdu"
+version = "0.5.0-beta.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1728,14 +1728,17 @@ dependencies = [
  "libc",
  "log",
  "profiling",
+ "rmcp",
+ "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "windows 0.62.0",
 ]
 
 [[package]]
 name = "hyperdu-core"
-version = "0.5.0-beta.2"
+version = "0.5.0-beta.3"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -1763,7 +1766,7 @@ dependencies = [
 
 [[package]]
 name = "hyperdu-gui"
-version = "0.5.0-beta.2"
+version = "0.5.0-beta.3"
 dependencies = [
  "anyhow",
  "color-eyre",
@@ -1777,21 +1780,6 @@ dependencies = [
  "profiling",
  "rfd",
  "tempfile",
-]
-
-[[package]]
-name = "hyperdu-mcp"
-version = "0.5.0-beta.2"
-dependencies = [
- "anyhow",
- "hyperdu-core",
- "libc",
- "rmcp",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "windows 0.62.0",
 ]
 
 [[package]]

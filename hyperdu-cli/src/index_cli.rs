@@ -5,6 +5,8 @@ use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    /// Start the MCP server over stdio. Use ./mcp to scan a directory named mcp.
+    Mcp,
     /// Explicit Linux directory snapshots (no background monitoring)
     #[command(subcommand)]
     Index(IndexCommand),
@@ -27,7 +29,7 @@ pub(crate) enum IndexCommand {
     },
 }
 
-pub(crate) fn run(command: Command) -> Result<()> {
+pub(crate) fn run(command: IndexCommand) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
         linux::run(command)
@@ -54,10 +56,9 @@ mod linux {
     use anyhow::{bail, Context, Result};
     use hyperdu_core::index::Index;
 
-    use super::{Command, IndexCommand};
+    use super::IndexCommand;
 
-    pub(super) fn run(command: Command) -> Result<()> {
-        let Command::Index(command) = command;
+    pub(super) fn run(command: IndexCommand) -> Result<()> {
         let (root, database, refresh) = match command {
             IndexCommand::Refresh { root, database } => (root, database, true),
             IndexCommand::Show { root, database } => (root, database, false),

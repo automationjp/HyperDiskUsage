@@ -11,8 +11,9 @@ use std::{
 };
 
 mod index_cli;
+mod mcp;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use humansize::{format_size, BINARY};
 
@@ -126,18 +127,22 @@ impl From<IoProfileArg> for hyperdu_core::IoProfile {
     パラメータは --help で一覧表示できます。Windows では /help または /? でも同様に表示できます。",
     after_help = "Examples:\n\
       Scan current dir and show top 30\n\
-        cargo run -p hyperdu-cli --release -- . --top 30\n\
+        cargo run -p hyperdu --release -- . --top 30\n\
       Build CLI and GUI binaries\n\
-        cargo build -p hyperdu-cli --release\n\
+        cargo build -p hyperdu --release\n\
         cargo build -p hyperdu-gui  --release --features mimalloc\n\
       Run GUI\n\
         cargo run -p hyperdu-gui --release\n\
       Print artifacts via helper script\n\
-        bash scripts/dev/build_print.sh -p hyperdu-cli --release\n\
+        bash scripts/dev/build_print.sh -p hyperdu --release\n\
       Fast scan profile (Turbo)\n\
         hyperdu --perf turbo <PATH>\n\
       GNU-compatible block reporting\n\
         hyperdu --compat gnu --apparent-size --block-size=1K <PATH>\n\
+      Start the MCP server over stdio\n\
+        hyperdu mcp\n\
+      Scan a directory literally named mcp\n\
+        hyperdu ./mcp\n\
     "
 )]
 struct Args {
@@ -610,6 +615,14 @@ fn load_config() -> AppConfig {
     }
 }
 
+fn run_mcp() -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("failed to initialize the MCP runtime")?;
+    runtime.block_on(mcp::run())
+}
+
 fn main() -> Result<()> {
     env_logger::init();
     #[cfg(feature = "debug-eyre")]
@@ -626,7 +639,10 @@ fn main() -> Result<()> {
     }
     let mut args = Args::parse();
     if let Some(command) = args.command.take() {
-        return index_cli::run(command);
+        return match command {
+            index_cli::Command::Index(command) => index_cli::run(command),
+            index_cli::Command::Mcp => run_mcp(),
+        };
     }
     // GNU du: -b is equivalent to --apparent-size --block-size=1
     if args.bytes {

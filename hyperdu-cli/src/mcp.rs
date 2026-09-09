@@ -13,11 +13,14 @@
 
 use std::path::PathBuf;
 
+use anyhow::{Context, Result};
 use hyperdu_core::{scan_directory, volume, Options};
 use rmcp::{
     handler::server::wrapper::{Json, Parameters},
     model::{Implementation, ServerCapabilities, ServerInfo},
-    schemars, tool, tool_handler, tool_router, ErrorData, ServerHandler,
+    schemars, tool, tool_handler, tool_router,
+    transport::io::stdio,
+    ErrorData, ServerHandler, ServiceExt,
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,8 +32,8 @@ const DEFAULT_MIN_RECLAIMABLE_BYTES: u64 = 1 << 30;
 
 const NO_DELETE_NOTE: &str = "Read-only result. This server never deletes anything. \
      Deleting build output is recoverable by rebuilding, but confirm with the user before \
-     removing any of these, and prefer a non-zero unused_for_days so an in-progress build \
-     is not destroyed.";
+     removing any of these, and prefer a non-zero unused_for_days as a sampled \
+     modification-age heuristic; it cannot establish that a build is inactive.";
 
 fn default_top_n() -> usize {
     DEFAULT_TOP_N
@@ -101,10 +104,9 @@ pub struct ReclaimableParams {
     /// Ignore candidates smaller than this. Defaults to 1 GiB.
     #[serde(default = "default_min_size")]
     pub min_size_bytes: u64,
-    /// Keep only candidates untouched for at least this many days. Omit to
-    /// list everything. Set it to 1 or more before proposing any deletion: a
-    /// directory an in-progress build is writing to is never idle, so this is
-    /// what keeps a suggestion from breaking a running job.
+    /// Keep only candidates whose sampled modification age reaches this many days.
+    /// Omit to list everything. This is a shallow age heuristic and cannot prove
+    /// that a build is inactive or make a deletion safe.
     #[serde(default)]
     pub unused_for_days: Option<u64>,
     /// Stop descending past this depth. 0 means unlimited.
@@ -246,10 +248,10 @@ impl HyperDuServer {
     #[tool(
         name = "find_reclaimable",
         description = "Find directories holding regenerable build output (Cargo target, \
-                       node_modules, virtualenvs, caches) with their size and how many days they \
-                       have sat untouched. Use this, not scan_path, when the question is what can \
-                       safely be freed. Pass unused_for_days to exclude anything a running build \
-                       is still writing to. This never deletes; it reports."
+                       node_modules, virtualenvs, caches) with their size and sampled modification age. \
+                       Use this, not scan_path, when the question is what can be rebuilt. Pass \
+                       unused_for_days as an age heuristic; it cannot establish that a build is \
+                       inactive. This never deletes; it reports."
     )]
     async fn find_reclaimable(
         &self,
@@ -324,6 +326,23 @@ impl ServerHandler for HyperDuServer {
     }
 }
 
+/// Run the MCP transport. This is called only after the CLI has selected the
+/// mcp subcommand, so ordinary scans never initialize Tokio or touch stdio.
+pub(crate) async fn run() -> Result<()> {
+    // stdout carries the protocol. Diagnostics go to stderr, which clients
+    // capture as a log; a stray println! here would corrupt the JSON-RPC stream.
+    let service = HyperDuServer::new()
+        .serve(stdio())
+        .await
+        .context("failed to start the HyperDU MCP server on stdio")?;
+
+    service
+        .waiting()
+        .await
+        .context("HyperDU MCP server stopped unexpectedly")?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,7 +397,7 @@ mod tests {
     fn reports_the_crate_version_so_clients_can_tell_builds_apart() {
         let info = HyperDuServer::new().get_info();
         assert_eq!(info.server_info.version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(info.server_info.name, "hyperdu-mcp");
+        assert_eq!(info.server_info.name, "hyperdu");
     }
 
     #[tokio::test]
@@ -500,7 +519,7 @@ mod tests {
 
     #[tokio::test]
     async fn find_reclaimable_excludes_freshly_written_output() {
-        // The property that keeps a suggestion from destroying a running build.
+        // Fresh sampled output is excluded, but age alone cannot prove a build is inactive.
         let dir = tempfile::tempdir().expect("temp dir");
         std::fs::write(dir.path().join("Cargo.toml"), b"[package]").expect("write manifest");
         let target = dir.path().join("target");

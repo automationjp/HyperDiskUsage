@@ -3,7 +3,6 @@ members = [
   "hyperdu-core",
   "hyperdu-cli",
   "hyperdu-gui",
-  "hyperdu-mcp",
 ]
 resolver = "2"
 
@@ -12,11 +11,10 @@ resolver = "2"
 # goes with it were repeated in four manifests, and the hyperdu-core dependency
 # pin in three of them, which is how a bump missed Cargo.lock once already.
 #
-# `rust-version` is deliberately not here. hyperdu-mcp needs 1.88 for rmcp and
-# the other three build on 1.75; inheriting a single floor would force the
-# higher one on CLI users for no benefit.
+# `rust-version` is deliberately not here. The hyperdu CLI includes the MCP
+# server and needs 1.88 for rmcp, while the core and GUI keep their own floors.
 [workspace.package]
-version = "0.5.0-beta.2"
+version = "0.5.0-beta.3"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automationjp/HyperDiskUsage"
@@ -25,8 +23,8 @@ homepage = "https://github.com/automationjp/HyperDiskUsage#readme"
 [workspace.dependencies]
 # The `version` here must match `workspace.package.version`: cargo publish
 # rewrites the path dependency into a registry one and needs a version to do
-# it. Publish hyperdu-core first, then the three binaries that depend on it.
-hyperdu-core = { path = "hyperdu-core", version = "0.5.0-beta.2" }
+# it. Publish hyperdu-core first, then the two binaries that depend on it.
+hyperdu-core = { path = "hyperdu-core", version = "0.5.0-beta.3" }
 
 [profile.release]
 opt-level = 3
