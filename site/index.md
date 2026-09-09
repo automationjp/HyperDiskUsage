@@ -3,121 +3,46 @@ layout: default
 lang: ja
 home_path: /
 lang_switch_label: 言語
-title: "HyperDU — 何がディスクを埋めているかを、すぐに"
-description: "Windows と Linux で実測した高速なディスク使用量解析。何が容量を食っていて、そのうち何を消してよいかを答えます。"
+title: "HyperDU — 高速なディスク使用量解析"
+description: "OS 固有の高速経路と並列走査でディスク使用量を解析する Rust 製ツール。性能値は再計測中です。"
 ---
 
-# 何がディスクを埋めているか
+# 高速なディスク使用量解析
 
 <p class="lede">
-容量が尽きたとき知りたいのは「何が大きいか」だけではありません。<strong>そのうち何を消してよいか</strong>です。HyperDU は両方に答えます。
+HyperDU は、<strong>何がディスクを埋めているかを速く見つける</strong>ための Rust 製ディスク使用量アナライザーです。
 </p>
 
 ```bash
-hyperdu C:\ --top 20
+cargo install hyperdu-cli --version {{ site.versions.cli }}
+hyperdu /path --top 20
 ```
 
-## 速度
+## Performance
 
-同一マシン（Ryzen 9 3900X / NVMe SSD）での実測です。計測日 2026-09-07。
+HyperDU は、単に `du` を Rust で書き直したものではありません。OS 固有の directory enumeration、metadata 取得、並列走査まで含めて hot path を最適化しています。
 
-### Windows — 101,368 ファイル / 2.96 GB
+### 公開用 benchmark は再計測中です
 
-| ツール | 実行時間 | 倍率 |
-|---|---|---|
-| **HyperDU** | **251 ms** | — |
-| robocopy `/L /S` | 14,362 ms | **57×** |
-| GNU du 8.32 (MSYS2) | 12,871 ms | **51×** |
+過去の数値は履歴として保存し、現在の性能主張には使用しません。新しい測定が完了するまで結果欄は `TBD` とします。
 
-### Linux（WSL2 / ext4） — 712,374 ファイル
+| Scenario | HyperDU | Baseline | Ratio |
+|---|---:|---:|---:|
+| Windows / NTFS | TBD | TBD | TBD |
+| Linux / ext4 | TBD | TBD | TBD |
+| Linux / XFS | TBD | TBD | TBD |
 
-| ツール | 実行時間 | 倍率 |
-|---|---|---|
-| **HyperDU** | **191 ms** | — |
-| du (uutils coreutils 0.8.0) | 2,900 ms | **15×** |
-
-比較対象は意図的に 2 種類用意しています。MSYS2 の `du` は POSIX 互換層を通るぶん Windows では構造的に不利なので、**互換層を通らない Windows 純正の robocopy** も測りました。それでも 57 倍です。
-
-Linux の `du` は Ubuntu 26.04 既定の uutils（Rust 実装）なので、**Rust 対 Rust** の比較になります。
-
-> **走査量が一致していることを毎回確認しています。** robocopy と HyperDU はファイル数 101,368、バイト数 2,956,477,017 が完全一致しました。片方が何かを除外して速く見えている、ということはありません。
-
-倍率はツリーの形とストレージに強く依存します。深く狭い木では差が縮み、HDD やネットワーク越しでは I/O 律速になります。**環境・手順・不利な結果を含む全数値**は [docs/benchmarks.md](https://github.com/{{ site.repository }}/blob/main/docs/benchmarks.md) にあります。
+再計測条件と作業項目は [Benchmark plan](https://github.com/{{ site.repository }}/blob/main/docs/benchmarks.md) を参照してください。
 
 ## 速い理由
 
-- **OS ごとの一括列挙 API** — Linux は `getdents64` + `statx`、Windows は `NtQueryDirectoryFile`（物理サイズとファイル ID が列挙結果に含まれるため、ハードリンク重複排除に追加のシステムコールが要りません）、macOS は `getattrlistbulk`
-- **NTFS の `$MFT` 直読み** — Windows で管理者権限かつボリュームルートを指定した場合
-- **ワークスティーリング** — ワーカーごとの LIFO デックから、浅い側＝大きなサブツリーを盗みます
+- **Linux** — `getdents64` + `statx` で低オーバーヘッドな列挙と metadata 取得
+- **Windows** — `NtQueryDirectoryFile` で name・size・allocation size・file ID を batch 取得
+- **macOS** — `getattrlistbulk` で metadata を bulk 取得
+- **Work stealing** — directory tree の大きさの偏りに合わせて worker 間で work を再分配
+- **Optional NTFS `$MFT` path** — 条件を満たす volume root では直接読み取り。安全に解析できない場合は通常列挙へ fallback
 
-## インストール
-
-### crates.io
-
-```bash
-cargo install hyperdu-cli --version {{ site.versions.cli }}
-```
-
-ベータ版のため `--version` の明示が要ります。**クレート名は `hyperdu-cli` ですが、入るコマンドは `hyperdu` です**（`ripgrep` が `rg` を入れるのと同じ形）。
-
-### Windows
-
-scoop はこのリポジトリ自体が bucket です。
-
-```powershell
-scoop bucket add hyperdu https://github.com/{{ site.repository }}
-scoop install hyperdu
-```
-
-winget はまだ使えません。[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) への申請は提出済みですが、CLA 署名待ちで未マージです。
-
-### ビルド済みバイナリ
-
-Windows / Linux（glibc・musl・aarch64）向けの zip と、Debian / Ubuntu 向けの `.deb` を [Releases](https://github.com/{{ site.repository }}/releases) に置いています。展開してそのまま実行できます。
-
-プレリリースのため `releases/latest` は解決しません（GitHub は prerelease を latest として扱いません）。上のリンクから該当バージョンを選んでください。
-
-### ソースから
-
-```bash
-git clone https://github.com/{{ site.repository }}.git
-cd HyperDiskUsage
-cargo install --path hyperdu-cli
-```
-
-## エージェント連携
-
-Claude や Codex のようなエージェントが、**容量の状況を構造化データとして受け取り、何を消してよいか判断できる**ようにする 3 つの面を同梱しています。**互いに依存しないので、どれか 1 つだけを採用できます。**
-
-| 面 | 単独で使えるか |
-|---|---|
-| MCP サーバ | 任意の MCP クライアント |
-| Agent Skill | CLI を叩くので MCP 不要 |
-| Agent Plugin | 上 2 つを束ねるだけ |
-
-```bash
-cargo install hyperdu-mcp --version {{ site.versions.mcp }}
-claude mcp add --transport stdio hyperdu -- hyperdu-mcp
-```
-
-公開しているツールは 3 つで、容量逼迫時に必要になる順に対応します。
-
-| ツール | 答えること |
-|---|---|
-| `list_volumes` | どのドライブが逼迫しているか |
-| `scan_path` | その中で何が大きいか |
-| `find_reclaimable` | そのうち**再生成できる**のはどれか（放置日数つき） |
-
-**削除ツールは意図的に持たせていません。** エージェントが人間の確認なしにデータを壊す経路を作らないためです。誤った報告は取り返しがつきますが、誤った `rm -rf` はつきません。
-
-`find_reclaimable` は `target/` を名前だけで判定しません。兄弟に `Cargo.toml` が無ければそれは誰かのデータであり、再生成可能と報告するのは危険だからです。
-
-## いま素直に書いておくこと
-
-- **ベータ版です。** API とツールの粒度は変わる可能性があります
-- **GitHub Releases はまだありません。** 現時点の導入経路は `cargo install` かソースビルドです
-- **macOS は実機未検証**です（ビルドは通ります）
-- Linux の実測値は WSL2 上のもので、ベアメタルとは異なる可能性があります
+設計詳細は [Performance design](https://github.com/{{ site.repository }}/blob/main/docs/performance.md) にまとめています。
 
 ## 使い方
 
@@ -125,12 +50,48 @@ claude mcp add --transport stdio hyperdu -- hyperdu-mcp
 # 上位 20 件
 hyperdu /path --top 20
 
-# 構造化出力
+# JSON
 hyperdu /path --json out.json
 
-# du の代替として
+# GNU du 互換モード
 hyperdu --compat gnu -sh /var/log
-alias du='hyperdu --compat gnu'
 ```
 
-詳細は [README](https://github.com/{{ site.repository }}#readme) を参照してください。
+## AI Agent 連携
+
+Claude や Codex などから、ディスク逼迫を structured data として調査できます。
+
+| Tool | 答えること |
+|---|---|
+| `list_volumes` | どの volume が逼迫しているか |
+| `scan_path` | その中で何が大きいか |
+| `find_reclaimable` | 再生成可能な候補は何か |
+
+**削除ツールは意図的に提供していません。**
+
+```bash
+cargo install hyperdu-mcp --version {{ site.versions.mcp }}
+claude mcp add --transport stdio hyperdu -- hyperdu-mcp
+```
+
+## インストール
+
+crates.io、GitHub Release の prebuilt binary、Scoop から導入できます。winget は申請中です。
+
+詳細な導入方法は [README](https://github.com/{{ site.repository }}#installation) を参照してください。
+
+## 現在の状態
+
+- Beta
+- Windows / Linux は検証対象
+- macOS は CLI 実機未検証、GUI は現在 release 対象外
+- 公開用 performance benchmark は再計測中
+
+## Documentation
+
+- [Performance design](https://github.com/{{ site.repository }}/blob/main/docs/performance.md)
+- [Benchmark plan](https://github.com/{{ site.repository }}/blob/main/docs/benchmarks.md)
+- [Architecture](https://github.com/{{ site.repository }}/blob/main/docs/architecture.md)
+- [Documentation index](https://github.com/{{ site.repository }}/blob/main/docs/README.md)
+
+過去の benchmark・Issue 固有設計は `docs/old/` に保存しています。

@@ -35,6 +35,9 @@ hyperdu-core = { workspace = true }
 profiling = { version = "1", optional = true }
 color-eyre = { version = "0.6", optional = true }
 
+[dev-dependencies]
+tempfile = "3.10"
+
 # Debian packaging (cargo-deb)
 [package.metadata.deb]
 section = "utils"
@@ -52,9 +55,8 @@ assets = [
 summary = "Hyper-fast disk usage analyzer GUI"
 license = "MIT"
 group = "Applications/System"
-# No `requires`, and `auto-req` is a string: see the note in
-# hyperdu-cli/Cargo.toml. Both fields were the wrong TOML type, and the manifest
-# is rejected before assets are even looked at.
+# cargo-generate-rpm expects a string policy here. `requires` is intentionally
+# omitted: automatic library dependency discovery supplies the runtime deps.
 auto-req = "auto"
 assets = [
   { source = "../target/release/hyperdu-gui", dest = "/usr/bin/hyperdu-gui", mode = "755" },

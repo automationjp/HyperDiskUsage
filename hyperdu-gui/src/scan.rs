@@ -84,7 +84,7 @@ pub struct Params {
 impl Params {
     fn to_options(&self, files_seen: Arc<AtomicU64>) -> core::Options {
         let counter = files_seen;
-        core::Options {
+        let mut opt = core::Options {
             exclude_contains: self.exclude.clone(),
             max_depth: self.max_depth,
             min_file_size: self.min_file_size,
@@ -101,7 +101,12 @@ impl Params {
             })),
             compute_physical: true,
             ..core::Options::default()
-        }
+        };
+        // A hand-built `Options` carries the raw patterns and none of the
+        // matchers. `scan_directory` compiles its own copy, but `is_excluded`
+        // reads the matchers directly, so it has to be done here too.
+        core::compile_filters_in_place(&mut opt);
+        opt
     }
 }
 
@@ -114,7 +119,11 @@ pub fn start(root: PathBuf, params: Params) -> Handle {
     let worker_counter = files_seen.clone();
     let worker_cancel = cancel.clone();
     std::thread::spawn(move || {
-        let (dirs, files) = list_root(&root);
+        // Built first: `list_root` needs the compiled excludes to decide which
+        // children to hand back, and the same options then drive every scan.
+        let opt = params.to_options(worker_counter);
+
+        let (dirs, files) = list_root(&root, &opt);
         if tx.send(Msg::Listing { dirs: dirs.clone() }).is_err() {
             return;
         }
@@ -122,7 +131,6 @@ pub fn start(root: PathBuf, params: Params) -> Handle {
             return;
         }
 
-        let opt = params.to_options(worker_counter);
         for dir in dirs {
             if worker_cancel.load(Ordering::Relaxed) {
                 return;
@@ -143,9 +151,21 @@ pub fn start(root: PathBuf, params: Params) -> Handle {
 }
 
 /// One `read_dir` of the root: directories to scan, and the files that live
-/// directly in it. Files are reported with the size we already have from the
-/// directory entry, so nothing is stat'd twice.
-fn list_root(root: &Path) -> (Vec<PathBuf>, Vec<(PathBuf, Stat)>) {
+/// directly in it.
+///
+/// Both halves defer to `core` rather than deciding anything here, because both
+/// were wrong when this did decide:
+///
+///   - The directories become scan roots of their own, and the backends only
+///     test the *children* of a directory they are processing -- never the root
+///     they were handed. So an excluded directory sitting at the top level was
+///     scanned anyway: with `--exclude node_modules`, a nested `node_modules`
+///     was dropped and one directly under the root was not.
+///   - The files were reported with `metadata().len()` as both sizes. That is
+///     the logical size, so a 10 KiB file in the root showed 10 KiB next to the
+///     same file one level down showing its allocated 64 KiB -- the number
+///     meant something different depending on depth.
+fn list_root(root: &Path, opt: &core::Options) -> (Vec<PathBuf>, Vec<(PathBuf, Stat)>) {
     let mut dirs = Vec::new();
     let mut files = Vec::new();
     let Ok(rd) = std::fs::read_dir(root) else {
@@ -153,18 +173,15 @@ fn list_root(root: &Path) -> (Vec<PathBuf>, Vec<(PathBuf, Stat)>) {
     };
     for entry in rd.flatten() {
         let path = entry.path();
+        if core::is_excluded(&path, opt) {
+            continue;
+        }
         match entry.file_type() {
             Ok(ft) if ft.is_dir() => dirs.push(path),
             Ok(_) => {
-                let len = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                files.push((
-                    path,
-                    Stat {
-                        logical: len,
-                        physical: len,
-                        files: 1,
-                    },
-                ));
+                if let Some(stat) = core::file_stat(&path, opt) {
+                    files.push((path, stat));
+                }
             }
             Err(_) => {}
         }
@@ -307,6 +324,97 @@ mod tests {
             physical,
             files: 1,
         }
+    }
+
+    fn params_excluding(exclude: &[&str]) -> Params {
+        Params {
+            exclude: exclude.iter().map(|s| s.to_string()).collect(),
+            min_file_size: 0,
+            max_depth: 0,
+            follow_links: false,
+        }
+    }
+
+    /// The excluded directory sits at the top level, which is the case the
+    /// backends cannot cover: they filter the children of whatever directory
+    /// they are walking, and each of these becomes a scan root of its own. Left
+    /// to `read_dir` alone, `node_modules` came back and got scanned.
+    #[test]
+    fn list_root_drops_excluded_top_level_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir(root.join("node_modules")).unwrap();
+        std::fs::create_dir(root.join("keep")).unwrap();
+
+        let opt = params_excluding(&["node_modules"]).to_options(Arc::new(AtomicU64::new(0)));
+        let (dirs, _) = list_root(root, &opt);
+
+        let names: Vec<_> = dirs
+            .iter()
+            .filter_map(|p| p.file_name()?.to_str())
+            .collect();
+        assert_eq!(names, ["keep"], "excluded top-level directory came back");
+    }
+
+    #[test]
+    fn list_root_drops_excluded_top_level_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("keep.txt"), b"x").unwrap();
+        std::fs::write(root.join("skip.log"), b"x").unwrap();
+
+        let opt = params_excluding(&[".log"]).to_options(Arc::new(AtomicU64::new(0)));
+        let (_, files) = list_root(root, &opt);
+
+        let names: Vec<_> = files
+            .iter()
+            .filter_map(|(p, _)| p.file_name()?.to_str())
+            .collect();
+        assert_eq!(names, ["keep.txt"], "excluded top-level file came back");
+    }
+
+    /// `metadata().len()` is the logical size, so using it for both made a
+    /// root-level file report a different number than the same file one level
+    /// down, where the scan reports the allocated size. Asking core keeps the
+    /// two consistent; on a filesystem that rounds up they differ, and on one
+    /// that does not they are equal -- either way both halves now agree.
+    #[test]
+    fn list_root_reports_the_size_core_would() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let path = root.join("f.bin");
+        std::fs::write(&path, vec![b'x'; 10240]).unwrap();
+
+        let opt = params_excluding(&[]).to_options(Arc::new(AtomicU64::new(0)));
+        let (_, files) = list_root(root, &opt);
+
+        assert_eq!(files.len(), 1);
+        let (_, got) = &files[0];
+        let expected = core::file_stat(&path, &opt).expect("core stats a regular file");
+        assert_eq!(got.logical, expected.logical);
+        assert_eq!(
+            got.physical, expected.physical,
+            "root-level file must carry the same physical size the scan would report"
+        );
+        assert_eq!(got.logical, 10240, "logical size is the byte count");
+    }
+
+    /// Directories are handed on as scan roots and must not be mistaken for
+    /// files, and a file must not be enqueued as a directory to scan.
+    #[test]
+    fn list_root_separates_directories_from_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir(root.join("d")).unwrap();
+        std::fs::write(root.join("f"), b"x").unwrap();
+
+        let opt = params_excluding(&[]).to_options(Arc::new(AtomicU64::new(0)));
+        let (dirs, files) = list_root(root, &opt);
+
+        assert_eq!(dirs.len(), 1);
+        assert!(dirs[0].ends_with("d"));
+        assert_eq!(files.len(), 1);
+        assert!(files[0].0.ends_with("f"));
     }
 
     /// Synthetic paths only; nothing here touches a filesystem.

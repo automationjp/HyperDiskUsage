@@ -43,8 +43,9 @@ usage() {
 Usage: $(basename "$0")
 
 Runs formatting and lint checks for the workspace:
+  - version/lockfile consistency
   - cargo fmt --all -- --check
-  - cargo clippy --workspace -- -D warnings
+  - cargo clippy --workspace --locked -- -D warnings
   - cargo deny check   (if cargo-deny is installed)
 
 Options:
@@ -54,11 +55,18 @@ USAGE
 
 for a in "$@"; do case "$a" in -h|--help) usage; exit 0;; esac; done
 
+# Run this before any resolving Cargo command. `cargo clippy` can refresh an
+# outdated Cargo.lock, which would otherwise hide exactly the missing-lockfile
+# release error this check is intended to detect.
+echo "==> version references"
+bash scripts/lint/versions.sh --self-test
+bash scripts/lint/versions.sh
+
 echo "==> rustfmt (check)"
 cargo fmt --all -- --check
 
 echo "==> clippy (workspace, deny warnings)"
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --locked -- -D warnings
 
 # Optional: strict import sort if nightly rustfmt is present
 # Install nightly rustfmt on demand if missing
@@ -110,13 +118,10 @@ else
   echo "(info) cargo-deny not found; skipping dependency audit"
 fi
 
-# Both unconditional on purpose. Every other step above skips when its tool is
+# Unconditional on purpose. Every other step above skips when its tool is
 # missing, and that is how a broken shellcheck glob passed a local lint run and
 # then failed CI: shellcheck was not installed, so nothing evaluated it.
 echo "==> script path references"
 bash scripts/lint/paths.sh
-
-echo "==> version references"
-bash scripts/lint/versions.sh
 
 echo "OK"

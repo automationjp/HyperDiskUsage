@@ -19,16 +19,16 @@ adopt any one of them without the other two**.
 ## Setup
 
 Everything here needs at least one HyperDU binary. The bundled script builds
-them with `cargo`, so a [Rust toolchain](https://rustup.rs) is required.
+the binaries it needs with `cargo`, so a [Rust toolchain](https://rustup.rs) is
+required for that script.
 
-Prebuilt archives are attached to each
-[release](https://github.com/automationjp/HyperDiskUsage/releases) and the
-crates are published, so you can install either one by hand instead and re-run
-the script with `--check`. The script does not do it for you: it needs two
-binaries on whatever platform it lands on, and picking and verifying the right
-archive for each is not a decision it should make on your behalf. The root
-README carries the pinned `cargo install` lines — a pre-release needs an
-explicit `--version`.
+Prebuilt release archives currently cover the CLI/GUI, while `hyperdu-mcp` is
+published as a crate but is not attached to the release as a prebuilt binary.
+If you only use the skill, installing the CLI archive is sufficient. For the
+full bundled setup, either use Cargo or provision both `hyperdu` and
+`hyperdu-mcp` yourself and re-run the script with `--check`. The root README
+carries the pinned installation commands; a pre-release needs an explicit
+`--version`.
 
 The bundled script installs both binaries and shows you how to register the MCP
 server:

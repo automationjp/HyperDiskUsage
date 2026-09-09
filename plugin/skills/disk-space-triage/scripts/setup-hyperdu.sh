@@ -5,10 +5,9 @@
 # worth stating plainly rather than leaving someone to discover it after a failed
 # `apt install`.
 #
-# Prebuilt archives and published crates both exist -- the repository README
-# lists them -- but this script installs two binaries on whichever platform it
-# lands on, and choosing the right archive for each, then verifying it, is more
-# than a setup script should decide on its owner's behalf.
+# Release archives currently cover the CLI/GUI, not the hyperdu-mcp binary. Both
+# crates are published, but this script deliberately uses Cargo for the two
+# binaries it needs rather than guessing and mixing installation sources.
 #
 # Registering an MCP server rewrites an agent's configuration, so this prints
 # the command by default and only runs it when asked with --register. Installing
@@ -93,15 +92,16 @@ have "$MCP_BIN" || missing="$missing $MCP_BIN"
 if [ -n "$missing" ]; then
     if ! have cargo; then
         cat >&2 <<EOF
-error: cargo not found, and this script installs by building from source.
+error: cargo not found, and this setup needs both hyperdu and hyperdu-mcp.
 
 Install a Rust toolchain first:
   https://rustup.rs
 
 Then run this script again.
 
-Or install the two binaries yourself and re-run with --check: prebuilt archives
-are attached to each release, and the crates are published.
+The release archives contain the CLI/GUI but do not currently contain a
+hyperdu-mcp binary. If you provision both required binaries yourself, re-run
+with --check. CLI archives are listed here:
   $REPO_URL/releases
 EOF
         exit 1
