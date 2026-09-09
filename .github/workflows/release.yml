@@ -29,39 +29,53 @@ jobs:
           cargo install cargo-generate-rpm || true
       - name: Lint (fmt + clippy)
         run: bash scripts/lint/run.sh
-      - name: Package ZIP/DEB/RPM (CLI+GUI)
+      - name: Package ZIP/DEB/RPM/AppImage (CLI+GUI)
+        # linuxdeploy and appimagetool are themselves AppImages, and an AppImage
+        # self-mounts through libfuse2, which the runner image no longer carries.
+        # Extracting instead is the supported way out and costs a temp directory.
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
         run: |
-          # Build Linux targets only here; Windows artifacts are built on the Windows runner to avoid duplicates
-          bash scripts/package/release.sh --targets "linux-gnu,linux-musl,linux-aarch64" \
+          # Build Linux targets only here; Windows artifacts are built on the Windows runner to avoid duplicates.
+          #
+          # linux-appimage goes through release.sh rather than calling
+          # scripts/package/appimage.sh directly. Only release.sh downloads
+          # linuxdeploy and appimagetool first, and the direct call this replaces
+          # failed every release with "error: linuxdeploy not found" -- into a
+          # step that ended in `|| true`, so nothing said so.
+          bash scripts/package/release.sh --targets "linux-gnu,linux-musl,linux-aarch64,linux-appimage" \
             --cpu-flavors "generic" --deb --rpm --verbose
       - name: Generate Snap/Flatpak manifests
         run: |
           bash scripts/package/snap.sh --generate-only
           bash scripts/package/flatpak.sh --generate-only
-      - name: Try AppImage (GUI)
-        run: |
-          bash scripts/package/appimage.sh || true
+      # snapcraft pushes the whole project into its build instance, and by this
+      # point target/ holds three cross-compiled release trees. Nothing after
+      # this reads it: the zips, deb, rpm and AppImage are already in dist/.
+      - name: Drop the build tree before the snap build
+        run: rm -rf target
       - name: Build Snap (CLI) via Snapcraft
         uses: snapcore/action-build@v1
         with:
-          path: snap
+          # The repository root, not snap/. `path` names the project directory,
+          # and pointing it at snap/ made the part's `source: .` resolve there
+          # too, so every release died with "could not find Cargo.toml in
+          # /root/parts/hyperdu/build" while the job stayed green.
+          path: .
         continue-on-error: true
       - name: Move Snap artifacts to dist
         run: |
           mkdir -p dist
           mv ./*.snap dist/ 2>/dev/null || true
         continue-on-error: true
-      - name: Build Flatpak (GUI)
-        uses: bilelmoussaoui/flatpak-github-actions/flatpak-builder@v6
-        with:
-          manifest-path: packaging/flatpak/org.hyperdu.GUI.yaml
-          bundle: true
-        continue-on-error: true
-      - name: Collect Flatpak bundles
-        run: |
-          mkdir -p dist
-          find . -name "*.flatpak" -exec cp {} dist/ \; || true
-        continue-on-error: true
+      # No flatpak build step. The manifest is still generated above, because it
+      # is useful to a downstream packager, but building it here has never
+      # produced a bundle: the runner has no flatpak-builder
+      # ("/usr/bin/xvfb-run: flatpak-builder: not found"), and past that the
+      # manifest would still need the rust SDK extension and a vendored crate
+      # tree, since flatpak-builder builds with the network switched off. That
+      # is a packaging task of its own. A step that cannot succeed is worse than
+      # no step, because continue-on-error turns it into silence.
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -75,6 +89,21 @@ jobs:
       # v0.0.1 draft proved they otherwise ship as public release assets.
       - name: Drop build logs from release assets
         run: rm -f dist/*.log
+      # Runs after the log sweep, so it describes exactly what the release will
+      # carry. Every packager above is allowed to fail, which is how a snap that
+      # had not built since 0.4.0 and an rpm that never built at all both went
+      # unnoticed: the job was green and the release simply had fewer files in
+      # it. The tolerance stays -- these are optional formats -- but the outcome
+      # is now recorded instead of inferred from the releases page.
+      - name: Report packaged artifacts
+        run: |
+          bash scripts/package/report_artifacts.sh \
+            --required 'hyperdu-cli-linux-x86_64-generic.zip' \
+            --required 'hyperdu-gui-linux-x86_64-generic.zip' \
+            --required '*.deb' \
+            --optional '*.rpm' \
+            --optional '*.snap' \
+            --optional '*.AppImage'
       - name: Create GitHub Release (upload assets)
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')

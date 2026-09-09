@@ -85,8 +85,19 @@ assets = [
 summary = "Hyper-fast disk usage analyzer CLI"
 license = "MIT"
 group = "Applications/System"
-auto-req = true
-requires = []
+# Two type errors here are why no .rpm has ever shipped; the release workflow
+# swallowed both, so the job stayed green with nothing to show for it.
+#
+#   requires = []    cargo-generate-rpm reads `requires` as a table of
+#                    name -> constraint, so an array fails the manifest with
+#                    "must be string or integer". Dropped: auto-req derives the
+#                    shared-library dependencies on its own.
+#   auto-req = true  the field takes a string, not a bool. "auto" is the
+#                    documented default and matches what the bool meant.
+#
+# Removing only the first moves the failure to the second, which is what the CI
+# log could never show: it stops at the first bad field.
+auto-req = "auto"
 assets = [
   { source = "../target/release/hyperdu", dest = "/usr/bin/hyperdu", mode = "755" },
   { source = "../README.md", dest = "/usr/share/doc/hyperdu/README.md", mode = "644" },

@@ -401,18 +401,36 @@ for flavor in "${cpu_flavors[@]}"; do
     if ! command -v rpmbuild >/dev/null 2>&1; then
       if command -v sudo >/dev/null 2>&1; then sudo apt-get update -y || true; sudo apt-get install -y rpm || true; fi
     fi
-    cargo generate-rpm -p hyperdu-cli || true
-    rpm_path=$(ls -1 target/generate-rpm/*hyperdu-cli*.rpm 2>/dev/null | tail -n1 || true)
-    if [[ -n "$rpm_path" && -f "$rpm_path" ]]; then
-      cp "$rpm_path" "$dist_dir/" || true
-    fi
-    if [[ $skip_gui -eq 0 ]]; then
-      cargo generate-rpm -p hyperdu-gui || true
-      rpm_path_gui=$(ls -1 target/generate-rpm/*hyperdu-gui*.rpm 2>/dev/null | tail -n1 || true)
-      if [[ -n "$rpm_path_gui" && -f "$rpm_path_gui" ]]; then
-        cp "$rpm_path_gui" "$dist_dir/" || true
+    # RPM versions cannot contain '-', so cargo-generate-rpm refuses
+    # 0.5.0-beta.2 outright. '~' is the RPM spelling for a pre-release and,
+    # unlike the '.' cargo-deb substitutes, it sorts *before* the release it
+    # precedes -- 0.5.0~beta.2 < 0.5.0, which is what a beta should do.
+    # Injected at build time rather than pinned in Cargo.toml, so it cannot
+    # drift from [workspace.package] the way the packaging tree already has.
+    rpm_version="$(cli_version)"
+    rpm_version="${rpm_version//-/\~}"
+    # cargo-generate-rpm writes under CARGO_TARGET_DIR when it is set, which
+    # ensure_safe_target_dir does on WSL mounts.
+    rpm_out="${CARGO_TARGET_DIR:-target}/generate-rpm"
+    for pkg in hyperdu-cli hyperdu-gui; do
+      if [[ "$pkg" == hyperdu-gui && $skip_gui -eq 1 ]]; then continue; fi
+      # Clear this package's previous output first. Only dist/ is wiped at the
+      # start of a run, so on a repeated local run a failed generate-rpm would
+      # otherwise leave the last version's .rpm sitting here for the `ls | tail`
+      # below to find and copy -- a silent packaging failure of exactly the kind
+      # this file is being changed to stop producing.
+      rm -f "$rpm_out"/*"$pkg"*.rpm
+      cargo generate-rpm -p "$pkg" -s "version = \"$rpm_version\"" || true
+      rpm_path=$(ls -1 "$rpm_out"/*"$pkg"*.rpm 2>/dev/null | tail -n1 || true)
+      if [[ -n "$rpm_path" && -f "$rpm_path" ]]; then
+        cp "$rpm_path" "$dist_dir/" || true
+      else
+        # Announced rather than swallowed: a silent rpm step is how two type
+        # errors in [package.metadata.generate-rpm] survived every release
+        # without anyone noticing there was no .rpm to download.
+        echo "warn: no .rpm produced for $pkg (looked in $rpm_out)"
       fi
-    fi
+    done
   fi
 
   if [[ $skip_gui -eq 0 && -n "$gui_bin" && -f "$gui_bin" ]]; then

@@ -16,10 +16,26 @@ root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/../.. && pwd)"
 snap_dir="$root_dir/snap"
 mkdir -p "$snap_dir"
 
-cat > "$snap_dir/snapcraft.yaml" <<'YAML'
+# The snap has to be labelled with the version it was built from. A literal here
+# is what stranded the committed snap/snapcraft.yaml at 0.4.0. version-sync:ignore
+# This generator rewrites that file on every release run, so editing the
+# committed copy could never have stuck.
+#
+# Ask cargo instead, like brew.sh and scoop.ps1 do -- the crate inherits
+# `version.workspace = true`, so the literal is not in hyperdu-cli/Cargo.toml.
+# pkgid prints `<url>#<version>`.
+version="$(cargo pkgid -p hyperdu-cli --manifest-path "$root_dir/Cargo.toml" | sed 's/.*[#@]//')"
+if [[ -z "$version" ]]; then
+  echo "error: could not determine hyperdu-cli version from cargo pkgid" >&2
+  exit 1
+fi
+
+# Quoted heredoc plus a single substitution: only __VERSION__ is interpolated,
+# so the rest of the YAML is not at the mercy of shell expansion.
+sed "s/__VERSION__/$version/" > "$snap_dir/snapcraft.yaml" <<'YAML'
 name: hyperdu
 base: core22
-version: '0.4.0'
+version: '__VERSION__'
 summary: Hyper-fast disk usage analyzer
 description: |
   HyperDU is a cross-platform, high-performance disk usage analyzer.
@@ -36,6 +52,14 @@ parts:
     plugin: rust
     source: .
     rust-channel: stable
+    # The snap ships the CLI only. Without this the plugin falls back to
+    # `cargo build --workspace --release`, because its default rust-path of "."
+    # makes `cargo read-manifest` fail against a virtual workspace root -- and
+    # that drags in hyperdu-gui, whose GTK build dependencies are not declared
+    # below. With a real package path the plugin runs `cargo install --locked
+    # --path hyperdu-cli --root <install>`, which lands exactly the bin/hyperdu
+    # that `apps` and `prime` expect.
+    rust-path: [hyperdu-cli]
     build-packages: [pkg-config]
     stage-packages: []
     prime:

@@ -1,6 +1,6 @@
 name: hyperdu
 base: core22
-version: '0.4.0'
+version: '0.5.0-beta.2'
 summary: Hyper-fast disk usage analyzer
 description: |
   HyperDU is a cross-platform, high-performance disk usage analyzer.
@@ -17,6 +17,14 @@ parts:
     plugin: rust
     source: .
     rust-channel: stable
+    # The snap ships the CLI only. Without this the plugin falls back to
+    # `cargo build --workspace --release`, because its default rust-path of "."
+    # makes `cargo read-manifest` fail against a virtual workspace root -- and
+    # that drags in hyperdu-gui, whose GTK build dependencies are not declared
+    # below. With a real package path the plugin runs `cargo install --locked
+    # --path hyperdu-cli --root <install>`, which lands exactly the bin/hyperdu
+    # that `apps` and `prime` expect.
+    rust-path: [hyperdu-cli]
     build-packages: [pkg-config]
     stage-packages: []
     prime:

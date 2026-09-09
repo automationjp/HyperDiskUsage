@@ -2,6 +2,15 @@
 set -euo pipefail
 
 # Generate a Flatpak manifest and optionally build with flatpak-builder.
+#
+# The release workflow only generates. It used to build too, and never once
+# produced a bundle: the runner has no flatpak-builder, and the manifest below
+# is a starting point rather than a working recipe. `cargo` is not in
+# org.freedesktop.Sdk -- that needs the org.freedesktop.Sdk.Extension.rust-stable
+# sdk-extension and an append-path -- and flatpak-builder runs builds with the
+# network off, so the crate tree has to be vendored in as sources. Both are real
+# work; until someone does it, this writes a manifest for a downstream packager
+# and CI does not pretend to build it.
 
 usage() {
   cat <<USAGE
