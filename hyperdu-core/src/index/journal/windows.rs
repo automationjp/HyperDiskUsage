@@ -794,8 +794,9 @@ fn invalid(message: &'static str) -> io::Error {
 mod tests {
     use std::fs;
 
-    use super::*;
     use windows::Win32::Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, FILE_READ_ATTRIBUTES};
+
+    use super::*;
 
     #[test]
     fn journal_cursor_accepts_only_current_incarnation_and_bounds() {
