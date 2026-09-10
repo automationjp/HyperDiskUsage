@@ -93,6 +93,61 @@ fn join_path(prefix: &str, rest: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// Project only directories and files reachable through listable ancestors.
+/// None aborts the entire projection; false preserves the directory's empty row.
+pub(crate) fn to_visible_stat_map(
+    entries: &[Entry],
+    root_prefix: &str,
+    count_hardlinks: bool,
+    compute_physical: bool,
+    mut listable: impl FnMut(&std::path::Path) -> Option<bool>,
+) -> Option<crate::StatMap> {
+    let mut paths = Paths::new(entries);
+    let mut children: HashMap<u64, Vec<&Entry>> = HashMap::new();
+    for entry in entries.iter().filter(|entry| entry.is_directory) {
+        children.entry(entry.parent).or_default().push(entry);
+    }
+    let mut visible = HashSet::from([ROOT_RECORD]);
+    let mut readable = HashSet::new();
+    let mut pending = vec![ROOT_RECORD];
+    while let Some(record) = pending.pop() {
+        if !listable(&join_path(root_prefix, paths.get(record)))? {
+            continue;
+        }
+        readable.insert(record);
+        if let Some(dirs) = children.get(&record) {
+            for entry in dirs {
+                if paths.valid(entry.record) && visible.insert(entry.record) {
+                    pending.push(entry.record);
+                }
+            }
+        }
+    }
+    // The reader emits only one name per record. A hidden chosen hardlink
+    // cannot establish whether some other, unrepresented name is visible.
+    if entries.iter().any(|entry| {
+        !entry.is_directory && entry.hard_link_count > 1 && !readable.contains(&entry.parent)
+    }) {
+        return None;
+    }
+    let projected: Vec<_> = entries
+        .iter()
+        .filter(|entry| {
+            if entry.is_directory {
+                visible.contains(&entry.record)
+            } else {
+                readable.contains(&entry.parent)
+            }
+        })
+        .cloned()
+        .collect();
+    Some(to_stat_map(
+        &projected,
+        root_prefix,
+        count_hardlinks,
+        compute_physical,
+    ))
+}
 pub(crate) fn to_stat_map(
     entries: &[Entry],
     root_prefix: &str,
@@ -161,6 +216,82 @@ mod tests {
         }
     }
 
+    #[test]
+    fn visibility_denied_ancestor_keeps_empty_boundary_and_skips_descendants() {
+        let entries = vec![
+            entry(17, 16, "nested", true),
+            entry(18, 17, "hidden", false),
+            entry(19, 16, "resident", false),
+            entry(16, ROOT_RECORD, "denied", true),
+            entry(20, ROOT_RECORD, "visible", false),
+        ];
+        let mut probes = Vec::new();
+        let map = to_visible_stat_map(&entries, r"C:\", false, true, |path| {
+            probes.push(path.to_path_buf());
+            Some(path != std::path::Path::new(r"C:\denied"))
+        })
+        .unwrap();
+        assert_eq!(map.len(), 2);
+        assert_eq!(map[&PathBuf::from(r"C:\denied")].files, 0);
+        assert_eq!(map[&PathBuf::from(r"C:\")].files, 1);
+        assert_eq!(probes, [PathBuf::from(r"C:\"), PathBuf::from(r"C:\denied")]);
+    }
+    #[test]
+    fn visibility_unknown_failure_aborts_and_denied_root_stays_empty() {
+        let entries = vec![entry(16, ROOT_RECORD, "d", true), entry(17, 16, "f", false)];
+        assert!(to_visible_stat_map(&entries, r"C:\", false, true, |_| None).is_none());
+        let mut probes = 0;
+        let denied = to_visible_stat_map(&entries, r"C:\", false, true, |_| {
+            probes += 1;
+            Some(false)
+        })
+        .unwrap();
+        assert_eq!(probes, 1);
+        assert_eq!(denied.len(), 1);
+        assert_eq!(denied[&PathBuf::from(r"C:\")].files, 0);
+    }
+
+    #[test]
+    fn visibility_removed_hardlink_declines_even_with_a_represented_visible_alias() {
+        let mut hidden = entry(18, 16, "hidden", false);
+        hidden.hard_link_count = 2;
+        let mut alias = hidden.clone();
+        alias.parent = ROOT_RECORD;
+        alias.name = "visible-alias".into();
+        let entries = vec![entry(16, ROOT_RECORD, "denied", true), hidden, alias];
+        assert!(to_visible_stat_map(&entries, r"C:\", false, true, |path| {
+            Some(path != std::path::Path::new(r"C:\denied"))
+        })
+        .is_none());
+    }
+
+    #[test]
+    fn visibility_all_readable_matches_existing_accounting_and_ignores_orphans() {
+        let entries = vec![
+            entry(17, 16, "child", true),
+            entry(18, 17, "f", false),
+            entry(16, ROOT_RECORD, "parent", true),
+            entry(19, 9999, "orphan", true),
+        ];
+        let mut probes = Vec::new();
+        let actual = to_visible_stat_map(&entries, r"C:\", false, true, |path| {
+            probes.push(path.to_path_buf());
+            Some(true)
+        })
+        .unwrap();
+        assert_eq!(
+            values(actual),
+            values(to_stat_map(&entries, r"C:\", false, true))
+        );
+        assert_eq!(
+            probes,
+            [
+                PathBuf::from(r"C:\"),
+                PathBuf::from(r"C:\parent"),
+                PathBuf::from(r"C:\parent\child"),
+            ]
+        );
+    }
     fn values(map: crate::StatMap) -> BTreeMap<PathBuf, (u64, u64, u64)> {
         map.into_iter()
             .map(|(path, stat)| (path, (stat.files, stat.logical, stat.physical)))

@@ -67,6 +67,9 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
 
     let mft_opt = Options {
         use_mft: true,
+        error_report: Some(std::sync::Arc::new(|message| {
+            eprintln!("MFT error: {message}");
+        })),
         ..Options::default()
     };
 
@@ -96,6 +99,9 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
     eprintln!("parity backend: mft (no fallback)");
     let walked_opt = Options {
         use_mft: false,
+        error_report: Some(std::sync::Arc::new(|message| {
+            eprintln!("enumeration error: {message}");
+        })),
         ..Options::default()
     };
     let walked = scan_directory(&root, &walked_opt).expect("enumeration scan");
@@ -103,6 +109,30 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
     if std::env::var_os("HYPERDU_MFT_PARITY_FIXTURE").is_some() {
         assert_fixture(&from_mft, &root);
         assert_fixture(&walked, &root);
+        assert_eq!(
+            mft_opt
+                .error_count
+                .load(std::sync::atomic::Ordering::Relaxed),
+            walked_opt
+                .error_count
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "MFT must report the same denied-directory errors as enumeration"
+        );
+        // An immutable image cannot use live-volume drift to hide namespace or
+        // accounting differences, including paths outside our created subtree.
+        let rows = |map: &hyperdu_core::StatMap| {
+            let mut rows: Vec<_> = map
+                .iter()
+                .map(|(path, stat)| (path.clone(), stat.logical, stat.physical, stat.files))
+                .collect();
+            rows.sort();
+            rows
+        };
+        assert_eq!(
+            rows(&from_mft),
+            rows(&walked),
+            "immutable whole-volume MFT rows must match directory enumeration"
+        );
     }
 
     let (wl, wp, wf) = totals(&walked, &root);
@@ -248,6 +278,14 @@ fn assert_fixture(map: &hyperdu_core::StatMap, root: &std::path::Path) {
     }
     assert_eq!(totals(map, &fixture), expected);
     assert!(map.contains_key(&fixture.join("empty")));
+    assert!(!map.contains_key(&fixture.join("plain-junction")));
+    let denied = root.join("hyperdu-denied");
+    assert_eq!(totals(map, &denied), (0, 0, 0));
+    assert!(
+        !map.keys()
+            .any(|path| path != &denied && path.starts_with(&denied)),
+        "denied directory must not expose descendant rows"
+    );
     let total = totals(map, root);
     let children = map
         .iter()

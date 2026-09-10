@@ -115,6 +115,26 @@ try {
         Remove-Item -LiteralPath $encrypted
     } else { Write-Host 'EFS native fixture enabled.' }
 
+    # Known no-follow tags must not add paths or bytes to either backend.
+    $null = New-Item -ItemType Junction -Path (Join-Path $fixture 'plain-junction') -Target (Join-Path $fixture 'plain')
+    $null = New-Item -ItemType SymbolicLink -Path (Join-Path $fixture 'plain-symlink.bin') -Target (Join-Path $fixture 'plain\file-1.bin')
+
+    # The raw reader sees this subtree; normal directory enumeration cannot.
+    # Deny only the list right on this new image-owned directory, after filling it.
+    $denied = Join-Path $root 'hyperdu-denied'
+    $null = New-Item -ItemType Directory -Path (Join-Path $denied 'nested') -Force
+    [IO.File]::WriteAllBytes((Join-Path $denied 'resident.bin'), [byte[]]::new(12))
+    [IO.File]::WriteAllBytes((Join-Path $denied 'nested\payload.bin'), $payload)
+    $acl = Get-Acl -LiteralPath $denied
+    $everyone = [Security.Principal.SecurityIdentifier]::new([Security.Principal.WellKnownSidType]::WorldSid, $null)
+    $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+        $everyone, [Security.AccessControl.FileSystemRights]::ListDirectory,
+        [Security.AccessControl.InheritanceFlags]::None,
+        [Security.AccessControl.PropagationFlags]::None,
+        [Security.AccessControl.AccessControlType]::Deny
+    )
+    $acl.AddAccessRule($rule)
+    Set-Acl -LiteralPath $denied -AclObject $acl
     # Only this new image receives a journal. Never create or change one on a
     # user volume. Mutable replay tests precede the immutable MFT comparison.
     Assert-OwnedVolume
@@ -166,8 +186,8 @@ try {
         codegen_units = $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS
         rustc = (& rustc -Vv) -join [Environment]::NewLine
         cache = 'warm after one untimed round per mode'
-        corpus = 'owned read-only 512MiB NTFS VHD; 2048 plain files and complex allocation fixtures'
-        limitations = 'internal MFT reader plus aggregation; not whole CLI throughput or cold-storage latency'
+        corpus = 'owned read-only 512MiB NTFS VHD; 2048 plain files, complex allocation, denied subtree and no-follow links'
+        limitations = 'internal MFT reader plus directory visibility and aggregation; excludes CLI, final rollup, initial volume open and cold-storage latency'
     }
     $record | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'hyperdu-mft-build.json') -Encoding utf8
     foreach ($simd in @('scalar','auto')) {

@@ -26,9 +26,11 @@ const RECORD_SIGNATURE: &[u8; 4] = b"FILE";
 
 /// Attribute type codes. Only the ones needed for sizes are listed.
 pub(crate) mod attr_type {
+    pub(crate) const STANDARD_INFORMATION: u32 = 0x10;
     pub(crate) const ATTRIBUTE_LIST: u32 = 0x20;
     pub(crate) const FILE_NAME: u32 = 0x30;
     pub(crate) const DATA: u32 = 0x80;
+    pub(crate) const REPARSE_POINT: u32 = 0xc0;
     /// Terminates the attribute chain.
     pub(crate) const END: u32 = 0xFFFF_FFFF;
 }
@@ -317,6 +319,32 @@ impl Iterator for Attributes<'_> {
     }
 }
 
+/// Accept only complete Microsoft symlink/mount-point reparse payloads.
+/// Unknown tags need ordinary enumeration's tag-specific metadata semantics.
+/// Layout: https://learn.microsoft.com/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_reparse_data_buffer
+pub(crate) fn parse_reparse_link(value: &[u8]) -> Option<()> {
+    let fixed = match u32_at(value, 0)? {
+        0xa000_000c => 12, // IO_REPARSE_TAG_SYMLINK
+        0xa000_0003 => 8,  // IO_REPARSE_TAG_MOUNT_POINT
+        _ => return None,
+    };
+    let data_len = u16_at(value, 4)? as usize;
+    if data_len < fixed || value.len() != 8 + data_len {
+        return None;
+    }
+    if fixed == 12 && u32_at(value, 16)? & !1 != 0 {
+        return None;
+    }
+    let path_bytes = data_len - fixed;
+    for offset in [8, 12] {
+        let start = u16_at(value, offset)? as usize;
+        let length = u16_at(value, offset + 2)? as usize;
+        if start % 2 != 0 || length % 2 != 0 || start + length > path_bytes {
+            return None;
+        }
+    }
+    (u16_at(value, 10)? != 0).then_some(())
+}
 // --- $FILE_NAME --------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]

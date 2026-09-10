@@ -338,18 +338,65 @@ impl<S: VolumeSource> MftReader<S> {
 
         let mut names: Vec<FileName> = Vec::new();
         let mut source = SizeSource::default();
+        let mut reparse = false;
+        let mut reparse_hint = false;
+        let mut attr_end = header.first_attr_offset;
         for attr in Attributes::new(&rec, &header) {
+            attr_end = attr.pos + attr.total_length;
             match attr.type_code {
-                attr_type::FILE_NAME if !attr.non_resident => {
+                attr_type::FILE_NAME | attr_type::STANDARD_INFORMATION => {
                     let value =
                         rec.get(attr.value_offset..attr.value_offset + attr.value_length)?;
-                    if let Some(f) = parse_file_name(value) {
-                        names.push(f);
+                    let flags_offset = if attr.type_code == attr_type::FILE_NAME {
+                        56
+                    } else {
+                        32
+                    };
+                    let Some(flags) = value.get(flags_offset..flags_offset + 4) else {
+                        self.complete = false;
+                        return None;
+                    };
+                    reparse_hint |= u32::from_le_bytes(flags.try_into().ok()?) & 0x400 != 0;
+                    if attr.type_code == attr_type::FILE_NAME {
+                        if let Some(f) = parse_file_name(value) {
+                            names.push(f);
+                        }
                     }
+                }
+                attr_type::REPARSE_POINT => {
+                    let value =
+                        rec.get(attr.value_offset..attr.value_offset + attr.value_length)?;
+                    if reparse
+                        || attr.non_resident
+                        || rec.get(attr.pos + 9) != Some(&0)
+                        || attr.value_offset < attr.pos + 24
+                        || super::mft::parse_reparse_link(value).is_none()
+                    {
+                        self.complete = false;
+                        return None;
+                    }
+                    reparse = true;
                 }
                 attr_type::ATTRIBUTE_LIST => source.has_attribute_list = true,
                 _ => {}
             }
+        }
+        // Attributes stops on malformed headers. Do not mistake a truncated
+        // reparse attribute for an ordinary file, even when flags are missing.
+        if attr_end < header.used_size as usize
+            && rec.get(attr_end..attr_end + 4) != Some(&attr_type::END.to_le_bytes())
+        {
+            self.complete = false;
+            return None;
+        }
+        if reparse_hint && !reparse {
+            // The tag may be in an extension; without it no-follow semantics
+            // cannot be established from duplicated FILE_NAME size metadata.
+            self.complete = false;
+            return None;
+        }
+        if reparse {
+            return None;
         }
         let resolved = match self.data_streams(number, &rec, &header) {
             Some(streams) => streams,
@@ -1030,6 +1077,97 @@ mod tests {
         r
     }
 
+    fn append_resident(rec: &mut [u8], kind: u32, value: &[u8]) -> usize {
+        let pos = u32::from_le_bytes(rec[24..28].try_into().unwrap()) as usize;
+        let total = (24 + value.len()).next_multiple_of(8);
+        rec[pos..pos + total].fill(0);
+        rec[pos..pos + 4].copy_from_slice(&kind.to_le_bytes());
+        rec[pos + 4..pos + 8].copy_from_slice(&(total as u32).to_le_bytes());
+        rec[pos + 16..pos + 20].copy_from_slice(&(value.len() as u32).to_le_bytes());
+        rec[pos + 20..pos + 22].copy_from_slice(&24u16.to_le_bytes());
+        rec[pos + 24..pos + 24 + value.len()].copy_from_slice(value);
+        set_used(rec, (pos + total) as u32);
+        pos
+    }
+
+    fn link_record(tag: u32, directory: bool) -> Vec<u8> {
+        let mut rec = if directory {
+            dir_record(5, "link")
+        } else {
+            file_record(5, "link", 4096, 7, 1)
+        };
+        let fixed = if tag == 0xa000_000c { 12 } else { 8 };
+        let mut value = vec![0; 8 + fixed + 2];
+        value[..4].copy_from_slice(&tag.to_le_bytes());
+        value[4..6].copy_from_slice(&((fixed + 2) as u16).to_le_bytes());
+        value[10..12].copy_from_slice(&2u16.to_le_bytes());
+        value[8 + fixed..].copy_from_slice(&[b'x', 0]);
+        // The duplicated FILE_NAME attributes flag reparse metadata as well.
+        rec[64 + 24 + 56..64 + 24 + 60].copy_from_slice(&0x400u32.to_le_bytes());
+        append_resident(&mut rec, 0xc0, &value);
+        rec
+    }
+
+    #[test]
+    fn known_reparse_links_are_skipped_without_losing_ordinary_records() {
+        let records = vec![
+            link_record(0xa000_000c, false),
+            link_record(0xa000_000c, true),
+            link_record(0xa000_0003, true),
+            file_record(5, "ordinary", 4096, 17, 1),
+        ];
+        let mut reader = MftReader::open(volume(with_metadata_records(records, 5))).unwrap();
+        let entries = reader.entries();
+        assert!(reader.is_complete());
+        assert_eq!(
+            entries.len(),
+            1,
+            "no-follow links must not become file or directory entries"
+        );
+        assert_eq!(entries[0].name, "ordinary");
+        assert_eq!(entries[0].sizes.real_size, 17);
+    }
+
+    #[test]
+    fn unresolved_reparse_metadata_invalidates_the_whole_scan() {
+        for case in 0..8 {
+            let mut rec = link_record(0xa000_000c, false);
+            let header = parse_record_header(&rec).unwrap();
+            let attr = Attributes::new(&rec, &header)
+                .find(|a| a.type_code == 0xc0)
+                .unwrap();
+            match case {
+                0 => rec[attr.value_offset..attr.value_offset + 4]
+                    .copy_from_slice(&0x8000_001bu32.to_le_bytes()),
+                1 => rec[attr.pos + 8] = 1, // unsupported non-resident value
+                2 => rec[attr.pos + 16..attr.pos + 20].copy_from_slice(&3u32.to_le_bytes()),
+                3 => rec[attr.value_offset + 4..attr.value_offset + 6]
+                    .copy_from_slice(&100u16.to_le_bytes()),
+                4 => set_used(&mut rec, attr.pos as u32), // flags but missing base attribute
+                5 => {
+                    // STANDARD_INFORMATION alone must also detect a missing tag.
+                    rec[64 + 24 + 56..64 + 24 + 60].fill(0);
+                    set_used(&mut rec, attr.pos as u32);
+                    let mut info = [0u8; 36];
+                    info[32..36].copy_from_slice(&0x400u32.to_le_bytes());
+                    append_resident(&mut rec, 0x10, &info);
+                }
+                6 => rec[attr.pos + 4..attr.pos + 8].copy_from_slice(&8u32.to_le_bytes()),
+                7 => rec[attr.value_offset + 8..attr.value_offset + 10]
+                    .copy_from_slice(&200u16.to_le_bytes()),
+                _ => unreachable!(),
+            }
+            let mut reader = MftReader::open(volume(with_metadata_records(vec![rec], 5))).unwrap();
+            assert!(
+                reader.entries().is_empty(),
+                "unsupported reparse case {case}"
+            );
+            assert!(
+                !reader.is_complete(),
+                "unsupported reparse case {case} must decline"
+            );
+        }
+    }
     // --- tests ---------------------------------------------------------------
 
     #[test]

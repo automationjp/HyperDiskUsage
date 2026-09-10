@@ -121,6 +121,12 @@ pub(super) fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMa
     outcome
 }
 
+/// Use exactly the enumeration backend's access rights without listing files.
+pub(super) fn check_directory_access(dir: &std::path::Path) -> windows::core::Result<()> {
+    let handle = open_dir(&to_wide_for_open(dir))?;
+    // SAFETY: open_dir returned a new owned handle; this is its only close.
+    unsafe { CloseHandle(handle) }
+}
 fn open_dir(wide_nul: &[u16]) -> windows::core::Result<HANDLE> {
     unsafe {
         CreateFileW(

@@ -588,7 +588,7 @@ mod raw_volume_tests {
     fn benchmark_owned_raw_pipeline() {
         use std::{collections::BTreeMap, time::Instant};
 
-        use super::super::{paths_for, to_stat_map};
+        use crate::platform::windows_impl::visible_mft_map;
 
         assert!(!cfg!(debug_assertions), "benchmark requires --release");
         assert_eq!(
@@ -629,11 +629,12 @@ mod raw_volume_tests {
                 let scan = start.elapsed();
                 assert!(reader.is_complete());
                 assert!(entries.len() > 2048, "corpus must cross 1 MiB");
-                let paths = paths_for(&entries);
-                let map: BTreeMap<_, _> = to_stat_map(&entries, &paths, &root, false, true)
-                    .into_iter()
-                    .map(|(p, s)| (p, (s.logical, s.physical, s.files)))
-                    .collect();
+                let map: BTreeMap<_, _> =
+                    visible_mft_map(&entries, &root, &crate::Options::default())
+                        .expect("owned MFT visibility projection must complete")
+                        .into_iter()
+                        .map(|(p, s)| (p, (s.logical, s.physical, s.files)))
+                        .collect();
                 let total = start.elapsed();
                 let (effective, submitted, completed) = match reader.source.prefetch.as_ref() {
                     None => ("sync", 0, 0),

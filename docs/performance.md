@@ -60,7 +60,7 @@ Windows MSVCでは `--mft` を指定し、管理者権限・NTFS・volume root�
 
 この経路は常時有効ではありません。必要な DATA extent を安全に解決できない場合や条件を満たさない場合は、通常の directory enumeration に fallback します。
 
-解析を完了できない結果は採用しません。ただし解析完了は通常列挙との完全一致を保証せず、MFTは実験的です。
+ディレクトリごとに通常列挙と同じ一覧取得権限を確認します。アクセス拒否のディレクトリは空の行として残し、配下を集計しません。symlink と junction は追跡せず除外します。未知・不完全な reparse metadata、想定外の権限確認エラー、除外対象に複数のハードリンク名があり可視性を確定できない場合は通常列挙へ戻します。解析完了は変更中のボリュームとの完全一致を保証せず、MFTは実験的です。
 
 `HYPERDU_MFT_IO=sync|overlapped|unbuffered|auto` で MFT I/O を比較できます。`auto` は geometry が確認できれば buffered overlapped を使い、非対応なら同期読み取りを選びます。unbuffered は明示指定だけで有効になります。現在の1 MiB window を解析する間に次の window を読み、キャンセルやランダムな extension record 読み取りでも未完了 I/O の buffer を解放しません。短い読み取りや geometry の不一致は同期処理へ戻します。これは `--mft` の利用条件を緩めません。
 

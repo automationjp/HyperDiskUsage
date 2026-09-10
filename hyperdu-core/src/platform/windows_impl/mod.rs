@@ -117,9 +117,9 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
     let entries = reader
         .entries_with_control(|progress| report_mft_progress(opt, &mut last_progress, progress))?;
     if !reader.is_complete() {
-        log::warn!("MFT DATA extents incomplete or inconsistent; declining MFT result");
+        log::warn!("MFT metadata unsupported, incomplete or inconsistent; declining MFT result");
         if std::env::var_os("HYPERDU_MFT_DIAG").is_some() {
-            eprintln!("mft-diag: rejected: DATA extents incomplete or inconsistent; no MFT result");
+            eprintln!("mft-diag: rejected: metadata unsupported, incomplete or inconsistent; no MFT result");
         }
         return None;
     }
@@ -130,8 +130,7 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
     }
 
     let prefix = format!("{}:\\", drive.to_ascii_uppercase());
-    let map =
-        mft_aggregate::to_stat_map(&entries, &prefix, opt.count_hardlinks, opt.compute_physical);
+    let map = visible_mft_map(&entries, &prefix, opt)?;
 
     if opt.cancel.load(std::sync::atomic::Ordering::Relaxed) {
         return None;
@@ -223,6 +222,71 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
 }
 
 #[cfg(target_env = "msvc")]
+/// The production namespace projection, also timed by the raw MFT benchmark.
+fn visible_mft_map(
+    entries: &[mft_reader::Entry],
+    prefix: &str,
+    opt: &crate::Options,
+) -> Option<crate::StatMap> {
+    visible_mft_map_with_probe(entries, prefix, opt, nt::check_directory_access)
+}
+
+#[cfg(target_env = "msvc")]
+fn visible_mft_map_with_probe(
+    entries: &[mft_reader::Entry],
+    prefix: &str,
+    opt: &crate::Options,
+    mut probe: impl FnMut(&std::path::Path) -> windows::core::Result<()>,
+) -> Option<crate::StatMap> {
+    use std::sync::atomic::Ordering;
+
+    let mut denied = Vec::new();
+    let map = mft_aggregate::to_visible_stat_map(
+        entries,
+        prefix,
+        opt.count_hardlinks,
+        opt.compute_physical,
+        |path| {
+            if opt.cancel.load(Ordering::Relaxed) {
+                return None;
+            }
+            match probe(path) {
+                Ok(()) => Some(true),
+                Err(error) if error.code() == windows::Win32::Foundation::E_ACCESSDENIED => {
+                    denied.push(crate::error_handling::ScanError::SystemCall {
+                        path: path.to_path_buf(),
+                        call: "CreateFileW",
+                        errno: 5,
+                    });
+                    Some(false)
+                }
+                Err(error) => {
+                    log::warn!(
+                        "MFT directory access probe failed for {}: {error}",
+                        path.display()
+                    );
+                    if std::env::var_os("HYPERDU_MFT_DIAG").is_some() {
+                        eprintln!(
+                            "mft-diag: rejected: directory access {}: {error}",
+                            path.display()
+                        );
+                    }
+                    None
+                }
+            }
+        },
+    )?;
+    if opt.cancel.load(Ordering::Relaxed) {
+        return None;
+    }
+    // A declined projection falls back to enumeration, which owns its errors.
+    for error in denied {
+        crate::error_handling::record_error(opt, &error);
+    }
+    Some(map)
+}
+
+#[cfg(target_env = "msvc")]
 fn report_mft_progress(
     opt: &crate::Options,
     last: &mut u64,
@@ -254,6 +318,80 @@ mod mft_progress_tests {
 
     use super::*;
 
+    fn visibility_directory(record: u64, parent: u64, name: &str) -> mft_reader::Entry {
+        mft_reader::Entry {
+            record,
+            parent,
+            name: name.into(),
+            is_directory: true,
+            sizes: mft::DataSizes::default(),
+            hard_link_count: 1,
+            data_flags: 0,
+            size_source: mft_reader::SizeSource::default(),
+        }
+    }
+
+    #[test]
+    fn visibility_reports_denied_only_after_success_and_aborts_on_other_errors() {
+        let entries = vec![
+            visibility_directory(16, mft::ROOT_RECORD, "later"),
+            visibility_directory(17, mft::ROOT_RECORD, "denied"),
+        ];
+        let errors = Arc::new(Mutex::new(Vec::new()));
+        let reported = errors.clone();
+        let opt = crate::Options {
+            error_report: Some(Arc::new(move |error| {
+                reported.lock().unwrap().push(error.to_string())
+            })),
+            ..crate::Options::default()
+        };
+        let run = |fail_later| {
+            visible_mft_map_with_probe(&entries, r"C:\", &opt, |path| {
+                if path.ends_with("denied") {
+                    Err(windows::core::Error::from(
+                        windows::Win32::Foundation::E_ACCESSDENIED,
+                    ))
+                } else if fail_later && path.ends_with("later") {
+                    Err(windows::core::Error::from(
+                        windows::Win32::Foundation::E_FAIL,
+                    ))
+                } else {
+                    Ok(())
+                }
+            })
+        };
+        assert!(run(true).is_none());
+        assert_eq!(opt.error_count.load(Ordering::Relaxed), 0);
+        assert!(errors.lock().unwrap().is_empty());
+        assert!(run(false).is_some());
+        assert_eq!(opt.error_count.load(Ordering::Relaxed), 1);
+        let errors = errors.lock().unwrap();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains(r"C:\denied"));
+        assert!(errors[0].contains("errno=5"));
+    }
+
+    #[test]
+    fn visibility_cancellation_drops_result_and_buffered_errors() {
+        let entries = vec![visibility_directory(16, mft::ROOT_RECORD, "denied")];
+        let opt = crate::Options::default();
+        assert!(visible_mft_map_with_probe(&entries, r"C:\", &opt, |path| {
+            if path.ends_with("denied") {
+                opt.cancel.store(true, Ordering::Relaxed);
+                Err(windows::core::Error::from(
+                    windows::Win32::Foundation::E_ACCESSDENIED,
+                ))
+            } else {
+                Ok(())
+            }
+        })
+        .is_none());
+        assert_eq!(opt.error_count.load(Ordering::Relaxed), 0);
+        assert!(visible_mft_map_with_probe(&entries, r"C:\", &opt, |_| {
+            panic!("cancelled before first directory open")
+        })
+        .is_none());
+    }
     #[test]
     fn progress_threshold_initial_final_and_disabled_callbacks() {
         let values = Arc::new(Mutex::new(Vec::new()));
