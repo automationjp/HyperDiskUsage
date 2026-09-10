@@ -80,6 +80,17 @@ def windows_metrics(handle: int) -> dict:
                 bytes_read_method="GetProcessIoCounters: process read transfers, not device bytes")
 
 
+def linux_final_read_bytes(pid: int) -> tuple[int | None, str]:
+    try:
+        text = Path(f"/proc/{pid}/io").read_text()
+    except OSError as error:
+        return None, f"unavailable: final /proc/pid/io {type(error).__name__} errno={error.errno}"
+    match = re.search(r"^read_bytes:\s*(\d+)$", text, re.M)
+    if match is None:
+        return None, "unavailable: final /proc/pid/io has no read_bytes counter"
+    return int(match[1]), "/proc/pid/io read_bytes: storage-layer reads"
+
+
 def measure_process(command: list[str], env: dict[str, str], timeout: float) -> tuple[dict, bytes, bytes]:
     """Wait on this child only; no accumulated RUSAGE_CHILDREN or sampled RSS."""
     start = time.perf_counter()
@@ -92,6 +103,7 @@ def measure_process(command: list[str], env: dict[str, str], timeout: float) -> 
                 metrics = windows_metrics(int(process._handle))
             else:
                 io_bytes = None
+                io_method = "unavailable: this OS does not expose final process storage bytes"
                 usage = None
                 while True:
                     if sys.platform == "linux":
@@ -100,11 +112,7 @@ def measure_process(command: list[str], env: dict[str, str], timeout: float) -> 
                         ended = os.waitid(os.P_PID, process.pid,
                                           os.WEXITED | os.WNOHANG | os.WNOWAIT)
                         if ended is not None:
-                            try:
-                                io_text = Path(f"/proc/{process.pid}/io").read_text()
-                                io_bytes = int(re.search(r"^read_bytes:\s*(\d+)$", io_text, re.M)[1])
-                            except (OSError, TypeError, ValueError):
-                                pass
+                            io_bytes, io_method = linux_final_read_bytes(process.pid)
                             _, status, usage = os.wait4(process.pid, 0)
                             process.returncode = os.waitstatus_to_exitcode(status)
                             break
@@ -121,9 +129,7 @@ def measure_process(command: list[str], env: dict[str, str], timeout: float) -> 
                     peak_rss_bytes=usage.ru_maxrss * (1 if sys.platform == "darwin" else 1024),
                     page_faults=usage.ru_minflt + usage.ru_majflt,
                     minor_faults=usage.ru_minflt, major_faults=usage.ru_majflt,
-                    bytes_read=io_bytes, bytes_read_method=(
-                        "/proc/pid/io read_bytes: storage-layer reads" if io_bytes is not None
-                        else "unavailable: this OS did not expose final process storage bytes"),
+                    bytes_read=io_bytes, bytes_read_method=io_method,
                     input_blocks=usage.ru_inblock, output_blocks=usage.ru_oublock)
             metrics["wall_seconds"] = time.perf_counter() - start
             metrics["cpu_seconds"] = metrics["user_seconds"] + metrics["kernel_seconds"]

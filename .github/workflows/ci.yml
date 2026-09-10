@@ -134,7 +134,9 @@ jobs:
           sw_vers
           uname -m
           rustc -Vv
-          diskutil info "$GITHUB_WORKSPACE"
+          device=$(df -P "$GITHUB_WORKSPACE" | awk 'NR == 2 { print $1 }')
+          test -n "$device"
+          diskutil info "$device"
       - name: Benchmark contract tests
         run: python3 -m unittest discover -s scripts/bench -p "test_*.py"
       - name: Clippy

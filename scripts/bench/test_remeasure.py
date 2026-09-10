@@ -116,10 +116,27 @@ class ChildTests(unittest.TestCase):
         self.assertGreater(metrics["peak_rss_bytes"], 4 * 1024 * 1024)
         self.assertGreaterEqual(metrics["cpu_seconds"], 0)
         self.assertGreaterEqual(metrics["page_faults"], 0)
-        if os.name == "nt" or sys.platform == "linux":
+        if os.name == "nt":
             self.assertIsNotNone(metrics["bytes_read"])
+        elif metrics["bytes_read"] is None:
+            self.assertIn("unavailable:", metrics["bytes_read_method"])
+            self.assertGreaterEqual(metrics["input_blocks"], 0)
         else:
-            self.assertIsNone(metrics["bytes_read"])
+            self.assertEqual(sys.platform, "linux")
+            self.assertGreaterEqual(metrics["bytes_read"], 0)
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux proc accounting")
+    def test_unreadable_final_io_keeps_other_metrics_and_explains_missing_counter(self):
+        with patch.object(bench.Path, "read_text",
+                          side_effect=PermissionError(13, "injected proc permission")):
+            metrics, stdout, stderr = bench.measure_process(
+                [sys.executable, "-c", "print('finished')"], bench.clean_environment(), 10)
+        self.assertEqual(stdout.strip(), b"finished")
+        self.assertEqual(stderr, b"")
+        self.assertIsNone(metrics["bytes_read"])
+        self.assertIn("PermissionError errno=13", metrics["bytes_read_method"])
+        self.assertGreater(metrics["peak_rss_bytes"], 0)
+        self.assertGreaterEqual(metrics["cpu_seconds"], 0)
 
     @unittest.skipUnless(sys.platform == "linux" and bench.shutil.which("strace"),
                          "requires Linux strace")
