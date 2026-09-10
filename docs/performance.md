@@ -30,7 +30,17 @@ Linux の directory entry にはファイルサイズが含まれないため、
 
 したがって Linux では「syscall を完全になくす」のではなく、**列挙オーバーヘッドを小さくし、metadata 取得を効率よく並列化する**ことが中心になります。
 
-filesystem に応じて buffer、prefetch、physical-size の扱いなどを変えます。ネットワーク filesystem や DrvFS では、ローカル ext4/XFS と同じ戦略が常に最適とは限りません。
+filesystem に応じて buffer、prefetch、推奨スレッド数を変えます。割当量を論理サイズへ自動的に置き換えません。ネットワーク filesystem や DrvFS では、ローカル ext4/XFS と同じ戦略が常に最適とは限りません。
+
+### macOS
+
+`getattrlistbulk` でファイルの data-fork logical length、全 fork の allocation、device ID、file ID、link count を取得します。返却 attribute mask と record 境界を検査し、必要な metadata が欠ける項目だけ `fstatat` で補います。通常ファイルごとの `lstat` とフルパス生成を避け、hardlink は device と inode の組で重複排除します。FIFO・ソケット等は通常ファイルに数えません。
+
+`HYPERDU_MAC_USE_GALB=0` は native fallback との比較用です。高速 API が最初から非対応の場合は通常走査へ戻り、実際のアクセス失敗は scan error として残します。
+
+### Filesystem selection
+
+Linux の mount 情報に加え、Windows の volume 情報と macOS の `statfs` を使って filesystem を検出します。NTFS・ReFS・APFS/HFS の native 経路、SMB/NFS 等の network 経路を区別します。Windows の UNC と network drive は remote として扱います。検出不能時は generic 設定を使い、検出結果だけで MFT を有効にしません。
 
 ### Windows
 

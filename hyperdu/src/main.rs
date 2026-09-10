@@ -868,8 +868,7 @@ fn main() -> Result<()> {
         );
     }
 
-    // Quick Win: Minimal FS detection to improve defaults on DrvFS/Network FS
-    #[cfg(target_os = "linux")]
+    // Select native filesystem tuning while preserving requested accounting.
     {
         if std::env::var("HYPERDU_FS_AUTO").ok().as_deref() != Some("0") {
             if let Some(root0) = roots.first() {
@@ -903,18 +902,6 @@ fn main() -> Result<()> {
                     // Diagnostics go to stderr so du-compatible stdout stays parsable.
                     eprintln!("fs-auto: {} for '{}'", meta.join(" "), root0.display());
                 }
-            }
-        }
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        if std::env::var("HYPERDU_FS_AUTO").ok().as_deref() != Some("0") {
-            if let Some(root0) = roots.first() {
-                // Diagnostics go to stderr so du-compatible stdout stays parsable.
-                eprintln!(
-                    "fs-auto: fs='unknown' strategy='generic' reason='platform=non-linux' for '{}'",
-                    root0.display()
-                );
             }
         }
     }
