@@ -77,6 +77,7 @@ mod batching {
             .collect();
         let mut records = with_metadata_records(user, 1);
         // Four-byte run length keeps this fixture useful past 255 clusters.
+        set_mft_extent_sizes(&mut records[0], 64, 0, (count / 4) as u64, CLUSTER as u64);
         records[0][128] = 0x14;
         records[0][129..133].copy_from_slice(&((count / 4) as u32).to_le_bytes());
         records[0][133] = MFT_LCN as u8;
@@ -115,6 +116,7 @@ mod batching {
         let mut boot = boot_sector();
         boot[13] = 1; // 512-byte clusters, 1024-byte records.
         let mut mft = mft_record(1);
+        set_mft_extent_sizes(&mut mft, 64, 0, 6, SECTOR as u64);
         mft[128..135].copy_from_slice(&[0x11, 3, 4, 0x11, 3, 8, 0]);
         let file = file_record(ROOT_RECORD, "split", 4096, 73, 1);
         boot.resize(4 * SECTOR, 0);

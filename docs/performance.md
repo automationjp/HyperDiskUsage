@@ -32,6 +32,10 @@ Linux の directory entry にはファイルサイズが含まれないため、
 
 filesystem に応じて buffer、prefetch、推奨スレッド数を変えます。割当量を論理サイズへ自動的に置き換えません。ネットワーク filesystem や DrvFS では、ローカル ext4/XFS と同じ戦略が常に最適とは限りません。
 
+Linux x86_64 GNU の `--xfs-bulk` は、CAP_SYS_ADMIN があり、superblock が読み取り専用の XFS 全体を走査するときだけ BulkStat を使います。inode と directory entry を結び付け、取得できない metadata は通常の経路で補います。書き込み可能な XFS、subdirectory、非対応 ioctl では使用しません。
+
+`linux-io-uring` feature と `--io-uring` を指定すると、最大64件の `statx` をまとめて発行します。path と結果 buffer は全 completion を回収するまで保持し、要求失敗・欠落属性は同期取得へ戻します。既定は同期経路です。
+
 ### macOS
 
 `getattrlistbulk` でファイルの data-fork logical length、全 fork の allocation、device ID、file ID、link count を取得します。返却 attribute mask と record 境界を検査し、必要な metadata が欠ける項目だけ `fstatat` で補います。通常ファイルごとの `lstat` とフルパス生成を避け、hardlink は device と inode の組で重複排除します。FIFO・ソケット等は通常ファイルに数えません。
@@ -57,6 +61,14 @@ Windows MSVCでは `--mft` を指定し、管理者権限・NTFS・volume root�
 この経路は常時有効ではありません。必要な DATA extent を安全に解決できない場合や条件を満たさない場合は、通常の directory enumeration に fallback します。
 
 解析を完了できない結果は採用しません。ただし解析完了は通常列挙との完全一致を保証せず、MFTは実験的です。
+
+`HYPERDU_MFT_IO=sync|overlapped|unbuffered|auto` で MFT I/O を比較できます。`auto` は geometry が確認できれば buffered overlapped を使い、非対応なら同期読み取りを選びます。unbuffered は明示指定だけで有効になります。現在の1 MiB window を解析する間に次の window を読み、キャンセルやランダムな extension record 読み取りでも未完了 I/O の buffer を解放しません。短い読み取りや geometry の不一致は同期処理へ戻します。これは `--mft` の利用条件を緩めません。
+
+## SIMD and incremental updates
+
+名前の絞り込みと MFT の UTF-16 ASCII 部分は、実行時に対応 CPU を確認して AVX2 または ARM64 NEON を使います。末尾・非 ASCII・不正 surrogate は scalar 処理で同じ結果を返します。`HYPERDU_SIMD=scalar` で比較用の scalar 経路を選べます。AVX-512 は Rust 1.89 以上で `simd-avx512` feature を有効にしたビルドだけに含み、実行時の CPU 判定も必要です。
+
+[Directory index v2](index-snapshots.md) は、初回走査の後に OS 通知が示した項目と必要な subtree を再確認します。通常のファイル更新では祖先の合計だけを更新し、directory rename は子の identity を保持します。通知の欠落・再開条件の不一致では全体を再構築し、通知だけでは検出できない変更に備えて定期照合します。
 
 ## Parallel traversal
 

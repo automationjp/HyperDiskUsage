@@ -104,6 +104,8 @@ hyperdu /path --progress --progress-every 1024 >result.txt 2>progress.log
 | `--approximate` | Unix、ただしmacOSを除く | 既定無効。論理サイズのみの対応経路で通常ファイルを4KiB相当とする概算を許可します。精密な容量比較には使わないでください。 |
 | `--dir-yield-every N` | Unix、ただしmacOSを除く | `HYPERDU_DIR_YIELD_EVERY`、未設定なら0（分割無効）。gentleでは0へ上書きします。 |
 | `--prefetch[=true\|false]` | Linux x86_64 | 引数単独はtrue。`--prefetch=false` で無効。未指定時はI/Oプロファイルに従います。 |
+| --xfs-bulk | Linux x86_64 GNU | 既定無効。権限のある、読み取り専用の XFS ファイルシステム全体で BulkStat を使います。サブディレクトリや書き込み可能な mount、非対応 ioctl では通常の取得へ戻ります。走査中も superblock を読み取り専用に保ってください。 |
+| --io-uring | Linux x86_64 GNU、linux-io-uring feature | 既定無効。最大64件の statx をまとめて発行します。カーネル・権限・CQE の失敗や欠落した属性は同期取得へ戻ります。キャンセルは発行済み要求の完了を待ちます。 |
 | `--pin-threads` | Linux | 既定無効。`HYPERDU_PIN_THREADS=1` 相当。CPUへのワーカー固定を要求します。 |
 | `--galb-buf-kb KiB` | macOS | `getattrlistbulk` バッファ。環境変数 `HYPERDU_GALB_BUF_KB`、未設定なら64KiB。指定値は最小4KiBです。 |
 | `--win-ntquery` | Windows MSVC | NtQuery列挙を明示有効。対応ビルドでは既定有効で、`HYPERDU_WIN_USE_NTQUERY=0` を上書きします。 |
@@ -115,6 +117,17 @@ hyperdu /path --progress --progress-every 1024 >result.txt 2>progress.log
 
 MFT側で扱えない除外条件、深さ制限、最小ファイルサイズ、リンク追従、ハードリンク別計上、概算、共有重複排除キャッシュを伴う設定も通常の列挙へ戻します。CLIでは `--count-links` や `--perf turbo`、重複排除キャッシュを用意する互換出力もこの対象になります。これは未対応の指定を無視してMFT集計を返すことを避けるための条件です。
 
+### 高速経路の比較用環境変数
+
+| 環境変数 | 値と条件 |
+| --- | --- |
+| `HYPERDU_SIMD` | `auto`（既定）または `scalar`。対応 CPU の命令だけ使用 |
+| `HYPERDU_MFT_IO` | `auto`（既定）、`sync`、`overlapped`、`unbuffered`。MFT が採用された場合だけ適用。非対応 I/O は同期へ fallback |
+| `HYPERDU_MAC_USE_GALB` | `0` で macOS bulk metadata を無効化 |
+| `HYPERDU_INDEX_LINUX_BACKEND` | `auto`（既定）、`fanotify`、`inotify`。`auto` では fanotify が使えない場合に inotify。明示した backend の失敗はエラー |
+
+`linux-io-uring` は追加 feature、`simd-avx512` は Rust 1.89 以上を要する追加 feature です。いずれも通常ビルドでは無効です。CLI・MFT・索引の利用条件はそれぞれの節を参照してください。
+
 ## MCP サーバ
 
 ```bash
@@ -124,19 +137,23 @@ hyperdu mcp
 MCPクライアントが子プロセスを起動し、stdin/stdoutでプロトコルを送受信します。通常走査のテキスト表示とは別のモードです。`list_volumes` / `scan_path` / `find_reclaimable` の3ツールを提供し、ファイル削除ツールはありません。ツールの引数はMCPスキーマで渡し、通常走査のCLIオプションは付けません。詳細は [Plugin / Skill / MCP](../plugin/README.md) を参照してください。
 
 `scan_path` はrequestのprogress tokenがある場合に標準の進捗通知を返し、tokenがない場合は送りません。開始通知の後は最新の進捗値を間引いて送ります。総件数が未確定なら割合を捏造せず、最終結果は通常のMCP応答として返します。キャンセルは協調的で、同期I/Oの即時中断を保証しません。
-## Linux の保存済みスナップショット
+## Directory index v2
 
-`index` はLinux限定です。その他のOSでは明示的なエラーになります。`--help` からコマンドの構文は確認できます。
+Windows、Linux、macOS に対応します。native watch の条件は [Directory index v2](index-snapshots.md) を参照してください。
 
 | コマンド・引数 | 必須／既定値 | 挙動 |
-|---|---|---|
-| `index refresh ROOT --database FILE` | ROOTとFILEが必須 | 走査してスナップショットを置き換えます。バックグラウンド監視は起動しません。 |
-| `index show ROOT --database FILE` | ROOTとFILEが必須 | 保存した集計を読み出します。ディレクトリ全体を再走査しませんが、ルートidentityの確認は行います。 |
+| --- | --- | --- |
+| `index refresh ROOT --database FILE` | ROOTとFILE必須 | 全体走査してv2 snapshotを保存 |
+| `index show ROOT --database FILE` | ROOTとFILE必須 | ROOT identityを確認して保存値を表示。ツリー走査なし |
+| `index watch ROOT --database FILE` | ROOTとFILE必須 | native変更を前景監視。Ctrl-Cで終了 |
+| `--once` | 無効 | 追いついて保存後に終了。30秒上限 |
+| `--poll-ms` | 100（10〜60000） | イベント確認間隔ms |
+| `--reconcile-seconds` | 900（1〜86400） | 通知漏れに備えた全体照合間隔 |
+| `--checkpoint-seconds` | 60（1〜3600） | 変更後のsnapshot保存間隔 |
 
-`ROOT` はディレクトリで、databaseはその外側に置きます。databaseの親ディレクトリは事前に作成してください。既存databaseがシンボリックリンクなど通常ファイル以外なら拒否します。割込み・ルートidentityの変更が起きたrefreshは旧スナップショットを保存します。
+databaseはROOTの外側に置き、親ディレクトリを事前に作成します。通常ファイル以外やsymlinkは拒否し、同時writerはOS lockで排除します。一つのfilesystemだけを対象にし、v1保存ファイルはrefreshで移行します。
 
-両コマンドはJSONをstdoutに出力し、`root`, `database`, `device`, `inode`, `physical_bytes`, `files`, `directory_count`, `freshness`, `monitoring` を含みます。`freshness` は常に `stale`、`monitoring` は `false` です。詳細は [Linuxスナップショット](index-snapshots.md) を参照してください。
-
+JSON Linesには `format`, `root`, `database`, `device`, `object_id`, `logical_bytes`, `physical_bytes`, `files`, `directory_count`, `freshness`, `monitoring`, `journal` と更新作業量を含みます。保存値は `stale`、配送イベントを処理済みの値は `observed` です。完全な最新性やatomic snapshotを意味しません。
 ## 実装との対応
 
 - [CLI引数と出力処理](../hyperdu/src/main.rs)

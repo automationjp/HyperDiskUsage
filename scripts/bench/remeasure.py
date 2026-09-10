@@ -345,7 +345,7 @@ def parse_flags(raw: str) -> list[str]:
         raise ValueError("flags must be a JSON argv array")
     index = 0
     while index < len(flags):
-        if flags[index] == "--mft":
+        if flags[index] in ("--mft", "--xfs-bulk", "--io-uring"):
             index += 1
         elif flags[index] in ("--threads", "--io-profile", "--prefetch"):
             index += 2

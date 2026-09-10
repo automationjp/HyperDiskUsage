@@ -23,7 +23,7 @@ $letter = @('Z','Y','X','W','V','U','T','S','R') | Where-Object {
 if (-not $letter) { throw 'No unused fixture drive letter.' }
 $root = "${letter}:\"
 $previous = @{}
-foreach ($key in @('HYPERDU_MFT_PARITY_ROOT','HYPERDU_MFT_PARITY_FIXTURE','HYPERDU_MFT_DIAG')) {
+foreach ($key in @('HYPERDU_MFT_PARITY_ROOT','HYPERDU_MFT_PARITY_FIXTURE','HYPERDU_MFT_DIAG','HYPERDU_TEST_USN_ROOT','HYPERDU_MFT_IO','HYPERDU_SIMD')) {
     $previous[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
 function Invoke-OwnedDiskPart([string[]]$Commands) {
@@ -43,18 +43,18 @@ function Assert-OwnedVolume {
 }
 try {
     Invoke-OwnedDiskPart @(
-        "create vdisk file=`"$vhd`" maximum=256 type=expandable",
+        "create vdisk file=`"$vhd`" maximum=512 type=expandable",
         'attach vdisk', 'create partition primary',
         'format fs=ntfs quick label=HyperDUFixture', "assign letter=$letter"
     )
     Assert-OwnedVolume
     $fixture = Join-Path $root 'hyperdu-fixture'
-    foreach ($dir in @('plain','sparse','empty')) {
+    foreach ($dir in @('plain','sparse','empty','compressed','populated-sparse','attribute-list','encrypted')) {
         $null = New-Item -ItemType Directory -Path (Join-Path $fixture $dir) -Force
     }
     $payload = [byte[]]::new(65536)
     for ($i = 0; $i -lt $payload.Length; $i++) { $payload[$i] = [byte]($i % 251) }
-    for ($i = 0; $i -lt 128; $i++) {
+    for ($i = 0; $i -lt 2048; $i++) {
         [IO.File]::WriteAllBytes((Join-Path $fixture "plain\file-$i.bin"), $payload)
     }
     [IO.File]::WriteAllBytes((Join-Path $root 'root-file.bin'), $payload)
@@ -70,6 +70,64 @@ try {
         $file = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::None)
         try { $file.SetLength([long]$item[1]); $file.Flush($true) } finally { $file.Dispose() }
     }
+    # Partially allocated sparse ranges exercise actual run allocation, not just holes.
+    $populated = Join-Path $fixture 'populated-sparse\partial.bin'
+    [IO.File]::WriteAllBytes($populated, [byte[]]::new(0))
+    & fsutil sparse setflag $populated
+    if ($LASTEXITCODE -ne 0) { throw 'Could not mark populated fixture sparse.' }
+    $file = [IO.File]::OpenWrite($populated)
+    try {
+        $file.SetLength(8MB)
+        $file.Write($payload, 0, 4096)
+        $null = $file.Seek(4MB, [IO.SeekOrigin]::Begin)
+        $file.Write($payload, 0, $payload.Length)
+        $file.Flush($true)
+    } finally { $file.Dispose() }
+
+    $compressed = Join-Path $fixture 'compressed\mixed.bin'
+    $compressible = [byte[]]::new(1MB + 313)
+    [Array]::Copy($payload, $compressible, $payload.Length)
+    [IO.File]::WriteAllBytes($compressed, $compressible)
+    & compact /c /i /q /f $compressed
+    if ($LASTEXITCODE -ne 0 -or -not ((Get-Item -LiteralPath $compressed).Attributes -band [IO.FileAttributes]::Compressed)) {
+        throw 'NTFS compression was not exercised.'
+    }
+
+    # Many long named attributes force extension records/ATTRIBUTE_LIST while
+    # only the unnamed stream contributes to the public file totals.
+    $attributes = Join-Path $fixture 'attribute-list\payload.bin'
+    [IO.File]::WriteAllBytes($attributes, $payload)
+    for ($i = 0; $i -lt 64; $i++) {
+        $stream = 'stream-' + $i + '-' + ('x' * 80)
+        [IO.File]::WriteAllBytes(($attributes + ':' + $stream), [byte[]]::new(48))
+    }
+    for ($i = 0; $i -lt 32; $i++) {
+        & fsutil hardlink create (Join-Path $fixture ('attribute-list\alias-' + $i + '.bin')) $attributes
+        if ($LASTEXITCODE -ne 0) { throw 'Could not create attribute-list fixture hardlink.' }
+    }
+
+    # CI-only: EFS may create a certificate in this disposable runner account.
+    $encrypted = Join-Path $fixture 'encrypted\efs.bin'
+    [IO.File]::WriteAllBytes($encrypted, $payload)
+    & cipher /e /a $encrypted
+    if ($LASTEXITCODE -ne 0 -or -not ((Get-Item -LiteralPath $encrypted).Attributes -band [IO.FileAttributes]::Encrypted)) {
+        Write-Host 'NOT RUN: EFS is unavailable on this runner.'
+        Remove-Item -LiteralPath $encrypted
+    } else { Write-Host 'EFS native fixture enabled.' }
+
+    # Only this new image receives a journal. Never create or change one on a
+    # user volume. Mutable replay tests precede the immutable MFT comparison.
+    Assert-OwnedVolume
+    & fsutil usn createjournal m=8388608 a=1048576 $root
+    if ($LASTEXITCODE -ne 0) { throw 'Could not create journal on the owned fixture.' }
+    $usn = Join-Path $root 'hyperdu-usn'
+    $null = New-Item -ItemType Directory -Path $usn
+    $env:HYPERDU_TEST_USN_ROOT = $usn
+    & cargo test --locked -p hyperdu-core index:: --lib -- --nocapture
+    if ($LASTEXITCODE -ne 0) { throw 'Native USN/index tests failed.' }
+    [Environment]::SetEnvironmentVariable('HYPERDU_TEST_USN_ROOT', $null, 'Process')
+    if (@(Get-ChildItem -LiteralPath $usn -Force).Count -ne 0) { throw 'USN tests left fixture children.' }
+    Remove-Item -LiteralPath $usn
     # Flush NTFS metadata by detaching, then forbid mutations during comparison.
     Invoke-OwnedDiskPart @("select vdisk file=`"$vhd`"", 'detach vdisk', 'attach vdisk readonly')
     if (-not (Test-Path -LiteralPath $root)) {
@@ -80,8 +138,40 @@ try {
     $env:HYPERDU_MFT_PARITY_FIXTURE = '1'
     $env:HYPERDU_MFT_DIAG = '1'
     Write-Host "Testing actual MFT and enumeration on read-only fixture $root"
-    & cargo test -p hyperdu-core -p hyperdu -p hyperdu-gui -- --nocapture
+    & cargo test --locked -p hyperdu-core -p hyperdu -p hyperdu-gui -- --nocapture
     if ($LASTEXITCODE -ne 0) { throw "Core/CLI tests failed ($LASTEXITCODE)." }
+    foreach ($mode in @('sync','overlapped','unbuffered')) {
+        $env:HYPERDU_MFT_IO = $mode
+        Write-Host "Testing immutable raw MFT mode: $mode"
+        & cargo test --locked -p hyperdu-core --test mft_parity -- --nocapture
+        if ($LASTEXITCODE -ne 0) { throw "MFT $mode parity failed." }
+    }
+    # All measurements use the same read-only corpus and optimized test binary.
+    # The test checks every mode's complete records and aggregates for equality.
+    $buildRows = & cargo test --locked --release -p hyperdu-core --lib --no-run --message-format=json
+    if ($LASTEXITCODE -ne 0) { throw 'Raw MFT benchmark build failed.' }
+    $binary = @($buildRows | ForEach-Object { $_ | ConvertFrom-Json } |
+        Where-Object { $_.reason -eq 'compiler-artifact' -and $_.target.name -eq 'hyperdu_core' -and $_.executable } |
+        ForEach-Object { $_.executable })
+    if ($binary.Count -ne 1) { throw 'Expected exactly one optimized core test binary.' }
+    $record = @{
+        head = (& git rev-parse HEAD).Trim()
+        binary_sha256 = (Get-FileHash -LiteralPath $binary[0] -Algorithm SHA256).Hash
+        build_command = 'cargo test --locked --release -p hyperdu-core --lib --no-run'
+        lto = $env:CARGO_PROFILE_RELEASE_LTO
+        codegen_units = $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS
+        rustc = (& rustc -Vv) -join [Environment]::NewLine
+        cache = 'warm after one untimed round per mode'
+        corpus = 'owned read-only 512MiB NTFS VHD; 2048 plain files and complex allocation fixtures'
+        limitations = 'internal MFT reader plus aggregation; not whole CLI throughput or cold-storage latency'
+    }
+    $record | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'hyperdu-mft-build.json') -Encoding utf8
+    foreach ($simd in @('scalar','auto')) {
+        $env:HYPERDU_SIMD = $simd
+        & $binary[0] 'platform::windows_impl::mft_reader::overlapped::raw_volume_tests::benchmark_owned_raw_pipeline' --exact --ignored --nocapture --test-threads=1 2>&1 |
+            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP "hyperdu-mft-$simd.log")
+        if ($LASTEXITCODE -ne 0) { throw "Raw MFT benchmark $simd failed." }
+    }
 } finally {
     foreach ($key in $previous.Keys) {
         [Environment]::SetEnvironmentVariable($key, $previous[$key], 'Process')
@@ -90,5 +180,12 @@ try {
         Invoke-OwnedDiskPart @("select vdisk file=`"$vhd`"", 'detach vdisk')
     }
     # This path is a new GUID-named directory owned by this invocation only.
-    Remove-Item -LiteralPath $owned -Recurse -Force
+    # Resolve the exact invocation-owned directory before recursive cleanup.
+    $resolvedParent = (Resolve-Path -LiteralPath $env:RUNNER_TEMP).Path.TrimEnd('\')
+    $resolvedOwned = (Resolve-Path -LiteralPath $owned).Path
+    if (-not $resolvedOwned.StartsWith($resolvedParent + '\', [StringComparison]::OrdinalIgnoreCase) -or
+        (Split-Path -Leaf $resolvedOwned) -notmatch '^hyperdu-ntfs-[0-9a-f]{32}$') {
+        throw 'Refusing cleanup outside the invocation-owned fixture directory.'
+    }
+    Remove-Item -LiteralPath $resolvedOwned -Recurse -Force
 }

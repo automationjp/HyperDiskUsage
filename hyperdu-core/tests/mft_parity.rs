@@ -225,13 +225,28 @@ fn assert_fixture(map: &hyperdu_core::StatMap, root: &std::path::Path) {
     let fixture = root.join("hyperdu-fixture");
     assert_eq!(
         totals(map, &fixture.join("plain")),
-        (128 * 65536, 128 * 65536, 128)
+        (2048 * 65536, 2048 * 65536, 2048)
     );
     assert_eq!(totals(map, &fixture.join("sparse")), (1048576, 0, 2));
-    assert_eq!(
-        totals(map, &fixture),
-        (128 * 65536 + 1048576, 128 * 65536, 130)
-    );
+    let mut expected = (2048 * 65536 + 1048576, 2048 * 65536, 2050);
+    for name in [
+        "compressed",
+        "populated-sparse",
+        "attribute-list",
+        "encrypted",
+    ] {
+        let path = fixture.join(name);
+        let oracle = allocation_oracle(&path);
+        assert_eq!(
+            totals(map, &path),
+            oracle,
+            "native allocation oracle for {name}"
+        );
+        expected.0 += oracle.0;
+        expected.1 += oracle.1;
+        expected.2 += oracle.2;
+    }
+    assert_eq!(totals(map, &fixture), expected);
     assert!(map.contains_key(&fixture.join("empty")));
     let total = totals(map, root);
     let children = map
@@ -335,4 +350,61 @@ fn the_mft_backend_declines_unsupported_options() {
             "fallback differs for case {case}"
         );
     }
+}
+
+// Independent Windows allocation API: no scanner/cache or MFT parser is used.
+// GetCompressedFileSize reports actual allocated storage for sparse/compressed
+// files. Named streams are intentionally absent from this namespace walk.
+fn allocation_oracle(path: &std::path::Path) -> (u64, u64, u64) {
+    use std::{collections::BTreeSet, os::windows::ffi::OsStrExt};
+
+    use windows::{
+        core::PCWSTR,
+        Win32::{
+            Foundation::{GetLastError, SetLastError, WIN32_ERROR},
+            Storage::FileSystem::GetCompressedFileSizeW,
+        },
+    };
+    let mut seen = BTreeSet::new();
+    let mut total = (0, 0, 0);
+    for entry in std::fs::read_dir(path).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        let metadata = entry.metadata().unwrap();
+        assert!(metadata.is_file());
+        let observed = hyperdu_core::index::v2::observe(&path).unwrap();
+        if !seen.insert(observed.id) {
+            continue;
+        }
+        let wide: Vec<_> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut high = 0;
+        // SAFETY: live terminated path and writable high word; immediately
+        // preserve the thread-local error needed to distinguish 0xffffffff.
+        let (low, error) = unsafe {
+            SetLastError(WIN32_ERROR(0));
+            let low = GetCompressedFileSizeW(PCWSTR(wide.as_ptr()), Some(&mut high));
+            (low, GetLastError())
+        };
+        assert!(
+            low != u32::MAX || error.0 == 0,
+            "allocation API failed: {error:?}"
+        );
+        let allocated = (u64::from(high) << 32) | u64::from(low);
+        assert_eq!(
+            observed.logical,
+            metadata.len(),
+            "index logical {}",
+            path.display()
+        );
+        assert_eq!(
+            observed.physical,
+            allocated,
+            "index allocation {}",
+            path.display()
+        );
+        total.0 += metadata.len();
+        total.1 += allocated;
+        total.2 += 1;
+    }
+    total
 }

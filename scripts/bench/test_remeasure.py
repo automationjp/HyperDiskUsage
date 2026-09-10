@@ -66,6 +66,8 @@ class CorpusTests(unittest.TestCase):
             bench.parse_json_map('{"LD_PRELOAD":"library"}')
         self.assertEqual(bench.parse_flags('["--threads","2","--mft"]'),
                          ["--threads", "2", "--mft"])
+        self.assertEqual(bench.parse_flags('["--xfs-bulk","--io-uring"]'),
+                         ["--xfs-bulk", "--io-uring"])
 
     def test_setup_rejects_source_and_input_overlaps_before_writes(self):
         with tempfile.TemporaryDirectory() as temporary:

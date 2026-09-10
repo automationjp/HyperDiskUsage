@@ -60,7 +60,7 @@ jobs:
       - name: Shellcheck scripts
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck python3-yaml
+          sudo apt-get install -y shellcheck python3-yaml xfsprogs
           shellcheck -S error -x scripts/**/*.sh
       - name: Benchmark contract tests
         run: python3 -m unittest discover -s scripts/bench -p "test_*.py"
@@ -74,6 +74,23 @@ jobs:
         run: cargo build --workspace --release
       - name: Test core, CLI and GUI
         run: cargo test -p hyperdu-core -p hyperdu -p hyperdu-gui -- --nocapture
+      - name: Linux asynchronous metadata configuration
+        run: |
+          cargo clippy --locked -p hyperdu-core -p hyperdu --all-targets --features linux-io-uring -- -D warnings
+          cargo test --locked -p hyperdu-core -p hyperdu --features linux-io-uring -- --nocapture
+      - name: Optional SIMD configuration
+        run: |
+          cargo clippy --locked -p hyperdu-core --all-targets --features simd-avx512 -- -D warnings
+          cargo test --locked -p hyperdu-core --features simd-avx512 simd:: --lib -- --nocapture
+      - name: Owned read-only XFS fixture
+        run: |
+          cargo test --locked -p hyperdu-core --features linux-io-uring --lib --test linux_acceleration --no-run --message-format=json > "$RUNNER_TEMP/linux-test-binaries.jsonl"
+          core_test=$(python3 -c 'import json,sys; a=[json.loads(s) for s in open(sys.argv[1])]; print(next(x["executable"] for x in a if x.get("executable") and x["target"]["name"]=="hyperdu_core"))' "$RUNNER_TEMP/linux-test-binaries.jsonl")
+          scan_test=$(python3 -c 'import json,sys; a=[json.loads(s) for s in open(sys.argv[1])]; print(next(x["executable"] for x in a if x.get("executable") and x["target"]["name"]=="linux_acceleration"))' "$RUNNER_TEMP/linux-test-binaries.jsonl")
+          sudo bash scripts/dev/xfs_fixture.sh "$core_test" "$scan_test"
+          sudo env HYPERDU_TEST_FANOTIFY_ROOT="$RUNNER_TEMP" "$core_test" index::journal::linux::tests --nocapture
+          sudo env HYPERDU_INDEX_LINUX_BACKEND=fanotify "$core_test" index::v2::watch::tests::native_service --nocapture
+          HYPERDU_INDEX_LINUX_BACKEND=inotify "$core_test" index::v2::watch::tests::native_service --nocapture
       # A silent drop to 0% would look exactly like the slow CI this replaced.
       - name: sccache stats
         if: always()
@@ -102,12 +119,29 @@ jobs:
       # the critical path.
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Optional SIMD configuration
+        run: |
+          cargo clippy --locked -p hyperdu-core --all-targets --features simd-avx512 -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p hyperdu-core --features simd-avx512 simd:: --lib -- --nocapture
       - name: Test core, CLI and GUI on a fixed NTFS volume
         run: .\scripts\dev\ntfs_fixture.ps1
       # A silent drop to 0% would look exactly like the slow CI this replaced.
       - name: sccache stats
         if: always()
         run: sccache --show-stats
+
+      - name: Retain native MFT measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-mft-measurements
+          path: |
+            ${{ runner.temp }}/hyperdu-mft-build.json
+            ${{ runner.temp }}/hyperdu-mft-scalar.log
+            ${{ runner.temp }}/hyperdu-mft-auto.log
+          if-no-files-found: warn
+          retention-days: 14
 
   # Exercise both native architectures: cross-checking cannot validate the
   # Darwin packed-attribute ABI, hardlink identity or allocation accounting.

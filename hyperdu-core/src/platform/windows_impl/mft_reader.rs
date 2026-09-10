@@ -14,6 +14,9 @@
 // volume backend; some diagnostic helpers are unused in that test harness.
 #![allow(dead_code)]
 
+#[cfg(windows)]
+#[path = "mft_reader/overlapped.rs"]
+mod overlapped;
 #[path = "mft_reader/progress.rs"]
 mod progress;
 #[path = "mft_reader/streams.rs"]
@@ -39,6 +42,18 @@ pub(crate) trait VolumeSource {
     /// Fill `buf` from `offset`. Returns false when the range is not readable,
     /// which the caller treats as the end of usable data rather than retrying.
     fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> bool;
+
+    /// Start at most one owned read-ahead operation without borrowing a caller's
+    /// buffer. False means unsupported or failed; normal read_at remains usable.
+    fn begin_prefetch(&mut self, _offset: u64, _length: usize) -> bool {
+        false
+    }
+    /// Drain the original operation and copy only a complete result into buf.
+    fn finish_prefetch(&mut self, _buf: &mut [u8]) -> bool {
+        false
+    }
+    /// Cancel and synchronously drain any pending operation before returning.
+    fn cancel_prefetch(&mut self) {}
 }
 
 /// Lets a caller keep ownership of the volume while the reader borrows it, so
@@ -46,6 +61,15 @@ pub(crate) trait VolumeSource {
 impl<S: VolumeSource + ?Sized> VolumeSource for &mut S {
     fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> bool {
         (**self).read_at(offset, buf)
+    }
+    fn begin_prefetch(&mut self, offset: u64, length: usize) -> bool {
+        (**self).begin_prefetch(offset, length)
+    }
+    fn finish_prefetch(&mut self, buf: &mut [u8]) -> bool {
+        (**self).finish_prefetch(buf)
+    }
+    fn cancel_prefetch(&mut self) {
+        (**self).cancel_prefetch();
     }
 }
 
@@ -110,6 +134,12 @@ pub(crate) struct MftReader<S: VolumeSource> {
     complete: bool,
 }
 
+impl<S: VolumeSource> Drop for MftReader<S> {
+    fn drop(&mut self) {
+        self.source.cancel_prefetch();
+    }
+}
+
 impl<S: VolumeSource> MftReader<S> {
     /// Read the boot sector and the MFT's own run list.
     ///
@@ -133,87 +163,104 @@ impl<S: VolumeSource> MftReader<S> {
         }
         let header = parse_record_header(&rec)?;
 
-        // The MFT's $DATA is non-resident by construction; its run list is what
-        // makes the rest of the records reachable.
-        let mut runs = data_runs_in(&rec, &header).unwrap_or_default();
-        if runs.is_empty() {
+        if !header.in_use || header.is_directory || bootstrap_u64(&rec, 32)? != 0 {
             return None;
         }
-
-        // On a volume with millions of files the MFT is itself fragmented
-        // enough that its $DATA does not fit in one record, and the rest lives
-        // in extension records named by $ATTRIBUTE_LIST. Stopping at the base
-        // record was measured missing 88.9% of a real volume's files -- while
-        // still reporting a plausible total, which is the worst way to be
-        // wrong. See #15.
-        let extensions = extension_records_for(&rec, &header, attr_type::DATA)?;
-        if !extensions.is_empty() {
-            let mut reader = Self {
-                source,
-                geometry,
-                runs,
-                complete: true,
-                window: window::ReadWindow::default(),
-            };
-            reader.extend_runs_from(&extensions);
-            return Some(reader);
+        let base_reference = (bootstrap_u16(&rec, 16)? as u64) << 48;
+        let mut extents = bootstrap_extents(&rec, &header)?;
+        extents.sort_unstable_by_key(|extent| extent.low);
+        let first = extents.first()?;
+        if first.low != 0 {
+            return None;
         }
-
-        // Reborrow: `source` was only moved in the branch above.
-        runs.shrink_to_fit();
-        Some(Self {
+        let allocated = bootstrap_u64(&rec, first.pos + 40)?;
+        let logical = bootstrap_u64(&rec, first.pos + 48)?;
+        let initialized = bootstrap_u64(&rec, first.pos + 56)?;
+        let cluster = geometry.cluster_size() as u64;
+        if allocated == 0
+            || allocated % cluster != 0
+            || logical > allocated
+            || initialized > logical
+        {
+            return None;
+        }
+        let expected_clusters = allocated / cluster;
+        let references = bootstrap_references(&rec, &header)?;
+        let mut reader = Self {
             source,
             geometry,
-            runs,
+            runs: Vec::new(),
             complete: true,
             window: window::ReadWindow::default(),
-        })
+        };
+        let mut end = 0;
+        for extent in &extents {
+            if extent.low != end || extent.end > expected_clusters {
+                return None;
+            }
+            end = extent.end;
+            reader.runs.extend_from_slice(&extent.runs);
+        }
+        // A partial bootstrap must never be reported as a complete MFT. Keep
+        // the valid prefix only so callers retain the existing fallback signal.
+        reader.complete = reader
+            .extend_runs_from(
+                &references,
+                &extents,
+                base_reference,
+                end,
+                expected_clusters,
+            )
+            .is_some_and(|end| end == expected_clusters);
+        Some(reader)
     }
 
-    /// Follow `$ATTRIBUTE_LIST` entries and append the `$DATA` runs they name.
-    ///
-    /// The extension records are themselves in the MFT, so this can only reach
-    /// the ones covered by the runs found so far. That is enough in practice:
-    /// NTFS keeps the first extent large, and each round of appending brings
-    /// more of the MFT into reach. The loop stops when a pass adds nothing,
-    /// rather than assuming one pass suffices.
-    fn extend_runs_from(&mut self, extensions: &[u64]) {
-        // A pathological volume could otherwise bounce between records; the
-        // records come from a filesystem that may be damaged.
-        const MAX_PASSES: usize = 8;
-        let mut seen: std::collections::HashSet<u64> = std::collections::HashSet::new();
-
-        for _ in 0..MAX_PASSES {
-            let before = self.runs.len();
-            for &number in extensions {
-                if seen.contains(&number) {
-                    continue;
-                }
-                let Some(rec) = self.read_record(number) else {
-                    // Not reachable yet with the runs we have; a later pass may
-                    // reach it once the run list grows.
-                    continue;
-                };
-                let Some(header) = parse_record_header(&rec) else {
-                    continue;
-                };
-                if !header.in_use
-                    || u64::from_le_bytes(rec[32..40].try_into().unwrap()) & ((1 << 48) - 1) != 0
+    /// Extend only the contiguous VCN prefix. A record needed for the next
+    /// extent must be reachable through that prefix; later extents cannot be
+    /// appended early just to make an unresolved reference appear reachable.
+    fn extend_runs_from(
+        &mut self,
+        references: &[BootstrapReference],
+        base_extents: &[BootstrapExtent],
+        base_reference: u64,
+        mut end: u64,
+        expected_clusters: u64,
+    ) -> Option<u64> {
+        for reference in references {
+            if reference.record & BOOTSTRAP_RECORD_MASK == 0 {
+                if reference.record != base_reference
+                    || !base_extents.iter().any(|extent| {
+                        extent.low == reference.low && extent.instance == reference.instance
+                    })
                 {
-                    continue;
+                    return None;
                 }
-                if let Some(more) = data_runs_in(&rec, &header).filter(|runs| !runs.is_empty()) {
-                    self.runs.extend(more);
-                    seen.insert(number);
-                }
+                continue;
             }
-            if self.runs.len() == before {
-                break;
+            if reference.low != end {
+                return None;
             }
+            let rec = self.read_record(reference.record & BOOTSTRAP_RECORD_MASK)?;
+            let header = parse_record_header(&rec)?;
+            if !header.in_use
+                || header.is_directory
+                || bootstrap_u16(&rec, 16)? != (reference.record >> 48) as u16
+                || bootstrap_u64(&rec, 32)? != base_reference
+            {
+                return None;
+            }
+            let extents = bootstrap_extents(&rec, &header)?;
+            let mut matching = extents.iter().filter(|extent| {
+                extent.low == reference.low && extent.instance == reference.instance
+            });
+            let extent = matching.next()?;
+            if matching.next().is_some() || extent.end > expected_clusters {
+                return None;
+            }
+            end = extent.end;
+            self.runs.extend_from_slice(&extent.runs);
         }
-        if seen.len() != extensions.len() {
-            self.complete = false;
-        }
+        Some(end)
     }
 
     pub(crate) fn is_complete(&self) -> bool {
@@ -228,6 +275,7 @@ impl<S: VolumeSource> MftReader<S> {
     /// geometry is known. Doing that after the records are read achieves
     /// nothing, which is what used to happen.
     pub(crate) fn source_mut(&mut self) -> &mut S {
+        self.drain_prefetch();
         self.window.clear();
         &mut self.source
     }
@@ -448,6 +496,7 @@ pub(crate) struct WindowsVolume {
     /// number of sectors long. MFT records are not, so reads are widened to
     /// the enclosing sectors and the wanted bytes copied out.
     sector: u64,
+    prefetch: Option<overlapped::Engine>,
 }
 
 #[cfg(windows)]
@@ -503,6 +552,7 @@ impl WindowsVolume {
         Some(Self {
             handle,
             sector: 4096,
+            prefetch: overlapped::Engine::open(&path, handle, overlapped::Mode::configured()),
         })
     }
 
@@ -519,6 +569,7 @@ impl WindowsVolume {
 impl Drop for WindowsVolume {
     fn drop(&mut self) {
         use windows::Win32::Foundation::CloseHandle;
+        self.cancel_prefetch();
         unsafe {
             let _ = CloseHandle(self.handle);
         }
@@ -527,6 +578,19 @@ impl Drop for WindowsVolume {
 
 #[cfg(windows)]
 impl VolumeSource for WindowsVolume {
+    fn begin_prefetch(&mut self, offset: u64, length: usize) -> bool {
+        self.prefetch
+            .as_mut()
+            .is_some_and(|io| io.begin(offset, length))
+    }
+    fn finish_prefetch(&mut self, buf: &mut [u8]) -> bool {
+        self.prefetch.as_mut().is_some_and(|io| io.finish(buf))
+    }
+    fn cancel_prefetch(&mut self) {
+        if let Some(io) = &mut self.prefetch {
+            io.cancel();
+        }
+    }
     fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> bool {
         use windows::Win32::{
             Storage::FileSystem::{ReadFile, SetFilePointerEx, FILE_BEGIN},
@@ -535,7 +599,16 @@ impl VolumeSource for WindowsVolume {
 
         // Widen to sector boundaries: a volume handle rejects anything else.
         let start = offset - (offset % self.sector);
-        let end = (offset + buf.len() as u64).next_multiple_of(self.sector);
+        let Some(end) = offset
+            .checked_add(buf.len() as u64)
+            .and_then(|end| end.checked_add(self.sector - 1))
+            .map(|end| end / self.sector * self.sector)
+        else {
+            return false;
+        };
+        if end > i64::MAX as u64 || end - start > u32::MAX as u64 {
+            return false;
+        }
         let span = (end - start) as usize;
 
         let mut scratch = vec![0u8; span];
@@ -601,69 +674,162 @@ pub(crate) fn is_elevated() -> bool {
     }
 }
 
-/// Run list of the first non-resident `$DATA` in a record, if it has one.
-fn data_runs_in(rec: &[u8], header: &super::mft::RecordHeader) -> Option<Vec<Run>> {
-    for attr in Attributes::new(rec, header) {
-        if attr.type_code == attr_type::DATA && attr.non_resident {
-            let off = run_list_offset(rec, attr.pos)?;
-            return parse_run_list(rec.get(off..)?);
-        }
-    }
-    None
+const BOOTSTRAP_RECORD_MASK: u64 = (1 << 48) - 1;
+
+struct BootstrapReference {
+    record: u64,
+    low: u64,
+    instance: u16,
 }
 
-/// Records that hold `type_code` attributes for this file, from its
-/// `$ATTRIBUTE_LIST`.
-///
-/// Entries naming the base record itself are dropped: re-reading it would add
-/// its runs a second time, doubling the MFT's apparent size.
-fn extension_records_for(
+struct BootstrapExtent {
+    pos: usize,
+    low: u64,
+    end: u64,
+    instance: u16,
+    runs: Vec<Run>,
+}
+
+fn bootstrap_u16(bytes: &[u8], pos: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(
+        bytes.get(pos..pos.checked_add(2)?)?.try_into().ok()?,
+    ))
+}
+
+fn bootstrap_u64(bytes: &[u8], pos: usize) -> Option<u64> {
+    Some(u64::from_le_bytes(
+        bytes.get(pos..pos.checked_add(8)?)?.try_into().ok()?,
+    ))
+}
+
+/// The shared iterator deliberately stops on a malformed attribute. Bootstrap
+/// must distinguish that stop from a real END marker or the exact used size.
+fn validate_bootstrap_attributes(rec: &[u8], header: &super::mft::RecordHeader) -> Option<()> {
+    let mut end = header.first_attr_offset;
+    for attr in Attributes::new(rec, header) {
+        end = attr.pos.checked_add(attr.total_length)?;
+    }
+    let used = header.used_size as usize;
+    if end == used
+        || (end.checked_add(4)? <= used && rec.get(end..end + 4)? == attr_type::END.to_le_bytes())
+    {
+        Some(())
+    } else {
+        None
+    }
+}
+
+/// Read only unnamed DATA mappings, bounded by each attribute's own end.
+/// Bootstrap cannot use sparse/compressed/encrypted mappings as raw MFT bytes.
+fn bootstrap_extents(
     rec: &[u8],
     header: &super::mft::RecordHeader,
-    type_code: u32,
-) -> Option<Vec<u64>> {
-    let mut out = Vec::new();
-    for attr in Attributes::new(rec, header) {
-        if attr.type_code != attr_type::ATTRIBUTE_LIST {
+) -> Option<Vec<BootstrapExtent>> {
+    validate_bootstrap_attributes(rec, header)?;
+    let mut extents = Vec::new();
+    for attr in Attributes::new(rec, header).filter(|attr| attr.type_code == attr_type::DATA) {
+        let bytes = rec.get(attr.pos..attr.pos.checked_add(attr.total_length)?)?;
+        if *bytes.get(9)? != 0 {
             continue;
         }
-        // Bootstrap cannot locate a non-resident list safely yet. Fall back,
-        // rather than treating an unsupported list as an empty one.
-        if attr.non_resident {
+        if !attr.non_resident || attr.flags != 0 || bytes.len() < 64 {
             return None;
         }
-        let value = rec.get(attr.value_offset..attr.value_offset + attr.value_length)?;
+        let low = bootstrap_u64(bytes, 16)?;
+        let end = bootstrap_u64(bytes, 24)?.checked_add(1)?;
+        if end <= low {
+            return None;
+        }
+        let offset = bootstrap_u16(bytes, 32)? as usize;
+        if offset < 64 {
+            return None;
+        }
+        let mapping = bytes.get(offset..)?;
+        // parse_run_list also accepts an unterminated final run, so locate an
+        // actual terminator without permitting it to come from the next attr.
         let mut pos = 0usize;
-        while pos < value.len() {
-            let length = u16::from_le_bytes(value.get(pos + 4..pos + 6)?.try_into().ok()?) as usize;
-            if length < 26 || pos.checked_add(length)? > value.len() {
+        while *mapping.get(pos)? != 0 {
+            let header = mapping[pos];
+            let length_bytes = (header & 15) as usize;
+            let offset_bytes = (header >> 4) as usize;
+            if length_bytes == 0 || length_bytes > 8 || offset_bytes == 0 || offset_bytes > 8 {
                 return None;
             }
-            pos += length;
+            pos = pos.checked_add(1 + length_bytes + offset_bytes)?;
         }
-        for entry in super::mft::parse_attribute_list(value) {
-            // Record 0 is the base for $MFT; anything else is an extension.
-            if entry.type_code == type_code && entry.record != 0 {
-                out.push(entry.record);
+        let runs = parse_run_list(&mapping[..=pos])?;
+        let covered = runs.iter().try_fold(0u64, |sum, run| {
+            if run.length == 0 {
+                None
+            } else {
+                sum.checked_add(run.length)
             }
+        })?;
+        if covered != end - low {
+            return None;
         }
+        extents.push(BootstrapExtent {
+            pos: attr.pos,
+            low,
+            end,
+            instance: bootstrap_u16(bytes, 14)?,
+            runs,
+        });
     }
-    out.sort_unstable();
-    out.dedup();
-    Some(out)
+    Some(extents)
 }
 
-/// Byte offset of a non-resident attribute's run list within the record.
-///
-/// The offset lives at 0x20 of the attribute header and is relative to the
-/// attribute, not the record.
-fn run_list_offset(rec: &[u8], attr_pos: usize) -> Option<usize> {
-    let rel = u16::from_le_bytes(rec.get(attr_pos + 0x20..attr_pos + 0x22)?.try_into().ok()?);
-    let off = attr_pos.checked_add(rel as usize)?;
-    if off >= rec.len() {
+/// Keep full segment identity, instance and VCN; named DATA is a different
+/// stream and cannot extend the unnamed MFT mapping. Non-resident bootstrap
+/// lists remain unsupported and trigger enumeration fallback.
+fn bootstrap_references(
+    rec: &[u8],
+    header: &super::mft::RecordHeader,
+) -> Option<Vec<BootstrapReference>> {
+    let mut out = Vec::new();
+    let mut has_list = false;
+    for attr in
+        Attributes::new(rec, header).filter(|attr| attr.type_code == attr_type::ATTRIBUTE_LIST)
+    {
+        if has_list || attr.non_resident {
+            return None;
+        }
+        has_list = true;
+        let value =
+            rec.get(attr.value_offset..attr.value_offset.checked_add(attr.value_length)?)?;
+        let mut pos = 0usize;
+        while pos < value.len() {
+            let length = bootstrap_u16(value, pos.checked_add(4)?)? as usize;
+            if length < 26 {
+                return None;
+            }
+            let entry = value.get(pos..pos.checked_add(length)?)?;
+            let name_len = *entry.get(6)? as usize;
+            if name_len != 0 {
+                let name_offset = *entry.get(7)? as usize;
+                if name_offset < 26 || name_offset % 2 != 0 {
+                    return None;
+                }
+                entry.get(name_offset..name_offset.checked_add(name_len.checked_mul(2)?)?)?;
+            }
+            let kind = u32::from_le_bytes(entry.get(..4)?.try_into().ok()?);
+            if kind == attr_type::DATA && name_len == 0 {
+                out.push(BootstrapReference {
+                    record: bootstrap_u64(entry, 16)?,
+                    low: bootstrap_u64(entry, 8)?,
+                    instance: bootstrap_u16(entry, 24)?,
+                });
+            }
+            pos = pos.checked_add(length)?;
+        }
+    }
+    out.sort_unstable_by_key(|reference| reference.low);
+    // A duplicate VCN is ambiguous even if both references name the same
+    // record. Never discard a conflicting sequence or instance by deduping IDs.
+    if out.windows(2).any(|pair| pair[0].low == pair[1].low) {
         return None;
     }
-    Some(off)
+    Some(out)
 }
 
 /// Build `record -> path` for a set of entries.
@@ -690,6 +856,8 @@ pub(crate) fn paths_for(entries: &[Entry]) -> HashMap<u64, String> {
 #[cfg(test)]
 mod tests {
     include!("mft_reader/batching_tests.rs");
+    include!("mft_reader/async_tests.rs");
+    include!("mft_reader/bootstrap_tests.rs");
     include!("mft_reader/progress_tests.rs");
     use super::{super::mft::ROOT_RECORD, *};
 
@@ -795,6 +963,7 @@ mod tests {
         r[pos..pos + 4].copy_from_slice(&attr_type::DATA.to_le_bytes());
         r[pos + 4..pos + 8].copy_from_slice(&(total as u32).to_le_bytes());
         r[pos + 8] = 1; // non-resident
+        set_mft_extent_sizes(&mut r, pos, 0, clusters, CLUSTER as u64);
         let run_off = 0x40u16; // within the attribute
         r[pos + 0x20..pos + 0x22].copy_from_slice(&run_off.to_le_bytes());
         // 0x11: one length byte, one offset byte.
@@ -805,6 +974,17 @@ mod tests {
         r[ro + 3] = 0x00; // end of list
         set_used(&mut r, (pos + total) as u32);
         r
+    }
+
+    fn set_mft_extent_sizes(rec: &mut [u8], pos: usize, low: u64, clusters: u64, cluster: u64) {
+        rec[pos + 16..pos + 24].copy_from_slice(&low.to_le_bytes());
+        rec[pos + 24..pos + 32].copy_from_slice(&(low + clusters - 1).to_le_bytes());
+        if low == 0 {
+            for offset in [40, 48, 56] {
+                rec[pos + offset..pos + offset + 8]
+                    .copy_from_slice(&(clusters * cluster).to_le_bytes());
+            }
+        }
     }
 
     /// Volume holding `records` starting at record 0, laid out as the MFT.
@@ -1196,11 +1376,18 @@ mod tests {
         let mut r = blank_record(0x0001, 1);
         let mut p = 64usize;
         p = push_attribute_list(&mut r, p, extensions);
+        for (index, reference) in extensions.iter().enumerate() {
+            if reference & BOOTSTRAP_RECORD_MASK != 0 {
+                let entry = 64 + 24 + index * 32;
+                r[entry + 8..entry + 16].copy_from_slice(&clusters.to_le_bytes());
+            }
+        }
 
         let total = 72usize;
         r[p..p + 4].copy_from_slice(&attr_type::DATA.to_le_bytes());
         r[p + 4..p + 8].copy_from_slice(&(total as u32).to_le_bytes());
         r[p + 8] = 1; // non-resident
+        set_mft_extent_sizes(&mut r, p, 0, clusters, CLUSTER as u64);
         let run_off = 0x40u16;
         r[p + 0x20..p + 0x22].copy_from_slice(&run_off.to_le_bytes());
         let ro = p + run_off as usize;
@@ -1223,6 +1410,7 @@ mod tests {
         r[pos..pos + 4].copy_from_slice(&attr_type::DATA.to_le_bytes());
         r[pos + 4..pos + 8].copy_from_slice(&(total as u32).to_le_bytes());
         r[pos + 8] = 1;
+        set_mft_extent_sizes(&mut r, pos, 1, clusters, CLUSTER as u64);
         r[pos + 0x20..pos + 0x22].copy_from_slice(&0x40u16.to_le_bytes());
         let ro = pos + 0x40;
         r[ro] = 0x11;
@@ -1243,6 +1431,11 @@ mod tests {
         // base record's own run covers only the first cluster; the extension
         // record supplies the next four, which is what makes 16 reachable.
         let mut records = vec![mft_record_with_extensions(1, &[1]), extension_record(4, 5)];
+        let data = 64 + 24 + 32;
+        for offset in [40, 48, 56] {
+            records[0][data + offset..data + offset + 8]
+                .copy_from_slice(&(5 * CLUSTER as u64).to_le_bytes());
+        }
         while records.len() < 16 {
             records.push(blank_record(0x0000, 0));
         }
@@ -1308,6 +1501,7 @@ mod tests {
         mft[pos..pos + 4].copy_from_slice(&attr_type::DATA.to_le_bytes());
         mft[pos + 4..pos + 8].copy_from_slice(&72u32.to_le_bytes());
         mft[pos + 8] = 1;
+        set_mft_extent_sizes(&mut mft, pos, 0, 2, CLUSTER as u64);
         mft[pos + 0x20..pos + 0x22].copy_from_slice(&0x40u16.to_le_bytes());
         let ro = pos + 0x40;
         mft[ro] = 0x11; // run 1: len 1, lcn +4

@@ -22,6 +22,7 @@ impl<S: VolumeSource> MftReader<S> {
         const FIRST_USER_RECORD: u64 = 16;
         let mut progress = ReadProgress::default();
         if !keep_going(progress) {
+            self.drain_prefetch();
             self.complete = false;
             return None;
         }
@@ -33,6 +34,7 @@ impl<S: VolumeSource> MftReader<S> {
             }
             progress.records += 1;
             if progress.records % 256 == 0 && !keep_going(progress) {
+                self.drain_prefetch();
                 self.complete = false;
                 return None;
             }
@@ -40,10 +42,12 @@ impl<S: VolumeSource> MftReader<S> {
         if self.complete {
             progress.finished = true;
             if !keep_going(progress) {
+                self.drain_prefetch();
                 self.complete = false;
                 return None;
             }
         }
+        self.drain_prefetch();
         Some(out)
     }
 }

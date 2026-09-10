@@ -18,6 +18,7 @@ mod progress_tests {
             .collect();
         let mut records = with_metadata_records(users, 1);
         let clusters = records.len().div_ceil(CLUSTER / RECORD) as u32;
+        set_mft_extent_sizes(&mut records[0], 64, 0, clusters as u64, CLUSTER as u64);
         records[0][128] = 0x14;
         records[0][129..133].copy_from_slice(&clusters.to_le_bytes());
         records[0][133] = MFT_LCN as u8;
