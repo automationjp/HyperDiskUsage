@@ -31,3 +31,13 @@ Linuxではディスク用MFT経路を使わず、マウントされたfilesyste
 [Reproducible benchmark runner](../scripts/bench/du_same_conditions.py)
 
 [AWS runbook and provenance records](benchmarks/aws-protocol.md)
+
+## OS 高速経路の共通 corpus
+
+[remeasure.py](../scripts/bench/remeasure.py) は、同じ corpus に対する baseline/candidate の比較に使います。flat・wide・deep の生成、既存 tree、100 万件規模を指定できます。独立した filesystem metadata oracle と全ディレクトリの logical bytes・allocated bytes・file count を照合し、全試行の一致と走査前後の corpus fingerprint 一致を採用条件にします。GNU du と AWS の比較は上記の別 protocol を使います。
+
+計測には clean な source commit、binary SHA-256、その commit と binary を結ぶ build record が必要です。最低 4 組の交互試行と中央値を保存し、entries/sec、CPU user/system time、page faults、peak RSS を記録します。read bytes は OS ごとの意味を明記し、取得できない項目は理由付きの null にします。Linux の syscall 診断は `strace` による別走査で測り、時間計測に混ぜません。entries の分母は訪問したディレクトリ内で列挙した項目数です。
+
+warm を既定とし、cold は各試行の前に実行する cache-reset コマンドを明示した場合だけ選べます。storage・network・runner の条件は `--environment-label` 等で記録します。未測定の NVMe/HDD/SMB/NFS に結果を外挿しません。出力は上書きせず、失敗時も `complete: false` と証跡を残します。
+
+CI の macOS ARM64 と Intel jobs は native fallback と bulk metadata を同じ release binary、flat/deep 各 25,000 files、4 組で比較し、raw JSON と build record を artifact に保存します。この runner 内の計測は、専用機や cold-cache の性能保証ではありません。

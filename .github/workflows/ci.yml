@@ -5,6 +5,7 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  workflow_dispatch: {}
   # Only main is watched on push. A branch with an open PR ran the whole matrix
   # twice per commit -- once for the push, once for the pull_request -- for two
   # identical results.
@@ -61,6 +62,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck python3-yaml
           shellcheck -S error -x scripts/**/*.sh
+      - name: Benchmark contract tests
+        run: python3 -m unittest discover -s scripts/bench -p "test_*.py"
       - name: Supply-chain regression tests (offline mocks)
         run: python3 scripts/package/test_supply_chain.py
       - name: Import sort (nightly strict)
@@ -87,6 +90,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: clippy
+      - name: Benchmark contract tests
+        run: python -m unittest discover -s scripts/bench -p "test_*.py"
       - name: Installer argument regression (offline mocks)
         run: pwsh -File scripts/package/test_setup_hyperdu.ps1
       - uses: mozilla-actions/sccache-action@fd02668681acd5f960e1372061bee5e3e987195c # v0.0.11
@@ -100,6 +105,80 @@ jobs:
       - name: Test core, CLI and GUI on a fixed NTFS volume
         run: .\scripts\dev\ntfs_fixture.ps1
       # A silent drop to 0% would look exactly like the slow CI this replaced.
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  # Exercise both native architectures: cross-checking cannot validate the
+  # Darwin packed-attribute ABI, hardlink identity or allocation accounting.
+  test-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: clippy
+      - uses: mozilla-actions/sccache-action@fd02668681acd5f960e1372061bee5e3e987195c # v0.0.11
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          cache-targets: "false"
+      - name: Record native environment
+        run: |
+          git rev-parse HEAD
+          sw_vers
+          uname -m
+          rustc -Vv
+          diskutil info "$GITHUB_WORKSPACE"
+      - name: Benchmark contract tests
+        run: python3 -m unittest discover -s scripts/bench -p "test_*.py"
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test native metadata and application behavior
+        run: cargo test --workspace -- --nocapture
+      - name: Test parallel configuration
+        run: cargo test --workspace --features hyperdu-core/rayon-par,hyperdu-core/rayon-inner,hyperdu-core/simd-prefetch
+      - name: Build
+        run: cargo build --workspace --release
+      - name: Compare bulk metadata with the native fallback
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess
+          binary = pathlib.Path("target/release/hyperdu")
+          record = {
+              "head": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+              "build_command": "cargo build --workspace --release",
+              "rustc": subprocess.check_output(["rustc", "-Vv"], text=True),
+              "lto": os.environ["CARGO_PROFILE_RELEASE_LTO"],
+              "codegen_units": os.environ["CARGO_PROFILE_RELEASE_CODEGEN_UNITS"],
+          }
+          pathlib.Path(os.environ["RUNNER_TEMP"], "hyperdu-build.json").write_text(json.dumps(record))
+          PY
+          python3 scripts/bench/remeasure.py \
+            --bin target/release/hyperdu --commit "$(git rev-parse HEAD)" \
+            --build-record "$RUNNER_TEMP/hyperdu-build.json" \
+            --baseline-build-record "$RUNNER_TEMP/hyperdu-build.json" \
+            --baseline-env '{"HYPERDU_MAC_USE_GALB":"0"}' \
+            --dataset-parent "$RUNNER_TEMP/hyperdu-corpus" \
+            --output "$RUNNER_TEMP/hyperdu-macos.json" \
+            --entries 25000 --shape flat --shape deep --runs 4 \
+            --environment-label "GitHub hosted $RUNNER_OS $RUNNER_ARCH" --syscalls off
+      - name: Retain native measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-measurements-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/hyperdu-macos.json
+            ${{ runner.temp }}/hyperdu-build.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: sccache stats
         if: always()
         run: sccache --show-stats
