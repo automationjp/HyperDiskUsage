@@ -30,9 +30,7 @@ if [[ $# -lt 1 ]]; then usage; exit 1; fi
 
 TAG="$1"; shift || true
 # SemVer, including a pre-release suffix. The old pattern ended at the patch
-# number, so this helper rejected v0.5.0-beta.2 -- the very tag the project
-# needed to cut -- while .github/workflows/release.yml triggers on the glob
-# v*.*.*, which matches it. The two disagreed; the workflow is the authority.
+# number, so this helper rejected v0.5.0-beta.2 while release.yml accepted it.
 [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] ||
   { echo "error: tag must be like vX.Y.Z or vX.Y.Z-prerelease" >&2; exit 1; }
 
@@ -66,7 +64,7 @@ done
 
 # Move to repo root robustly (handles broken CWD in WSL)
 move_to_repo_root() {
-  # Prefer Git’s notion of the repo root if available
+  # Prefer Git's notion of the repo root if available
   if rr=$(git rev-parse --show-toplevel 2>/dev/null); then
     cd "$rr" || {
       echo "error: failed to cd to git toplevel $rr" >&2; exit 1; }
@@ -75,8 +73,8 @@ move_to_repo_root() {
   # Fallback: derive from this script path relative to current PWD
   local sp="${BASH_SOURCE[0]}"
   case "$sp" in
-    /*) ;;                             # already absolute
-    *) sp="$PWD/$sp" ;;                # make absolute from current dir
+    /*) ;;
+    *) sp="$PWD/$sp" ;;
   esac
   local rr
   rr=$(cd "$(dirname "$sp")/../.." && pwd) || {
@@ -97,6 +95,36 @@ if [[ $ALLOW_DIRTY -eq 0 ]]; then
   fi
 fi
 
+# Tagging without Cargo validation is unsafe: --no-lint used to skip the only
+# remaining check and could publish a tag that disagreed with the tree.
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "error: cargo is required to validate the workspace version before tagging." >&2
+  exit 1
+fi
+
+# Do not let any later Cargo command repair an omitted Cargo.lock update before
+# we notice it. This is intentionally checked even when --no-lint is supplied.
+if ! cargo metadata --locked --no-deps --format-version 1 >/dev/null 2>&1; then
+  echo "error: Cargo.lock is not synchronized with Cargo.toml." >&2
+  echo "       Run 'cargo update -w' and commit Cargo.lock before tagging." >&2
+  exit 1
+fi
+
+if ! VER=$(cargo pkgid -p hyperdu --manifest-path Cargo.toml 2>/dev/null | sed 's/.*[#@]//'); then
+  echo "error: could not determine the workspace version from cargo pkgid." >&2
+  exit 1
+fi
+if [[ -z "$VER" ]]; then
+  echo "error: could not determine the workspace version from cargo pkgid." >&2
+  exit 1
+fi
+if [[ "$TAG" != "v$VER" ]]; then
+  echo "error: $TAG does not name the workspace version (v$VER)." >&2
+  echo "       Bump [workspace.package] version in Cargo.toml, run 'cargo update -w'," >&2
+  echo "       then 'bash scripts/lint/versions.sh --fix' before tagging." >&2
+  exit 1
+fi
+
 BRANCH="${PUSH_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 
 if [[ $VERBOSE -eq 1 ]]; then
@@ -104,12 +132,8 @@ if [[ $VERBOSE -eq 1 ]]; then
 fi
 
 if [[ $RUN_LINT -eq 1 ]]; then
-  if command -v cargo >/dev/null 2>&1; then
-    echo "==> Lint (fmt + clippy)"
-    bash scripts/lint/run.sh
-  else
-    echo "(info) cargo not found; skipping lint. Use --no-lint to silence."
-  fi
+  echo "==> Lint (fmt + clippy)"
+  bash scripts/lint/run.sh
 fi
 
 if [[ $PUBLISH_LOCAL -eq 1 ]]; then

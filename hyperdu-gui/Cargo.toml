@@ -45,9 +45,21 @@ priority = "optional"
 depends = "$auto"
 maintainer = "HyperDU Maintainers <maintainers@example.com>"
 extended-description = "Hyper-fast disk usage analyzer GUI."
+# An explicit assets list turns OFF cargo-deb's automatic binary inclusion, so the
+# executable has to be listed here too. Without this line the .deb shipped the
+# README and the licence and no `hyperdu-gui` command at all -- 7480 bytes of
+# documentation, published as v0.5.0-beta.2. hyperdu-cli hit this and was fixed;
+# this manifest was not. Same source path as [package.metadata.generate-rpm]
+# below, for the same reason.
+#
+# The docs land under the package's own name rather than a shared /usr/share/doc/hyperdu/.
+# dpkg refuses to unpack a file another package already owns, so sharing that
+# directory with hyperdu-cli made the two .deb files mutually exclusive. It never
+# surfaced only because this package shipped no binary and nobody installed it.
 assets = [
-  ["../README.md", "/usr/share/doc/hyperdu/README.md", "644"],
-  ["../LICENSE", "/usr/share/doc/hyperdu/LICENSE", "644"],
+  ["../target/release/hyperdu-gui", "/usr/bin/hyperdu-gui", "755"],
+  ["../README.md", "/usr/share/doc/hyperdu-gui/README.md", "644"],
+  ["../LICENSE", "/usr/share/doc/hyperdu-gui/LICENSE", "644"],
 ]
 
 # RPM packaging (cargo-generate-rpm)
@@ -55,10 +67,11 @@ assets = [
 summary = "Hyper-fast disk usage analyzer GUI"
 license = "MIT"
 group = "Applications/System"
-auto-req = true
-requires = []
+# cargo-generate-rpm expects a string policy here. `requires` is intentionally
+# omitted: automatic library dependency discovery supplies the runtime deps.
+auto-req = "auto"
 assets = [
   { source = "../target/release/hyperdu-gui", dest = "/usr/bin/hyperdu-gui", mode = "755" },
-  { source = "../README.md", dest = "/usr/share/doc/hyperdu/README.md", mode = "644" },
-  { source = "../LICENSE", dest = "/usr/share/doc/hyperdu/LICENSE", mode = "644" },
+  { source = "../README.md", dest = "/usr/share/doc/hyperdu-gui/README.md", mode = "644" },
+  { source = "../LICENSE", dest = "/usr/share/doc/hyperdu-gui/LICENSE", mode = "644" },
 ]

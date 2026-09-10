@@ -16,14 +16,23 @@ root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/../.. && pwd)"
 snap_dir="$root_dir/snap"
 mkdir -p "$snap_dir"
 
-# The crate inherits its version from [workspace.package], so the literal is
-# not in hyperdu/Cargo.toml. pkgid prints `<url>#<version>`. This was the
-# one packaging script still hardcoding it, and it drifted to 0.4.0 while the
-# workspace moved on; every sibling already derives it this way.
-VER=$(cd "$root_dir" && cargo pkgid -p hyperdu | sed 's/.*[#@]//')
-if [[ -z "$VER" ]]; then echo "error: could not determine hyperdu version" >&2; exit 1; fi
+# The snap has to be labelled with the version it was built from. A literal here
+# is what stranded the committed snap/snapcraft.yaml at 0.4.0. version-sync:ignore
+# This generator rewrites that file on every release run, so editing the
+# committed copy could never have stuck.
+#
+# Ask cargo instead, like brew.sh and scoop.ps1 do -- the crate inherits
+# `version.workspace = true`, so the literal is not in hyperdu/Cargo.toml.
+# pkgid prints `<url>#<version>`.
+version="$(cargo pkgid -p hyperdu --manifest-path "$root_dir/Cargo.toml" | sed 's/.*[#@]//')"
+if [[ -z "$version" ]]; then
+  echo "error: could not determine hyperdu version from cargo pkgid" >&2
+  exit 1
+fi
 
-cat > "$snap_dir/snapcraft.yaml" <<'YAML'
+# Quoted heredoc plus a single substitution: only __VERSION__ is interpolated,
+# so the rest of the YAML is not at the mercy of shell expansion.
+sed "s/__VERSION__/$version/" > "$snap_dir/snapcraft.yaml" <<'YAML'
 name: hyperdu
 base: core22
 version: '__VERSION__'
@@ -43,16 +52,21 @@ parts:
     plugin: rust
     source: .
     rust-channel: stable
+    # The snap ships the CLI only. Without this the plugin falls back to
+    # `cargo build --workspace --release`, because its default rust-path of "."
+    # makes `cargo read-manifest` fail against a virtual workspace root -- and
+    # that drags in hyperdu-gui, whose GTK build dependencies are not declared
+    # below. With a real package path the plugin runs `cargo install --locked
+    # --path hyperdu --root <install>`, which lands exactly the bin/hyperdu
+    # that `apps` and `prime` expect.
+    rust-path: [hyperdu]
     build-packages: [pkg-config]
     stage-packages: []
     prime:
       - bin/hyperdu
 YAML
 
-sed -i.bak -e "s/__VERSION__/$VER/" "$snap_dir/snapcraft.yaml"
-rm -f "$snap_dir/snapcraft.yaml.bak"
-
-echo "Wrote $snap_dir/snapcraft.yaml (version $VER)"
+echo "Wrote $snap_dir/snapcraft.yaml"
 
 if [[ $gen_only -eq 0 ]]; then
   if command -v snapcraft >/dev/null 2>&1; then
