@@ -16,6 +16,8 @@ default = ["prefetch-advise"]
 mimalloc = ["dep:mimalloc"]
 prof-tracy = ["dep:profiling", "profiling/profile-with-tracy", "dep:tracy-client"]
 prof-puffin = ["dep:profiling", "profiling/profile-with-puffin", "dep:puffin"]
+linux-io-uring = ["dep:io-uring"] # opt-in Linux x86_64 GNU batched statx
+simd-avx512 = []         # optional stable AVX-512 intrinsics require Rust 1.89+
 simd-prefetch = []        # x86_64 prefetch next dirent into cache
 prefetch-advise = []      # posix_fadvise(SEQUENTIAL) hint on directory fd (now default)
 rayon-par = ["dep:rayon"] # experimental: parallelize across roots via rayon
@@ -41,7 +43,8 @@ puffin = { version = "0.19", optional = true }
 rayon = { version = "1.10", optional = true }
 infer = "0.8"
 
-[target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
+[target.'cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))'.dependencies]
+io-uring = { version = "=0.7.15", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
@@ -49,6 +52,7 @@ windows = { version = "0.62", features = [
   "Win32_Storage_FileSystem",
   "Win32_Security",
   "Win32_System_IO",
+  "Win32_System_Ioctl",
   "Win32_System_Threading",
   "Wdk_Foundation",
   "Wdk_Storage_FileSystem",

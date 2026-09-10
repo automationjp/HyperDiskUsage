@@ -31,62 +31,40 @@ pub fn build_statx_mask(_opt: &Options) -> u32 {
     0
 }
 
-/// Safe helpers to read fields from a getdents64 dirent buffer
-#[inline(always)]
-pub unsafe fn dirent_reclen(ptr: *const u8) -> isize {
-    *(ptr.add(16) as *const u16) as isize
+/// A checked view whose name cannot outlive the getdents64 buffer.
+pub(super) struct DirEntry<'a> {
+    pub ino: u64,
+    pub offset: u64,
+    pub kind: u8,
+    pub name: &'a std::ffi::CStr,
+    pub record_len: usize,
 }
 
-#[inline(always)]
-pub unsafe fn dirent_dtype(ptr: *const u8) -> u8 {
-    *ptr.add(18)
-}
-
-/// getdents64: read d_off field (byte offset 8..15)
-#[inline(always)]
-pub unsafe fn dirent_d_off(ptr: *const u8) -> u64 {
-    *(ptr.add(8) as *const i64) as u64
-}
-
-#[inline(always)]
-pub unsafe fn dirent_name_len(ptr: *const u8, reclen: isize) -> usize {
-    let mut name_len = 0usize;
-    while (19 + name_len as isize) < reclen {
-        let c = *ptr.add((19 + name_len as isize) as usize);
-        if c == 0 {
-            break;
-        }
-        name_len += 1;
+/// Validate the entire record before reading fields or passing its name to FFI.
+pub(super) fn decode_dirent(bytes: &[u8]) -> std::io::Result<DirEntry<'_>> {
+    let invalid =
+        || std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid getdents64 record");
+    if bytes.len() < 20 {
+        return Err(invalid());
     }
-    name_len
+    let record_len = u16::from_ne_bytes([bytes[16], bytes[17]]) as usize;
+    if record_len < 20 || record_len > bytes.len() || record_len % 8 != 0 {
+        return Err(invalid());
+    }
+    let field = &bytes[19..record_len];
+    let nul = memchr::memchr(0, field).ok_or_else(invalid)?;
+    if nul == 0 || field[..nul].contains(&b'/') {
+        return Err(invalid());
+    }
+    let name = std::ffi::CStr::from_bytes_with_nul(&field[..=nul]).map_err(|_| invalid())?;
+    Ok(DirEntry {
+        ino: u64::from_ne_bytes(bytes[..8].try_into().map_err(|_| invalid())?),
+        offset: u64::from_ne_bytes(bytes[8..16].try_into().map_err(|_| invalid())?),
+        kind: bytes[18],
+        name,
+        record_len,
+    })
 }
-
-/// Safe slice view over a dirent's name given base pointer and reclen
-#[inline(always)]
-pub unsafe fn dirent_name_slice<'a>(ptr: *const u8, reclen: isize) -> &'a [u8] {
-    let name_len = dirent_name_len(ptr, reclen);
-    let name_ptr = ptr.add(19);
-    std::slice::from_raw_parts(name_ptr, name_len)
-}
-
-/// The dirent's name as a NUL-terminated C string, borrowed from the getdents64
-/// buffer itself.
-///
-/// `d_name` is already NUL-terminated (the kernel pads the record out to
-/// `d_reclen`), so a syscall that wants a `*const c_char` can use this pointer
-/// directly. Copying the name into a `CString` first cost one malloc and one
-/// free per file, and the allocator is the second-largest item in a warm scan
-/// profile after `statx` itself.
-///
-/// # Safety
-/// The pointer is only valid until the next `getdents64` overwrites the buffer,
-/// so it must be consumed within the same iteration. Anything that outlives the
-/// iteration has to copy the bytes.
-#[inline(always)]
-pub unsafe fn dirent_name_ptr(ptr: *const u8) -> *const libc::c_char {
-    ptr.add(19) as *const libc::c_char
-}
-
 /// Perform statx syscall with proper error handling (glibc)
 #[cfg(not(target_env = "musl"))]
 #[inline]
@@ -405,6 +383,42 @@ pub fn packed_dev(dev: libc::dev_t) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dirent_decoder_rejects_truncation_invalid_lengths_and_missing_terminators() {
+        let mut record = [0u8; 32];
+        record[..8].copy_from_slice(&17u64.to_ne_bytes());
+        record[8..16].copy_from_slice(&999u64.to_ne_bytes());
+        record[16..18].copy_from_slice(&32u16.to_ne_bytes());
+        record[18] = libc::DT_REG;
+        record[19..22].copy_from_slice(b"abc");
+        let entry = decode_dirent(&record).unwrap();
+        assert_eq!(
+            (entry.ino, entry.offset, entry.kind),
+            (17, 999, libc::DT_REG)
+        );
+        assert_eq!(entry.name.to_bytes(), b"abc");
+        for end in 0..32 {
+            assert!(decode_dirent(&record[..end]).is_err());
+        }
+        for length in [0u16, 8, 19, 25, 40] {
+            let mut bad = record;
+            bad[16..18].copy_from_slice(&length.to_ne_bytes());
+            assert!(decode_dirent(&bad).is_err());
+        }
+        let mut bad = record;
+        bad[19..].fill(b'x');
+        assert!(decode_dirent(&bad).is_err());
+        bad[19] = 0;
+        assert!(decode_dirent(&bad).is_err());
+        bad = record;
+        bad[20] = b'/';
+        assert!(decode_dirent(&bad).is_err());
+        // Unaligned caller slices are decoded without pointer casts.
+        let mut unaligned = vec![0];
+        unaligned.extend_from_slice(&record);
+        assert_eq!(decode_dirent(&unaligned[1..]).unwrap().ino, 17);
+    }
 
     #[test]
     fn packed_dev_matches_the_statx_encoding() {

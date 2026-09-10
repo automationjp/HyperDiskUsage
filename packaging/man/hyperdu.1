@@ -79,6 +79,15 @@ Unix except macOS: split large directories every N entries.
 .BR --prefetch
 Linux x86_64: enable posix_fadvise/readahead hints.
 .TP
+.BR --xfs-bulk
+Linux x86_64 GNU: request BulkStat for a privileged, complete, stable read-only XFS filesystem.
+Keep its superblock read-only for the entire scan. Other mounts use normal metadata.
+.TP
+.BR --io-uring
+Linux x86_64 GNU, built with linux-io-uring: batch up to 64 statx requests.
+Unavailable support and incomplete metadata use synchronous fallback.
+Cancellation waits for outstanding requests to finish.
+.TP
 .BR --pin-threads
 Linux: pin worker threads to CPUs.
 .TP

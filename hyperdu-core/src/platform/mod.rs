@@ -1,3 +1,6 @@
+#[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+pub use linux_x86_64_impl::xfs_bulk::XfsCache;
+
 use crate::{DirContext, ScanContext, StatMap};
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]

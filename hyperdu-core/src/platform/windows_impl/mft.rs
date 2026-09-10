@@ -351,13 +351,9 @@ pub(crate) fn parse_file_name(value: &[u8]) -> Option<FileName> {
     let ns = *value.get(65)?;
 
     let name_bytes = value.get(66..66 + name_len * 2)?;
-    let units: Vec<u16> = name_bytes
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
-        .collect();
-    // Lossy on purpose: an unpaired surrogate on disk must not cost the whole
-    // record, and the name is only used for display and grouping.
-    let name = String::from_utf16_lossy(&units);
+    // Lossy on purpose: unpaired surrogates retain the existing replacement
+    // behavior; ordinary ASCII names avoid the temporary UTF-16 allocation.
+    let name = crate::simd::decode_utf16le_lossy(name_bytes)?;
 
     Some(FileName {
         parent,

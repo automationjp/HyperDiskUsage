@@ -1,32 +1,49 @@
-//! Exact metadata required by the glibc strict accounting path.
+//! Shared exact metadata decoding for synchronous and batched Linux lookups.
 use std::{ffi::CStr, io};
 
-const REQUIRED: u32 = libc::STATX_TYPE
+#[cfg(not(target_env = "musl"))]
+pub(super) const REQUIRED: u32 = libc::STATX_TYPE
     | libc::STATX_MODE
     | libc::STATX_SIZE
     | libc::STATX_BLOCKS
     | libc::STATX_INO
     | libc::STATX_NLINK;
 
+#[derive(Clone, Copy)]
 pub(super) struct Metadata {
     pub logical: u64,
     pub blocks: u64,
     pub dev: u64,
     pub ino: u64,
     pub nlink: u32,
-    mode: u32,
+    pub mode: u32,
 }
 
 impl Metadata {
+    pub fn is_reg(&self) -> bool {
+        self.mode & libc::S_IFMT == libc::S_IFREG
+    }
+
     pub fn is_dir(&self) -> bool {
         self.mode & libc::S_IFMT == libc::S_IFDIR
     }
 }
 
-pub(super) fn metadata(fd: libc::c_int, name: &CStr, follow_links: bool) -> io::Result<Metadata> {
+#[cfg(not(target_env = "musl"))]
+pub(super) fn metadata(
+    fd: libc::c_int,
+    name: &CStr,
+    follow_links: bool,
+    synchronized: bool,
+) -> io::Result<Metadata> {
     // SAFETY: libc::statx is a C integer-only output structure; zero is valid.
     let mut stx: libc::statx = unsafe { std::mem::zeroed() };
-    let flags = flags(follow_links);
+    let flags = flags(follow_links)
+        | if synchronized {
+            0
+        } else {
+            libc::AT_STATX_DONT_SYNC
+        };
     // Strict accounting requests synchronized metadata and verifies every field
     // it consumes. A successful syscall alone does not guarantee those fields.
     // SAFETY: CStr supplies a live NUL-terminated name, and stx is writable.
@@ -39,7 +56,7 @@ pub(super) fn metadata(fd: libc::c_int, name: &CStr, follow_links: bool) -> io::
     statx_or_fstatat(fd, name, follow_links, result)
 }
 
-fn flags(follow_links: bool) -> libc::c_int {
+pub(super) fn flags(follow_links: bool) -> libc::c_int {
     libc::AT_NO_AUTOMOUNT
         | if follow_links {
             0
@@ -48,7 +65,8 @@ fn flags(follow_links: bool) -> libc::c_int {
         }
 }
 
-fn statx_or_fstatat(
+#[cfg(not(target_env = "musl"))]
+pub(super) fn statx_or_fstatat(
     fd: libc::c_int,
     name: &CStr,
     follow_links: bool,
@@ -66,6 +84,20 @@ fn statx_or_fstatat(
             });
         }
     }
+    fallback(fd, name, follow_links)
+}
+
+#[cfg(target_env = "musl")]
+pub(super) fn metadata(
+    fd: libc::c_int,
+    name: &CStr,
+    follow_links: bool,
+    _synchronized: bool,
+) -> io::Result<Metadata> {
+    fallback(fd, name, follow_links)
+}
+
+fn fallback(fd: libc::c_int, name: &CStr, follow_links: bool) -> io::Result<Metadata> {
     // The fallback must preserve follow policy, inode identity and allocated
     // blocks. Using logical length here would overcount sparse files.
     // SAFETY: libc::stat is a C integer-only output structure; zero is valid.
@@ -84,7 +116,7 @@ fn statx_or_fstatat(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_env = "musl")))]
 mod tests {
     use std::{ffi::CString, fs, os::unix::fs::symlink};
 

@@ -21,3 +21,5 @@ complete -c hyperdu -n '__hyperdu_has_option time-style' -l time-style -d 'Time 
 complete -c hyperdu -l csv -d 'Write CSV' -r
 complete -c hyperdu -l json -d 'Write JSON' -r
 complete -c hyperdu -l progress -d 'Show progress'
+complete -c hyperdu -n '__hyperdu_has_option xfs-bulk' -l xfs-bulk -d 'Use gated XFS bulk metadata'
+complete -c hyperdu -n '__hyperdu_has_option io-uring' -l io-uring -d 'Batch asynchronous Linux metadata'

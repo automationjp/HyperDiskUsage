@@ -84,6 +84,23 @@ fn conditional_options() -> Vec<(&'static [&'static str], bool)> {
             &["--prefetch=false"],
             cfg!(all(target_os = "linux", target_arch = "x86_64")),
         ),
+        (
+            &["--xfs-bulk"],
+            cfg!(all(
+                target_os = "linux",
+                target_arch = "x86_64",
+                target_env = "gnu"
+            )),
+        ),
+        (
+            &["--io-uring"],
+            cfg!(all(
+                target_os = "linux",
+                target_arch = "x86_64",
+                target_env = "gnu",
+                feature = "linux-io-uring"
+            )),
+        ),
         (&["--pin-threads"], cfg!(target_os = "linux")),
         (&["--galb-buf-kb", "64"], cfg!(target_os = "macos")),
         (&["--win-ntquery"], cfg!(all(windows, target_env = "msvc"))),

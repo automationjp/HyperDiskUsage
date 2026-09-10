@@ -86,11 +86,15 @@ pub mod index;
 pub mod memory_pool;
 mod options; // for OptionsBuilder
 mod platform;
+#[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+#[doc(hidden)]
+pub use platform::XfsCache;
 pub mod reclaimable;
 pub mod report;
 mod rollup;
 mod scanner; // FileSystemScanner + platform default
 mod scheduler;
+mod simd;
 /// Capacity of the volume a path sits on -- the other half of "what is using
 /// space", without which a size means nothing.
 pub mod volume;
@@ -300,6 +304,17 @@ pub struct Options {
     /// whole volume, or the parse fails -- the scan falls back to enumeration
     /// rather than returning a partial answer.
     pub use_mft: bool,
+    /// Try XFS BulkStat for a whole, stable read-only XFS filesystem. Linux
+    /// x86_64 GNU only; unavailable metadata always uses the regular backend.
+    /// Keep the filesystem read-only for the complete scan.
+    pub use_xfs_bulk: bool,
+    /// Opt into bounded asynchronous statx. Requires the linux-io-uring feature
+    /// and a supporting Linux x86_64 GNU kernel; otherwise use synchronous I/O.
+    pub use_io_uring: bool,
+    /// Rebuilt for each scan; never trust another scan's retained metadata.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+    #[doc(hidden)]
+    pub xfs_bulk_cache: Option<Arc<XfsCache>>,
 }
 
 impl std::fmt::Debug for Options {
@@ -367,6 +382,10 @@ impl Default for Options {
             win_allow_handle: false,
             win_handle_sample_every: 64,
             use_mft: false,
+            use_xfs_bulk: false,
+            use_io_uring: false,
+            #[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+            xfs_bulk_cache: None,
         }
     }
 }
@@ -1039,6 +1058,20 @@ fn prepare_options(root: &Path, opt: &Options, threads: usize) -> Arc<Options> {
     }
     // Report the worker count that actually runs, not the one that was asked
     // for: the profile may have capped it.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+    {
+        compiled.xfs_bulk_cache = None;
+        if compiled.use_xfs_bulk {
+            match XfsCache::prepare(root, &compiled.cancel) {
+                Ok(Some(cache)) => {
+                    log::debug!("XFS BulkStat cache prepared for {}", root.display());
+                    compiled.xfs_bulk_cache = Some(Arc::new(cache));
+                }
+                Ok(None) => log::debug!("XFS BulkStat unavailable for {}", root.display()),
+                Err(error) => log::warn!("XFS BulkStat fallback for {}: {error}", root.display()),
+            }
+        }
+    }
     compiled.threads = threads;
     Arc::new(compiled)
 }
@@ -1278,7 +1311,7 @@ fn name_contains_patterns_bytes(name: &[u8], patterns: &[String]) -> bool {
         if pb.is_empty() {
             continue;
         }
-        if memchr::memmem::find(name, pb).is_some() {
+        if simd::contains_bytes(name, pb) {
             return true;
         }
     }
@@ -1318,9 +1351,9 @@ pub(crate) fn name_matches(name: &[u8], opt: &Options) -> bool {
 #[cfg(windows)]
 #[inline(always)]
 pub(crate) fn wname_matches(name: &[u16], opt: &Options) -> bool {
-    opt.exclude_contains_w.iter().any(|pat| {
-        !pat.is_empty() && pat.len() <= name.len() && name.windows(pat.len()).any(|w| w == &pat[..])
-    })
+    opt.exclude_contains_w
+        .iter()
+        .any(|pat| simd::contains_wide(name, pat))
 }
 
 #[cfg(test)]

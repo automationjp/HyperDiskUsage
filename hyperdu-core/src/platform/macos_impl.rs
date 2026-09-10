@@ -430,11 +430,17 @@ mod tests {
         opt: &Options,
         read_bulk: impl FnMut(libc::c_int, &mut libc::attrlist, &mut [u8]) -> std::io::Result<usize>,
     ) -> Stat {
+        // The shared progress counter is intentionally idle when progress is
+        // disabled. Enable it because this fixture asserts counter/stat parity.
+        let opt = Options {
+            progress_every: 1,
+            ..opt.clone()
+        };
         let workers = crate::scheduler::Scheduler::make_workers(1);
         let sched = crate::scheduler::Scheduler::new(&workers);
         let total_files = std::sync::atomic::AtomicU64::new(0);
         let ctx = ScanContext {
-            options: opt,
+            options: &opt,
             sched: &sched,
             local: &workers[0],
             total_files: &total_files,

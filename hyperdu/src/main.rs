@@ -251,6 +251,37 @@ struct Args {
     #[cfg_attr(not(all(windows, target_env = "msvc")), arg(skip))]
     mft: bool,
 
+    /// Cache XFS inode metadata (privileged full read-only filesystem; otherwise fall back)
+    #[cfg_attr(
+        all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"),
+        arg(long)
+    )]
+    #[cfg_attr(
+        not(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu")),
+        arg(skip)
+    )]
+    xfs_bulk: bool,
+
+    /// Batch statx through io_uring when supported (otherwise synchronous metadata)
+    #[cfg_attr(
+        all(
+            target_os = "linux",
+            target_arch = "x86_64",
+            target_env = "gnu",
+            feature = "linux-io-uring"
+        ),
+        arg(long)
+    )]
+    #[cfg_attr(
+        not(all(
+            target_os = "linux",
+            target_arch = "x86_64",
+            target_env = "gnu",
+            feature = "linux-io-uring"
+        )),
+        arg(skip)
+    )]
+    io_uring: bool,
     /// Worker count (default: available CPUs * 4, clamped to 4..=32)
     #[arg(
         long,
@@ -772,6 +803,8 @@ fn main() -> Result<()> {
         );
     }
     opt.use_mft = args.mft;
+    opt.use_xfs_bulk = args.xfs_bulk;
+    opt.use_io_uring = args.io_uring;
     opt.one_file_system = args.one_file_system;
     if args.follow_links && !matches!(opt.compat_mode, hyperdu_core::CompatMode::HyperDU) {
         opt.visited_bloom = Some(std::sync::Arc::new(hyperdu_core::Bloom::with_bits(1 << 20)));
