@@ -187,3 +187,225 @@ fn nothing_is_excluded_by_default() {
     assert_eq!(s.files, 1, "'.git' matches '.github' too, by substring");
     assert_eq!(s.logical, 25);
 }
+
+/// Run each backend in a separate process: environment overrides must not race
+/// other tests, and native CI must exercise GALB rather than silently falling back.
+#[cfg(target_os = "macos")]
+mod macos_bulk {
+    use std::{
+        os::unix::fs::{symlink, MetadataExt},
+        process::Command,
+        sync::{atomic::Ordering, Arc, Mutex},
+    };
+
+    use super::*;
+
+    #[test]
+    fn bulk_and_portable_backends_agree_on_native_filesystem() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("scan");
+        fs::create_dir_all(root.join("nested/deep")).unwrap();
+        for i in 0..160 {
+            write_bytes(
+                &root.join(format!("file-{i:03}-{}", "long-name-".repeat(8))),
+                i + 1,
+            );
+        }
+        // Neither backend may classify special files as regular files.
+        let fifo = std::ffi::CString::new(std::os::unix::ffi::OsStrExt::as_bytes(
+            root.join("fifo").as_os_str(),
+        ))
+        .unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        let _listener = std::os::unix::net::UnixListener::bind(root.join("socket")).unwrap();
+        let original = root.join(format!("file-000-{}", "long-name-".repeat(8)));
+        fs::hard_link(&original, root.join("hardlink")).unwrap();
+        // TOTALSIZE would incorrectly include this resource fork in logical bytes.
+        write_bytes(&original.join("..namedfork/rsrc"), 8192);
+        fs::File::create(root.join("sparse"))
+            .unwrap()
+            .set_len(8 * 1024 * 1024)
+            .unwrap();
+        write_bytes(&root.join("nested/data"), 17);
+        write_bytes(&root.join("nested/deep/data"), 19);
+        write_bytes(&tmp.path().join("external-file"), 7);
+        fs::create_dir(tmp.path().join("external-dir")).unwrap();
+        write_bytes(&tmp.path().join("external-dir/data"), 11);
+        symlink(tmp.path().join("external-file"), root.join("file-link")).unwrap();
+        symlink(tmp.path().join("external-dir"), root.join("dir-link")).unwrap();
+        symlink(&root, tmp.path().join("external-dir/cycle")).unwrap();
+
+        let mut results = Vec::new();
+        for mode in ["1", "0"] {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "macos_bulk::subprocess_fixture", "--nocapture"])
+                .env("HYPERDU_MAC_TEST_ROOT", &root)
+                .env("HYPERDU_MAC_USE_GALB", mode)
+                .env("HYPERDU_GALB_BUF_KB", "4")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success(),
+                "mode={mode}\n{stdout}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let summary: Vec<_> = stdout
+                .lines()
+                .filter(|line| line.starts_with("MAC_RESULT "))
+                .map(str::to_owned)
+                .collect();
+            assert_eq!(summary.len(), 6, "missing child results: {stdout}");
+            results.push(summary);
+        }
+        assert_eq!(results[0], results[1]);
+    }
+
+    #[test]
+    fn followed_broken_link_reports_the_entry_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        symlink(tmp.path().join("absent"), tmp.path().join("broken")).unwrap();
+        let mut opt = quiet_opts();
+        opt.follow_links = true;
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let captured = reports.clone();
+        opt.error_report = Some(Arc::new(move |message| {
+            captured.lock().unwrap().push(message.to_owned())
+        }));
+        let s = stat_of(&scan_directory(tmp.path(), &opt).unwrap(), tmp.path());
+        assert_eq!(s.files, 0);
+        assert!(opt.error_count.load(Ordering::Relaxed) > 0);
+        assert!(reports
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|message| message.contains("broken")));
+    }
+    #[test]
+    fn subprocess_fixture() {
+        let Some(root) = std::env::var_os("HYPERDU_MAC_TEST_ROOT") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let expected_logical = (1..=160).sum::<u64>() + 8 * 1024 * 1024 + 17 + 19;
+        let mut expected_physical = 0;
+        for item in fs::read_dir(&root).unwrap() {
+            let item = item.unwrap();
+            let name = item.file_name();
+            if name.to_string_lossy().starts_with("file-0")
+                || name.to_string_lossy().starts_with("file-1")
+                || name == "sparse"
+            {
+                expected_physical += fs::symlink_metadata(item.path()).unwrap().blocks() * 512;
+            }
+        }
+        expected_physical += fs::metadata(root.join("nested/data")).unwrap().blocks() * 512;
+        expected_physical += fs::metadata(root.join("nested/deep/data"))
+            .unwrap()
+            .blocks()
+            * 512;
+        let original = root.join(format!("file-000-{}", "long-name-".repeat(8)));
+        let expected_file = hyperdu_core::file_stat(&original, &quiet_opts()).unwrap();
+        assert_eq!(expected_file.logical, 1);
+        assert!(
+            fs::metadata(original.join("..namedfork/rsrc"))
+                .unwrap()
+                .len()
+                > expected_file.logical
+        );
+        for scenario in 0..6 {
+            let mut opt = quiet_opts();
+            opt.threads = 1;
+            match scenario {
+                1 => opt.compute_physical = false,
+                2 => opt.count_hardlinks = true,
+                3 => {
+                    opt.follow_links = true;
+                    opt.one_file_system = true;
+                }
+                4 => {
+                    opt.exclude_contains = vec!["nested/".into()];
+                    opt.min_file_size = 100;
+                }
+                5 => opt.max_depth = 1,
+                _ => {}
+            }
+            let samples = Arc::new(Mutex::new(Vec::new()));
+            let captured = samples.clone();
+            opt.progress_every = 1;
+            opt.progress_sample_callback = Some(Arc::new(move |sample| {
+                captured.lock().unwrap().push((
+                    sample.path.to_path_buf(),
+                    sample.logical,
+                    sample.physical,
+                ));
+            }));
+            let s = stat_of(&scan_directory(&root, &opt).unwrap(), &root);
+            assert_eq!(
+                opt.error_count.load(Ordering::Relaxed),
+                0,
+                "backend must not hide a bulk error"
+            );
+            if scenario == 0 {
+                assert_eq!(
+                    (s.logical, s.physical, s.files),
+                    (expected_logical, expected_physical, 163)
+                );
+            } else if scenario == 1 {
+                assert_eq!(
+                    (s.logical, s.physical),
+                    (expected_logical, expected_logical)
+                );
+            } else if scenario == 2 {
+                assert_eq!((s.logical, s.files), (expected_logical + 1, 164));
+            } else if scenario == 3 {
+                assert_eq!(
+                    (s.logical, s.files),
+                    (expected_logical + 18, 165),
+                    "follow target sizes, traverse a directory link once and terminate its cycle"
+                );
+            } else if scenario == 4 {
+                assert_eq!(
+                    (s.logical, s.files),
+                    ((100..=160).sum::<u64>() + 8 * 1024 * 1024, 62)
+                );
+            }
+            if scenario == 5 {
+                assert_eq!((s.logical, s.files), (expected_logical - 19, 162));
+            }
+            let samples = samples.lock().unwrap();
+            assert!(!samples.is_empty());
+            for (path, logical, physical) in samples.iter() {
+                let md = fs::metadata(path).unwrap();
+                assert_eq!(*logical, md.len());
+                assert_eq!(
+                    *physical,
+                    if opt.compute_physical {
+                        md.blocks() * 512
+                    } else {
+                        md.len()
+                    }
+                );
+            }
+            println!(
+                "MAC_RESULT {scenario} {} {} {}",
+                s.logical, s.physical, s.files
+            );
+        }
+
+        // One small GALB batch must observe cancellation before consuming this
+        // directory. The fallback reports one file per batch, also bounded.
+        let mut opt = quiet_opts();
+        opt.threads = 1;
+        opt.progress_every = 1;
+        let cancel = opt.cancel.clone();
+        opt.progress_callback = Some(Arc::new(move |_| cancel.store(true, Ordering::Relaxed)));
+        let s = stat_of(&scan_directory(&root, &opt).unwrap(), &root);
+        assert!(opt.cancel.load(Ordering::Relaxed));
+        assert!(
+            s.files > 0 && s.files < 163,
+            "cancellation ignored within directory: {}",
+            s.files
+        );
+    }
+}
