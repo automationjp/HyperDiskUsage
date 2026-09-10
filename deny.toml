@@ -10,18 +10,12 @@
 # Report unmaintained crates anywhere in the graph, not just direct dependencies.
 unmaintained = "all"
 yanked = "warn"
-# Advisories were previously configured as "warn", which the current schema no
-# longer offers: every advisory now fails the check. The entries below are the
-# ones outstanding when this file was migrated. They all come from the GUI's
-# dependency tree and need an upstream release (egui / eframe / zbus), so they
-# are listed explicitly rather than left to block every push. Anything new still
-# fails, which is the point of the check. Re-check this list when egui updates.
+# The remaining GUI font-parser notice is unmaintained, not a known vulnerability.
+# egui 0.32 -> epaint -> ab_glyph -> owned_ttf_parser still requires this crate.
+# No patched ttf-parser release exists. Reassess when upgrading the GUI stack;
+# replacing that stack is a separate compatibility change, not an ignored DoS.
 ignore = [
-  "RUSTSEC-2025-0057", # fxhash unmaintained (egui)
-  "RUSTSEC-2024-0384", # instant unmaintained (egui, parking_lot 0.11)
-  "RUSTSEC-2026-0192", # ttf-parser unmaintained (egui)
-  "RUSTSEC-2026-0194", # quick-xml quadratic attribute check (ashpd/zbus, Linux GUI)
-  "RUSTSEC-2026-0195", # quick-xml namespace allocation DoS (ashpd/zbus, Linux GUI)
+  "RUSTSEC-2026-0192", # ttf-parser 0.25.1; review date 2026-09-10
 ]
 
 [bans]

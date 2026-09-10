@@ -110,7 +110,7 @@ if ! cargo metadata --locked --no-deps --format-version 1 >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! VER=$(cargo pkgid -p hyperdu-cli --manifest-path Cargo.toml 2>/dev/null | sed 's/.*[#@]//'); then
+if ! VER=$(cargo pkgid -p hyperdu --manifest-path Cargo.toml 2>/dev/null | sed 's/.*[#@]//'); then
   echo "error: could not determine the workspace version from cargo pkgid." >&2
   exit 1
 fi

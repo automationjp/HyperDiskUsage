@@ -90,15 +90,7 @@ pub fn auto_parallel_scan(
         return parallel_scan(roots, opt);
     }
     if matches!(opt.heuristics_mode, InnerOnly) || n_roots == 1 {
-        // Single root: rely on inner parallelism (manual threads or rayon-inner if enabled)
-        #[cfg(feature = "rayon-inner")]
-        {
-            return crate::scan_directory_rayon(&roots[0], opt);
-        }
-        #[cfg(not(feature = "rayon-inner"))]
-        {
-            return crate::scan_directory(&roots[0], opt);
-        }
+        return scan_roots_sequentially(roots, opt);
     }
     // Initial probe: estimate top-level width for a few roots (fast read_dir)
     let mut total_width: usize = 0;
@@ -117,25 +109,16 @@ pub fn auto_parallel_scan(
             return parallel_scan(roots, opt);
         }
     }
-    // If width is high, prefer inner parallelism
-    if avg_width >= 4096 {
-        let mut acc: ahash::AHashMap<std::path::PathBuf, crate::Stat> = ahash::AHashMap::default();
-        for r in roots {
-            #[cfg(feature = "rayon-inner")]
-            let map = crate::scan_directory_rayon(&r, opt)?;
-            #[cfg(not(feature = "rayon-inner"))]
-            let map = crate::scan_directory(&r, opt)?;
-            for (k, v) in map {
-                let e = acc.entry(k).or_default();
-                e.logical += v.logical;
-                e.physical += v.physical;
-                e.files += v.files;
-            }
-        }
-        return Ok(acc);
-    }
-    // Else fall back to sequential outer scans using full inner threads
-    // Otherwise run sequential outer, full inner threads
+    // Narrow trees without enough roots and wide trees both use full inner
+    // parallelism, but every requested root must still be scanned.
+    scan_roots_sequentially(roots, opt)
+}
+
+#[cfg(feature = "rayon-par")]
+fn scan_roots_sequentially(
+    roots: Vec<std::path::PathBuf>,
+    opt: &crate::Options,
+) -> anyhow::Result<crate::StatMap> {
     let mut acc: ahash::AHashMap<std::path::PathBuf, crate::Stat> = ahash::AHashMap::default();
     for r in roots {
         #[cfg(feature = "rayon-inner")]
@@ -453,5 +436,27 @@ mod tests {
         let s_root = map.get(&root).copied().unwrap_or_default();
         assert_eq!(s_root.files, 1);
         assert_eq!(s_root.logical, 5);
+    }
+    #[cfg(feature = "rayon-par")]
+    #[test]
+    fn inner_only_scans_every_requested_root() {
+        let fixture = tempfile::tempdir().unwrap();
+        let roots: Vec<_> = ["first", "second"]
+            .iter()
+            .map(|name| fixture.path().join(name))
+            .collect();
+        for root in &roots {
+            std::fs::create_dir(root).unwrap();
+            std::fs::write(root.join("data"), b"payload").unwrap();
+        }
+        let opt = Options {
+            heuristics_mode: crate::HeuristicsMode::InnerOnly,
+            threads: 2,
+            ..Options::default()
+        };
+        let result = auto_parallel_scan(roots.clone(), &opt).unwrap();
+        for root in roots {
+            assert_eq!(result.get(&root).map(|stat| stat.logical), Some(7));
+        }
     }
 }

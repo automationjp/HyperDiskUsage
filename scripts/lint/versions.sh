@@ -27,7 +27,7 @@ esac
 # Match the complete version token, including repeated '-' components and '+'
 # build metadata. '.' and '~' are also accepted because Debian/RPM package
 # filenames use those spellings for the same prerelease.
-pattern='[0-9]+\.[0-9]+\.[0-9]+([-~.+][0-9A-Za-z][0-9A-Za-z.~+-]*)?'
+pattern='[0-9]+\.[0-9]+\.[0-9]+([-~.+][0-9A-Za-z-]+([.~+][0-9A-Za-z-]+)*)?'
 
 normalize_package_tokens() {
     local text="$1" expected="$2"
@@ -50,7 +50,7 @@ normalize_package_tokens() {
 }
 
 self_test() {
-    local expected='0.6.0-alpha-beta+build.1'
+    local expected='0.6.0-alpha--beta-+build.1'
     local got
     got="$(printf '%s\n' "$expected" | grep -oE "$pattern")"
     if [ "$got" != "$expected" ]; then
@@ -58,10 +58,22 @@ self_test() {
         return 1
     fi
 
+    expected='0.6.0'
+    got="$(printf '%s\n' "$expected" | grep -oE "$pattern")"
+    if [ "$got" != "$expected" ]; then
+        echo "self-test: stable version changed: '$got'" >&2
+        return 1
+    fi
     expected='0.6.0+build.1'
     got="$(printf '%s\n' "$expected" | grep -oE "$pattern")"
     if [ "$got" != "$expected" ]; then
         echo "self-test: release build metadata truncated: '$got'" >&2
+        return 1
+    fi
+    expected='0.6.0-beta.3'
+    got="$(printf '%s.\n' "$expected" | grep -oE "$pattern")"
+    if [ "$got" != "$expected" ]; then
+        echo "self-test: sentence punctuation became part of version: '$got'" >&2
         return 1
     fi
     expected='0.6.0-alpha-beta'
@@ -96,7 +108,7 @@ if ! cargo metadata --locked --no-deps --format-version 1 >/dev/null 2>&1; then
     exit 1
 fi
 
-workspace_version="$(cargo pkgid -p hyperdu-cli --manifest-path Cargo.toml 2>/dev/null | sed 's/.*[#@]//')"
+workspace_version="$(cargo pkgid -p hyperdu --manifest-path Cargo.toml 2>/dev/null | sed 's/.*[#@]//')"
 if [ -z "$workspace_version" ]; then
     echo "error: could not determine the workspace version from cargo pkgid" >&2
     exit 1
@@ -125,7 +137,7 @@ fi
 
 THIRD_PARTY=(
     "README.md|uutils|0.8.0"
-    "hyperdu-cli/README.md|uutils|0.8.0"
+    "hyperdu/README.md|uutils|0.8.0"
     "plugin/plugin.json|agent-plugins.org|1.0.0"
     "scripts/package/winget.ps1|ManifestVersion|1.12.0"
     "scripts/package/winget.ps1|MinimumOSVersion|10.0.17763.0"
@@ -137,16 +149,17 @@ WORKSPACE_FILES=(
     scripts/package/snap.sh
     scripts/package/winget.ps1
     snap/snapcraft.yaml
-)
-
-RELEASE_FILES=(
-    README.md
-    bucket/hyperdu.json
-    hyperdu-cli/README.md
-    hyperdu-gui/README.md
-    hyperdu-mcp/README.md
+    README.md README.en.md README.zh-CN.md
+    hyperdu/README.md hyperdu/README.en.md hyperdu/README.zh-CN.md
+    hyperdu-gui/README.md hyperdu-gui/README.en.md hyperdu-gui/README.zh-CN.md
+    plugin/README.md plugin/README.en.md plugin/README.zh-CN.md
     site/_config.yml
 )
+
+# Current documentation explicitly describes the pending workspace release.
+# The bucket instead advertises assets already published and must not be bumped
+# until those assets exist.
+RELEASE_FILES=(bucket/hyperdu.json)
 
 fail=0
 unfixable=0
@@ -207,7 +220,7 @@ check_file() {
 
 self_test || exit 1
 
-echo "  workspace $workspace_version (cargo pkgid -p hyperdu-cli)"
+echo "  workspace $workspace_version (cargo pkgid -p hyperdu)"
 echo "  released  $released_version (bucket/hyperdu.json)"
 for target in "${WORKSPACE_FILES[@]}"; do
     check_file "$target" "$workspace_version" workspace

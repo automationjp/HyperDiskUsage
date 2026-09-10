@@ -1,213 +1,46 @@
 #!/bin/sh
-# Install the HyperDU binaries this skill needs, and register the MCP server.
-#
-# This builds from source with `cargo`, so a Rust toolchain is required. That is
-# worth stating plainly rather than leaving someone to discover it after a failed
-# `apt install`.
-#
-# Release archives currently cover the CLI/GUI, not the hyperdu-mcp binary. Both
-# crates are published, but this script deliberately uses Cargo for the two
-# binaries it needs rather than guessing and mixing installation sources.
-#
-# Registering an MCP server rewrites an agent's configuration, so this prints
-# the command by default and only runs it when asked with --register. Installing
-# a binary is reversible with `cargo uninstall`; silently editing someone's
-# agent config is the kind of surprise that makes a setup script untrustworthy.
-#
-#   ./setup-hyperdu.sh              install what is missing, print how to register
-#   ./setup-hyperdu.sh --check      report status, change nothing
-#   ./setup-hyperdu.sh --register   install, then register with detected clients
-
+# Install unified HyperDU (CLI + MCP). --check is read-only; --register opts in
+# to changing detected MCP client configuration. Requires Rust 1.88+ to build.
 set -eu
-
-REPO_URL="https://github.com/automationjp/HyperDiskUsage"
-# The crate is `hyperdu-cli`; the command it installs is `hyperdu`, declared
-# by a [[bin]] section. That matches what the deb and rpm packages install.
-#
-# The two names have to be tracked separately. We look for `hyperdu` on PATH, but
-# cargo only understands `hyperdu-cli` -- passing it the command name made every
-# install fail: `--path <root>/hyperdu` points at a directory that does not exist,
-# and `--git <url> hyperdu` reports `could not find hyperdu`. Nothing in this
-# workspace is called `hyperdu`, so the script could never install the CLI at all.
-CLI_BIN="hyperdu"
-CLI_CRATE="hyperdu-cli"
-MCP_BIN="hyperdu-mcp"
-MCP_CRATE="hyperdu-mcp"
-MCP_NAME="hyperdu"
-
-crate_for() {
-    case "$1" in
-        "$CLI_BIN") printf '%s' "$CLI_CRATE" ;;
-        "$MCP_BIN") printf '%s' "$MCP_CRATE" ;;
-        *)
-            echo "internal error: no crate known for binary '$1'" >&2
-            return 1
-            ;;
-    esac
-}
-
-MODE="install"
-
+# Audited source revision; update together with the PowerShell installer.
+source_rev="5f36fca6f955c727e4ffa2dbd7d4784568f2690c"
+mode=install
 for arg in "$@"; do
     case "$arg" in
-        --check) MODE="check" ;;
-        --register) MODE="register" ;;
-        -h | --help)
-            # The whole header block, however long it happens to be. The fixed
-            # line range this replaces dropped the three usage lines silently
-            # the moment the comment above it grew by a paragraph.
-            awk 'NR > 1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0"
-            exit 0
-            ;;
-        *)
-            echo "unknown option: $arg" >&2
-            echo "try --help" >&2
-            exit 2
-            ;;
+        --check) mode=check ;;
+        --register) mode=register ;;
+        -h|--help) echo 'Usage: setup-hyperdu.sh [--check|--register]'; exit 0 ;;
+        *) echo "Unknown option: $arg" >&2; exit 2 ;;
     esac
 done
-
-have() { command -v "$1" >/dev/null 2>&1; }
-
-# Resolve the repository root when this script is run from inside a checkout, so
-# a contributor testing local changes installs those rather than whatever is on
-# the default branch. Layout: <root>/plugin/skills/<skill>/scripts/<this file>.
-repo_root() {
-    script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-    candidate=$(CDPATH= cd -- "$script_dir/../../../.." 2>/dev/null && pwd) || return 1
-    [ -f "$candidate/Cargo.toml" ] || return 1
-    grep -q 'hyperdu-core' "$candidate/Cargo.toml" || return 1
-    printf '%s' "$candidate"
+have_unified() {
+    command -v hyperdu >/dev/null 2>&1 || return 1
+    help_text=$(hyperdu mcp --help 2>/dev/null) || return 1
+    printf '%s\n' "$help_text" | grep -Eq 'Usage: hyperdu(\.exe)? mcp'
 }
-
-report() {
-    for bin in "$CLI_BIN" "$MCP_BIN"; do
-        if have "$bin"; then
-            echo "  present: $bin ($(command -v "$bin"))"
-        else
-            echo "  MISSING: $bin"
-        fi
-    done
-}
-
-echo "HyperDU setup"
-echo
-echo "Binaries:"
-report
-echo
-
-if [ "$MODE" = "check" ]; then
-    if have "$CLI_BIN" && have "$MCP_BIN"; then
-        exit 0
-    fi
-    echo "Run this script without --check to install what is missing."
+if [ "$mode" = check ]; then
+    if have_unified; then echo 'Ready: hyperdu (CLI + MCP)'; exit 0; fi
+    echo 'Missing unified hyperdu. Run this script without --check to install.'
     exit 1
 fi
-
-missing=""
-have "$CLI_BIN" || missing="$missing $CLI_BIN"
-have "$MCP_BIN" || missing="$missing $MCP_BIN"
-
-if [ -n "$missing" ]; then
-    if ! have cargo; then
-        cat >&2 <<EOF
-error: cargo not found, and this setup needs both hyperdu and hyperdu-mcp.
-
-Install a Rust toolchain first:
-  https://rustup.rs
-
-Then run this script again.
-
-The release archives contain the CLI/GUI but do not currently contain a
-hyperdu-mcp binary. If you provision both required binaries yourself, re-run
-with --check. CLI archives are listed here:
-  $REPO_URL/releases
-EOF
-        exit 1
-    fi
-
-    if root=$(repo_root); then
-        echo "Installing from this checkout: $root"
-        from_checkout=1
+if ! have_unified; then
+    command -v cargo >/dev/null 2>&1 || { echo 'Install Rust 1.88+ from https://rustup.rs' >&2; exit 1; }
+    script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+    source_root=$(CDPATH= cd -- "$script_dir/../../../.." && pwd)
+    if [ -f "$source_root/hyperdu/Cargo.toml" ]; then
+        cargo install --locked --force --path "$source_root/hyperdu"
     else
-        echo "Installing from $REPO_URL"
-        from_checkout=0
+        cargo install --locked --force --git https://github.com/automationjp/HyperDiskUsage --rev "$source_rev" hyperdu
     fi
-
-    for bin in $missing; do
-        crate=$(crate_for "$bin")
-        echo
-        if [ "$from_checkout" -eq 1 ]; then
-            echo "==> cargo install --path $root/$crate"
-            cargo install --path "$root/$crate"
-        else
-            echo "==> cargo install --git $REPO_URL $crate"
-            cargo install --git "$REPO_URL" "$crate"
-        fi
-    done
-
-    echo
-    echo "Binaries after install:"
-    report
-    echo
-
-    # cargo installs into ~/.cargo/bin, which a shell started before the
-    # toolchain existed may not have on PATH. Without this note the next step
-    # fails for a reason that looks like the install itself did not work.
-    if ! have "$CLI_BIN" || ! have "$MCP_BIN"; then
-        cat >&2 <<'EOF'
-warning: cargo finished but the binaries are not on PATH.
-They are in ~/.cargo/bin. Add it to PATH, for example:
-
-  export PATH="$HOME/.cargo/bin:$PATH"
-
-EOF
-    fi
+    PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+    export PATH
+    have_unified || { echo 'Installed command unavailable or missing MCP; check PATH.' >&2; exit 1; }
 fi
-
-# --- MCP registration -------------------------------------------------------
-#
-# Installing the server binary is not enough: a client only sees it once it has
-# been registered.
-
-echo "MCP server registration:"
-
-found_client=0
-
-register_with() {
-    client=$1
-    shift
-    have "$client" || return 0
-    found_client=1
-    if [ "$MODE" = "register" ]; then
-        echo "  ==> $*"
-        if "$@"; then
-            echo "  registered with $client"
-        else
-            echo "  WARNING: $client registration failed; run the command above by hand" >&2
-        fi
-    else
-        echo "  $client detected. To register:"
-        echo "    $*"
-    fi
-}
-
-register_with claude claude mcp add --transport stdio "$MCP_NAME" -- "$MCP_BIN"
-register_with codex codex mcp add "$MCP_NAME" -- "$MCP_BIN"
-
-if [ "$found_client" -eq 0 ]; then
-    cat <<EOF
-  No claude or codex CLI found on PATH.
-
-  For any other MCP client, add a stdio server that runs:
-    $MCP_BIN
-
-  The bundled plugin/mcp.json already declares exactly that.
-EOF
-elif [ "$MODE" != "register" ]; then
-    echo
-    echo "Re-run with --register to have this script issue those commands."
+echo 'Ready: hyperdu (CLI + MCP)'
+echo 'claude mcp add --transport stdio hyperdu -- hyperdu mcp'
+echo 'codex mcp add hyperdu -- hyperdu mcp'
+if [ "$mode" = register ]; then
+    if command -v claude >/dev/null 2>&1; then claude mcp add --transport stdio hyperdu -- hyperdu mcp; fi
+    if command -v codex >/dev/null 2>&1; then codex mcp add hyperdu -- hyperdu mcp; fi
 fi
-
-echo
-echo "Done."
+echo 'Other MCP clients: command="hyperdu", args=["mcp"].'

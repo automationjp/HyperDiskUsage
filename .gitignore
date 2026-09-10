@@ -50,3 +50,7 @@ coverage/
 .btrfs-probe/
 project_memory/
 .specstory/
+
+# Python benchmark bytecode
+__pycache__/
+*.pyc

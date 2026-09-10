@@ -52,6 +52,11 @@ Flags:
   --rpm            Build .rpm packages for host (cargo-generate-rpm)
   --url-base URL   Base URL for release assets (for local manifest URL/SHA insertion)
 
+AppImage configuration (required for linux-appimage):
+  LINUXDEPLOY and APPIMAGETOOL: absolute paths to reviewed local tools.
+  LINUXDEPLOY_SHA256 and APPIMAGETOOL_SHA256: independently reviewed SHA256 values.
+  No automatic download or unchecked PATH fallback is used.
+
 Examples:
   bash scripts/package/release.sh --cpu-flavors "generic,native"
   bash scripts/package/release.sh --targets "linux-musl,windows-gnu" --skip-gui --verbose
@@ -126,22 +131,7 @@ ensure_tool zip
 command -v jq >/dev/null || echo "warning: jq still missing; falling back to sed parser"
 command -v zip >/dev/null || { echo "error: zip not found; please install zip"; exit 1; }
 
-# Ensure AppImage tools (download to ~/.local/bin if missing)
-ensure_appimage_tools() {
-  local bindir="$HOME/.local/bin"
-  mkdir -p "$bindir"
-  if ! command -v linuxdeploy >/dev/null 2>&1; then
-    echo "==> Installing linuxdeploy AppImage"
-    curl -L -o "$bindir/linuxdeploy" https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage || true
-    chmod +x "$bindir/linuxdeploy" || true
-  fi
-  if ! command -v appimagetool >/dev/null 2>&1; then
-    echo "==> Installing appimagetool AppImage"
-    curl -L -o "$bindir/appimagetool" https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage || true
-    chmod +x "$bindir/appimagetool" || true
-  fi
-  export PATH="$bindir:$PATH"
-}
+# AppImage verification is enforced by appimage.sh for every entry point.
 
 # Ensure Snapcraft
 ensure_snapcraft() {
@@ -174,8 +164,8 @@ ensure_flatpak_builder() {
 # version literal finds nothing. pkgid prints `<url>#<version>`.
 cli_version() {
   local v
-  v=$(cargo pkgid -p hyperdu-cli --manifest-path "$root_dir/Cargo.toml" | sed 's/.*[#@]//')
-  if [[ -z "$v" ]]; then echo "error: could not determine hyperdu-cli version" >&2; return 1; fi
+  v=$(cargo pkgid -p hyperdu --manifest-path "$root_dir/Cargo.toml" | sed 's/.*[#@]//')
+  if [[ -z "$v" ]]; then echo "error: could not determine hyperdu version" >&2; return 1; fi
   printf '%s' "$v"
 }
 ensure_brew() { command -v brew >/dev/null 2>&1; }
@@ -341,26 +331,26 @@ gui_bin=""
 for flavor in "${cpu_flavors[@]}"; do
   rustflags=""; suffix="generic"
   if [[ "$flavor" == "native" ]]; then rustflags="-C target-cpu=native"; suffix="native"; fi
-  echo "==> Building hyperdu-cli (release) [$suffix]"
-  cli_bin="$(build_and_capture hyperdu-cli "$rustflags")"
+  echo "==> Building hyperdu (release) [$suffix]"
+  cli_bin="$(build_and_capture hyperdu "$rustflags")"
   echo "  cli: $cli_bin"
   # Also copy raw CLI binary to dist for direct run
-  raw_cli_name="hyperdu-cli-${os_tag}-${arch}-${suffix}"
+  raw_cli_name="hyperdu-${os_tag}-${arch}-${suffix}"
   if [[ "$os_tag" == "windows" ]]; then raw_cli_name+=".exe"; fi
   cp "$cli_bin" "$dist_dir/$raw_cli_name" && chmod +x "$dist_dir/$raw_cli_name" || true
 
   if [[ $skip_gui -eq 0 ]]; then
     echo "==> Building hyperdu-gui (release) [$suffix]"
-    gui_bin="$(build_and_capture hyperdu-gui "$rustflags" || true)"
+    gui_bin="$(build_and_capture hyperdu-gui "$rustflags")"
     if [[ -n "$gui_bin" && -f "$gui_bin" ]]; then
       echo "  gui: $gui_bin"
     else
-      echo "  gui: not built (skipping GUI package)"
+      echo "error: required GUI binary missing" >&2; exit 1
     fi
   fi
 
   # Normalize names
-  cli_name="hyperdu-cli-${os_tag}-${arch}-${suffix}.zip"
+  cli_name="hyperdu-${os_tag}-${arch}-${suffix}.zip"
   gui_name="hyperdu-gui-${os_tag}-${arch}-${suffix}.zip"
 
   if [[ $raw_only -eq 0 && $no_zip -eq 0 ]]; then
@@ -373,20 +363,30 @@ for flavor in "${cpu_flavors[@]}"; do
   fi
   # On Windows hosts, also drop a plain .exe for easy run
   if [[ "$os_tag" == "windows" ]]; then
-    cp "$cli_bin" "$dist_dir/hyperdu-cli-${os_tag}-${arch}-${suffix}.exe"
+    cp "$cli_bin" "$dist_dir/hyperdu-${os_tag}-${arch}-${suffix}.exe"
+  fi
+
+  # The package manifests intentionally use ../target/release paths.
+  # Stage the exact captured binaries there even when Cargo builds on ext4.
+  if [[ $build_deb -eq 1 || $build_rpm -eq 1 ]]; then
+    mkdir -p "$root_dir/target/release"
+    [[ "$cli_bin" -ef "$root_dir/target/release/hyperdu" ]] || cp "$cli_bin" "$root_dir/target/release/hyperdu"
+    if [[ $skip_gui -eq 0 ]]; then
+      [[ "$gui_bin" -ef "$root_dir/target/release/hyperdu-gui" ]] || cp "$gui_bin" "$root_dir/target/release/hyperdu-gui"
+    fi
   fi
 
   # Optional: host .deb / .rpm
   if [[ $build_deb -eq 1 ]]; then
     echo "==> Building .deb package (cargo-deb)"
     cargo install cargo-deb >/dev/null 2>&1 || true
-    cargo deb -p hyperdu-cli --no-build --target-dir target >/dev/null 2>&1 || cargo deb -p hyperdu-cli
-    deb_path=$(ls -1 target/debian/*hyperdu-cli*.deb 2>/dev/null | tail -n1 || true)
+    cargo deb -p hyperdu --no-build --target-dir "$root_dir/target" >/dev/null 2>&1 || cargo deb -p hyperdu
+    deb_path=$(ls -1 target/debian/hyperdu_*.deb 2>/dev/null | tail -n1 || true)
     if [[ -n "$deb_path" && -f "$deb_path" ]]; then
       cp "$deb_path" "$dist_dir/" || true
     fi
     if [[ $skip_gui -eq 0 ]]; then
-      cargo deb -p hyperdu-gui --no-build --target-dir target >/dev/null 2>&1 || cargo deb -p hyperdu-gui
+      cargo deb -p hyperdu-gui --no-build --target-dir "$root_dir/target" >/dev/null 2>&1 || cargo deb -p hyperdu-gui
       deb_path_gui=$(ls -1 target/debian/*hyperdu-gui*.deb 2>/dev/null | tail -n1 || true)
       if [[ -n "$deb_path_gui" && -f "$deb_path_gui" ]]; then
         cp "$deb_path_gui" "$dist_dir/" || true
@@ -412,16 +412,16 @@ for flavor in "${cpu_flavors[@]}"; do
     # cargo-generate-rpm writes under CARGO_TARGET_DIR when it is set, which
     # ensure_safe_target_dir does on WSL mounts.
     rpm_out="${CARGO_TARGET_DIR:-target}/generate-rpm"
-    for pkg in hyperdu-cli hyperdu-gui; do
+    for pkg in hyperdu hyperdu-gui; do
       if [[ "$pkg" == hyperdu-gui && $skip_gui -eq 1 ]]; then continue; fi
       # Clear this package's previous output first. Only dist/ is wiped at the
       # start of a run, so on a repeated local run a failed generate-rpm would
       # otherwise leave the last version's .rpm sitting here for the `ls | tail`
       # below to find and copy -- a silent packaging failure of exactly the kind
       # this file is being changed to stop producing.
-      rm -f "$rpm_out"/*"$pkg"*.rpm
+      rm -f "$rpm_out"/"$pkg"-[0-9]*.rpm
       cargo generate-rpm -p "$pkg" -s "version = \"$rpm_version\"" || true
-      rpm_path=$(ls -1 "$rpm_out"/*"$pkg"*.rpm 2>/dev/null | tail -n1 || true)
+      rpm_path=$(ls -1 "$rpm_out"/"$pkg"-[0-9]*.rpm 2>/dev/null | tail -n1 || true)
       if [[ -n "$rpm_path" && -f "$rpm_path" ]]; then
         cp "$rpm_path" "$dist_dir/" || true
       else
@@ -447,7 +447,7 @@ for flavor in "${cpu_flavors[@]}"; do
 done
 
 # Normalize names
-cli_name="hyperdu-cli-${os_tag}-${arch}.zip"
+cli_name="hyperdu-${os_tag}-${arch}.zip"
 gui_name="hyperdu-gui-${os_tag}-${arch}.zip"
 
 # Only package host artifacts without suffix if a host build actually ran
@@ -459,7 +459,7 @@ if [[ -n "$cli_bin" && -f "$cli_bin" ]]; then
   (cd "$tmpdir_cli" && zip -9 -q "$dist_dir/$cli_name" "$(basename "$cli_bin")" README.md)
   rm -rf "$tmpdir_cli"
   if [[ "$os_tag" == "windows" ]]; then
-    cp "$cli_bin" "$dist_dir/hyperdu-cli-${os_tag}-${arch}.exe"
+    cp "$cli_bin" "$dist_dir/hyperdu-${os_tag}-${arch}.exe"
   fi
 fi
 
@@ -482,7 +482,8 @@ echo "OK -> $dist_dir"
 
 # Print installers summary for convenience
 echo "==> Installers Summary"
-for f in "$dist_dir"/hyperdu-cli-*; do
+for f in "$dist_dir"/hyperdu-*; do
+  [[ "$(basename "$f")" == hyperdu-gui-* ]] && continue
   [[ -f "$f" ]] && echo "  CLI: $(basename "$f")" || true
 done
 for f in "$dist_dir"/hyperdu-gui-*; do
@@ -499,8 +500,9 @@ if [[ -n "$targets_csv" ]]; then
       linux-rpm) build_rpm=1 ;;
       linux-appimage)
         if [[ "$os_tag" == linux ]]; then
-          ensure_appimage_tools
-          bash "$root_dir/scripts/package/appimage.sh" >> "$dist_dir/appimage-pack.log" 2>&1 || echo "warn: AppImage step failed (see dist/appimage-pack.log)"
+          if ! bash "$root_dir/scripts/package/appimage.sh" >> "$dist_dir/appimage-pack.log" 2>&1; then
+            echo "warn: optional AppImage skipped; reviewed local tools and SHA256 values are required (see dist/appimage-pack.log)"
+          fi
         else
           echo "warn: linux-appimage requested on non-linux host; skipping"
         fi ;;
@@ -554,27 +556,27 @@ if [[ -n "$targets_csv" ]]; then
             echo "warn: skipping unsupported cross target on this host: $triple"; continue ;;
         esac
 
-        echo "==> Cross-building ($triple) hyperdu-cli [generic]"
-        cli_cross="$(build_and_capture_cross hyperdu-cli "$triple" "" || true)"
+        echo "==> Cross-building ($triple) hyperdu [generic]"
+        cli_cross="$(build_and_capture_cross hyperdu "$triple" "")"
         if [[ -n "$cli_cross" && -f "$cli_cross" ]]; then
           base="$(name_from_triple "$triple")"
           # Raw cross cli binary
-          raw_cli_cross="hyperdu-cli-${base}-generic"; [[ "$triple" == x86_64-pc-windows-gnu ]] && raw_cli_cross+=".exe"
+          raw_cli_cross="hyperdu-${base}-generic"; [[ "$triple" == x86_64-pc-windows-gnu ]] && raw_cli_cross+=".exe"
           cp "$cli_cross" "$dist_dir/$raw_cli_cross" && chmod +x "$dist_dir/$raw_cli_cross" || true
           if [[ $raw_only -eq 0 && $no_zip -eq 0 ]]; then
-            zipname="hyperdu-cli-${base}-generic.zip"
+            zipname="hyperdu-${base}-generic.zip"
             td="$(mktemp -d)"; cp "$cli_cross" "$td/"
             cp "$root_dir/README.md" "$td/"
             (cd "$td" && zip -9 -q "$dist_dir/$zipname" "$(basename "$cli_cross")" README.md)
             rm -rf "$td"
           fi
         else
-          echo "warn: CLI build failed for $triple (skipping)"
+          echo "error: CLI build failed for $triple" >&2; exit 1
         fi
 
         if [[ $skip_gui -eq 0 ]]; then
           echo "==> Cross-building ($triple) hyperdu-gui [generic]"
-          gui_cross="$(build_and_capture_cross hyperdu-gui "$triple" "" || true)"
+          gui_cross="$(build_and_capture_cross hyperdu-gui "$triple" "")"
           if [[ -n "$gui_cross" && -f "$gui_cross" ]]; then
             base="$(name_from_triple "$triple")"
             raw_gui_cross="hyperdu-gui-${base}-generic"; [[ "$triple" == x86_64-pc-windows-gnu ]] && raw_gui_cross+=".exe"
@@ -587,7 +589,7 @@ if [[ -n "$targets_csv" ]]; then
               rm -rf "$td"
             fi
           else
-            echo "warn: GUI build failed for $triple (skipping)"
+            echo "error: GUI build failed for $triple" >&2; exit 1
           fi
         fi
         ;;
@@ -612,8 +614,8 @@ if [[ -n "$url_base" ]]; then
   fi
   # Scoop manifest (EXE/MSI)
   if [[ -f "$dist_dir/scoop/hyperdu.json" ]]; then
-    exe=$(ls -1 "$dist_dir"/hyperdu-cli-*.exe 2>/dev/null | head -n1 || true)
-    msi=$(ls -1 "$dist_dir"/hyperdu-cli-*.msi 2>/dev/null | head -n1 || true)
+    exe=$(ls -1 "$dist_dir"/hyperdu-windows-*.exe 2>/dev/null | head -n1 || true)
+    msi=$(ls -1 "$dist_dir"/hyperdu-setup.msi 2>/dev/null | head -n1 || true)
     asset="${exe:-$msi}"
     if [[ -n "$asset" && -f "$asset" ]]; then
       sum=$(sha256_of "$asset"); url="$url_base/$(basename "$asset")"
@@ -622,8 +624,8 @@ if [[ -n "$url_base" ]]; then
   fi
   # winget manifest
   if [[ -f "$dist_dir/winget/manifest.yaml" ]]; then
-    exe=$(ls -1 "$dist_dir"/hyperdu-cli-*.exe 2>/dev/null | head -n1 || true)
-    msi=$(ls -1 "$dist_dir"/hyperdu-cli-*.msi 2>/dev/null | head -n1 || true)
+    exe=$(ls -1 "$dist_dir"/hyperdu-windows-*.exe 2>/dev/null | head -n1 || true)
+    msi=$(ls -1 "$dist_dir"/hyperdu-setup.msi 2>/dev/null | head -n1 || true)
     asset="${exe:-$msi}"
     if [[ -n "$asset" && -f "$asset" ]]; then
       sum=$(sha256_of "$asset"); url="$url_base/$(basename "$asset")"

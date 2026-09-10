@@ -1,11 +1,4 @@
-//! The egui application.
-//!
-//! Everything drawn here is derived from [`scan::Model`] at draw time. The
-//! previous version built a `Node` tree of the entire result up front -- on the
-//! UI thread, so the window went "Not Responding" for the duration -- and then
-//! walked that whole tree on every repaint to find the selected node. Both are
-//! gone: the model answers "children of this directory" from an index in about
-//! 11 us, and nothing is materialised for a row that is not on screen.
+//! Desktop controls and bounded result rendering over the shared core scan API.
 
 use std::{
     collections::HashSet,
@@ -19,51 +12,53 @@ use egui_extras::TableBuilder;
 use humansize::{format_size, BINARY};
 
 use crate::{fonts, scan};
-
-/// Messages drained per frame. Each one folds a subtree into the model, which
-/// re-sorts the affected parents, so an unbounded drain would let a burst of
-/// small subtrees stall a frame.
-const MSGS_PER_FRAME: usize = 32;
-
+/// Bound display ingestion by nodes and elapsed time, not subtree message count.
+const NODES_PER_FRAME: usize = 1024;
+const INGEST_MS: u64 = 3;
 /// How often to wake while a scan is running, so rows appear as they land.
 const REFRESH_MS: u64 = 250;
-
-/// A filesystem this deep means a link loop; recursing without a bound would
-/// blow the stack.
+/// Bound recursive tree rendering. Deeper directories remain accessible in the table.
 const MAX_TREE_DEPTH: usize = 64;
-
 pub struct App {
-    root: Option<PathBuf>,
-    exclude: String,
-    min_file: u64,
-    max_depth: u32,
-    follow: bool,
-
+    root_input: String,
+    params: scan::Params,
     scan: Option<scan::Handle>,
     model: scan::Model,
-    /// Directory whose children the table is showing.
     current: PathBuf,
-    /// Directories the user has opened in the tree.
     expanded: HashSet<PathBuf>,
-
     started_at: Option<Instant>,
     finished_in: Option<f64>,
+    state: String,
+    complete: bool,
+    result_size_mode: u8,
+    cancelling: bool,
+    errors: u64,
+    error_details: Vec<String>,
+    export_message: String,
+    sort: u8,
+    pending: Option<scan::Msg>,
 }
 
 impl Default for App {
     fn default() -> Self {
         Self {
-            root: None,
-            exclude: String::new(),
-            min_file: 0,
-            max_depth: 0,
-            follow: false,
+            root_input: String::new(),
+            params: scan::Params::default(),
             scan: None,
             model: scan::Model::default(),
             current: PathBuf::new(),
             expanded: HashSet::new(),
             started_at: None,
             finished_in: None,
+            state: "フォルダを選んでスキャンを開始してください".into(),
+            complete: false,
+            result_size_mode: 0,
+            cancelling: false,
+            errors: 0,
+            error_details: Vec::new(),
+            export_message: String::new(),
+            sort: 0,
+            pending: None,
         }
     }
 }
@@ -71,114 +66,301 @@ impl Default for App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         fonts::configure_fonts(&cc.egui_ctx);
+        let mut visuals = egui::Visuals::light();
+        visuals.selection.bg_fill = egui::Color32::from_rgb(55, 115, 94);
+        cc.egui_ctx.set_visuals(visuals);
         Self::default()
     }
-
-    fn start_scan(&mut self, root: PathBuf) {
-        let params = scan::Params {
-            exclude: self
-                .exclude
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect(),
-            min_file_size: self.min_file,
-            max_depth: self.max_depth,
-            follow_links: self.follow,
-        };
-        self.model = scan::Model::new(root.clone());
-        self.current = root.clone();
-        self.expanded.clear();
-        self.expanded.insert(root.clone());
-        self.started_at = Some(Instant::now());
-        self.finished_in = None;
-        self.scan = Some(scan::start(root, params));
+    fn start_scan(&mut self, root: PathBuf, ctx: &egui::Context) {
+        if self.scanning() {
+            return;
+        }
+        let context = ctx.clone();
+        match scan::start(
+            root.clone(),
+            self.params.clone(),
+            std::sync::Arc::new(move || context.request_repaint()),
+        ) {
+            Ok(handle) => {
+                self.model = scan::Model::new(root.clone());
+                self.current = root.clone();
+                self.expanded.clear();
+                self.expanded.insert(root);
+                self.started_at = Some(Instant::now());
+                self.finished_in = None;
+                self.scan = Some(handle);
+                self.complete = false;
+                self.result_size_mode = self.params.size_mode;
+                self.cancelling = false;
+                self.errors = 0;
+                self.error_details.clear();
+                self.export_message.clear();
+                self.state = "スキャン中".into();
+                self.pending = None;
+                ctx.request_repaint();
+            }
+            Err(error) => {
+                self.state = format!("開始できません: {error} — 表示中の結果は前回の走査です");
+                self.complete = false;
+            }
+        }
     }
-
     fn scanning(&self) -> bool {
         self.scan.is_some()
     }
-
-    /// Fold whatever the worker has produced into the model.
-    fn drain(&mut self) {
+    fn drain(&mut self, ctx: &egui::Context) {
         let Some(handle) = &self.scan else { return };
         let mut done = false;
-        for _ in 0..MSGS_PER_FRAME {
-            match handle.rx.try_recv() {
-                Ok(scan::Msg::Listing { dirs }) => self.model.expect(dirs),
-                Ok(scan::Msg::RootFiles(files)) => self.model.absorb_files(files),
-                Ok(scan::Msg::Child { path, map }) => self.model.absorb(&path, map),
-                Ok(scan::Msg::Done) => {
+        let frame_start = Instant::now();
+        let mut work = 0;
+        while work < NODES_PER_FRAME && frame_start.elapsed().as_millis() < u128::from(INGEST_MS) {
+            let message = match self.pending.take() {
+                Some(message) => Ok(message),
+                None => handle.rx.try_recv(),
+            };
+            match message {
+                Ok(scan::Msg::Update(update)) => {
+                    let cost = update.work();
+                    if work + cost > NODES_PER_FRAME {
+                        self.pending = Some(scan::Msg::Update(update));
+                        break;
+                    }
+                    work += cost;
+                    self.model.apply(update);
+                }
+                Ok(scan::Msg::Core(hyperdu_core::ScanEvent::BatchFallback { .. })) => {
+                    self.state = "MFT: 一括結果を受信中".into()
+                }
+                Ok(scan::Msg::Core(hyperdu_core::ScanEvent::Finished)) => {
+                    self.errors = handle.errors.load(Ordering::Relaxed);
+                    self.complete = self.errors == 0 && !self.cancelling;
+                    self.state = if self.cancelling {
+                        "中断しました — 表示は部分結果です".into()
+                    } else if self.complete {
+                        "完了".into()
+                    } else {
+                        format!("一部を読み取れませんでした ({} 件)", self.errors)
+                    };
+                    done = true;
+                    break;
+                }
+                Ok(scan::Msg::Core(hyperdu_core::ScanEvent::Cancelled)) => {
+                    self.state = "中断しました — 表示は部分結果です".into();
+                    done = true;
+                    break;
+                }
+                Ok(scan::Msg::Core(_)) => {
+                    self.state = "表示データの受信形式が不正です".into();
+                    done = true;
+                    break;
+                }
+                Ok(scan::Msg::Failed(error)) => {
+                    self.state = format!("スキャン失敗: {error}");
                     done = true;
                     break;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.state = "スキャン失敗: 完了通知なしに接続が終了しました".into();
                     done = true;
                     break;
                 }
             }
         }
+        if work > 0 || self.pending.is_some() {
+            ctx.request_repaint();
+        }
+        self.errors = handle.errors.load(Ordering::Relaxed);
+        self.error_details = handle
+            .error_details
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         if done {
             self.finished_in = self.started_at.map(|t| t.elapsed().as_secs_f64());
             self.scan = None;
+            self.pending = None;
+            self.cancelling = false;
         }
     }
-
     fn controls(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            if ui.button("フォルダ…").clicked() {
-                if let Some(p) = rfd::FileDialog::new().pick_folder() {
-                    self.root = Some(p);
-                }
-            }
-            let can_scan = self.root.is_some() && !self.scanning();
-            if ui
-                .add_enabled(can_scan, egui::Button::new("スキャン"))
-                .clicked()
+        let running = self.scanning();
+        ui.horizontal_wrapped(|ui| {
+            ui.heading("HyperDU");
+            ui.label("ディスクの使用状況");
+            if running
+                && ui
+                    .add_enabled(!self.cancelling, egui::Button::new("中止"))
+                    .clicked()
             {
-                if let Some(root) = self.root.clone() {
-                    self.start_scan(root);
+                if let Some(handle) = &self.scan {
+                    handle.cancel();
+                    self.cancelling = true;
+                    self.state = "中断処理中…".into();
                 }
             }
-            if self.scanning() && ui.button("中止").clicked() {
-                self.scan = None;
-            }
-            ui.separator();
-            ui.label("除外");
-            ui.text_edit_singleline(&mut self.exclude);
-            ui.label("最小サイズ(B)");
-            ui.add(egui::DragValue::new(&mut self.min_file).speed(1.0));
-            ui.label("深さ上限(0=無制限)");
-            ui.add(egui::DragValue::new(&mut self.max_depth).range(0..=u32::MAX));
-            ui.checkbox(&mut self.follow, "リンク追従");
+        });
+        ui.add_enabled_ui(!running,|ui|{
+            ui.horizontal_wrapped(|ui|{
+                ui.label("対象フォルダ");
+ui.add(egui::TextEdit::singleline(&mut self.root_input).desired_width(430.0).hint_text("C:\\ またはフォルダのパス"));
+                if ui.button("選択…").clicked() {if let Some(path)=rfd::FileDialog::new().pick_folder() {self.root_input=path.display().to_string();
+}}
+                if ui.add_enabled(!self.root_input.trim().is_empty(),egui::Button::new("スキャン開始")).clicked() {self.start_scan(PathBuf::from(self.root_input.trim()), ui.ctx());
+}
+            });
+            ui.horizontal_wrapped(|ui|{
+                ui.label("走査モード");
+                ui.selectable_value(&mut self.params.mode,hyperdu_core::ScanMode::Interactive,"インタラクティブ");
+                ui.selectable_value(&mut self.params.mode,hyperdu_core::ScanMode::Batch,"一括");
+                ui.weak("インタラクティブ: 子フォルダの結果を順次表示");
+            });
+            ui.weak("設定の変更は次回のスキャンに適用されます。");
+            egui::CollapsingHeader::new("詳細設定 — 除外・サイズ・リンク・速度").show(ui,|ui|{
+                egui::ScrollArea::vertical().id_salt("settings_scroll").max_height(230.0).show(ui,|ui|{
+                    ui.horizontal_wrapped(|ui|{
+                        ui.label("最小ファイルサイズ");
+ui.add(egui::TextEdit::singleline(&mut self.params.min_size).desired_width(100.0));
+ui.weak("例: 10 MiB");
+                        ui.label("深さ上限");
+ui.add(egui::DragValue::new(&mut self.params.max_depth).range(0..=u32::MAX));
+ui.weak("0 = 無制限");
+                    });
+                    ui.label("除外パターン (1行に1つ。空欄 = 除外なし)");
+                    ui.columns(3,|columns|{
+                        columns[0].label("名前・パスに含まれる文字列");
+columns[0].add(egui::TextEdit::multiline(&mut self.params.exclude).desired_rows(2).desired_width(f32::INFINITY));
+                        columns[1].label("glob");
+columns[1].add(egui::TextEdit::multiline(&mut self.params.glob).desired_rows(2).desired_width(f32::INFINITY));
+                        columns[2].label("正規表現");
+columns[2].add(egui::TextEdit::multiline(&mut self.params.regex).desired_rows(2).desired_width(f32::INFINITY));
+                    });
+                    ui.horizontal_wrapped(|ui|{ui.checkbox(&mut self.params.follow_links,"リンク先を走査");
+ui.checkbox(&mut self.params.count_hardlinks,"ハードリンクを個別に数える");
+ui.checkbox(&mut self.params.one_file_system,"同じファイルシステムのみ");
+});
+                    ui.horizontal_wrapped(|ui|{
+                        ui.label("サイズ計算");
+ui.selectable_value(&mut self.params.size_mode,0,"物理 + 論理");
+ui.selectable_value(&mut self.params.size_mode,1,"論理のみ");
+ui.selectable_value(&mut self.params.size_mode,2,"概算 (高速)");
+                    });
+                    if self.params.size_mode!=0 {ui.colored_label(egui::Color32::DARK_RED,"論理のみ・概算では、物理欄も代替値です。概算はファイルサイズの正確性を優先しません。");
+}
+                    ui.horizontal_wrapped(|ui|{
+                        ui.label("スレッド数 (0 = 自動)");
+ui.add(egui::DragValue::new(&mut self.params.threads).range(0..=256));
+                        ui.label("I/O");
+ui.selectable_value(&mut self.params.io_profile,hyperdu_core::IoProfile::Balanced,"標準");
+ui.selectable_value(&mut self.params.io_profile,hyperdu_core::IoProfile::Throughput,"速度優先");
+ui.selectable_value(&mut self.params.io_profile,hyperdu_core::IoProfile::Gentle,"低負荷");
+                    });
+                    ui.horizontal_wrapped(|ui|{
+                        ui.label("先読み");
+ui.selectable_value(&mut self.params.prefetch,0,"自動");
+ui.selectable_value(&mut self.params.prefetch,1,"有効");
+ui.selectable_value(&mut self.params.prefetch,2,"無効");
+                        ui.label("巨大フォルダの分割間隔 (0 = 無効)");
+ui.add(egui::DragValue::new(&mut self.params.dir_yield).range(0..=1_000_000));
+                    });
+                    #[cfg(windows)] {
+                        ui.checkbox(&mut self.params.use_mft,"NTFS MFT直接走査を試す");
+                        ui.weak("MFTは管理者権限とNTFSボリュームルートが必要です。対応できない設定では通常走査に戻り、MFT成功時は結果を一括表示します。");
+                    }
+                });
+            });
         });
     }
-
-    fn status(&self, ui: &mut egui::Ui) {
-        let Some(start) = self.started_at else { return };
-        ui.horizontal(|ui| {
-            if let Some(handle) = &self.scan {
-                let n = handle.files_seen.load(Ordering::Relaxed);
-                let dt = start.elapsed().as_secs_f64().max(1e-6);
+    fn status(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            if self.scanning() {
                 ui.spinner();
-                ui.monospace(format!(
-                    "{n} files  {:.0} files/s  残り {} ディレクトリ",
-                    n as f64 / dt,
-                    self.model.pending_count()
-                ));
-            } else if let Some(secs) = self.finished_in {
-                ui.monospace(format!(
-                    "完了 {secs:.2} 秒  {} エントリ",
-                    self.model.entry_count()
-                ));
             }
-            if let Some(root) = &self.root {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new(root.display().to_string()).monospace());
-                });
+            ui.strong(&self.state);
+            if self.result_size_mode == 2 {
+                ui.colored_label(egui::Color32::DARK_RED, "概算結果");
+            } else if self.result_size_mode == 1 {
+                ui.label("物理欄は論理サイズの代替値");
+            }
+            if self.model.entry_count() > 0 {
+                ui.weak(format!("{} ディレクトリ", self.model.entry_count()));
+            }
+            if let Some(start) = self.started_at {
+                let seconds = self
+                    .finished_in
+                    .unwrap_or_else(|| start.elapsed().as_secs_f64());
+                let total = self.model.total_of(&self.model.root);
+                ui.label(format!(
+                    "{seconds:.2} 秒 · {} files · 論理 {} · 物理 {} · エラー {}",
+                    total.files,
+                    format_size(total.logical, BINARY),
+                    format_size(total.physical, BINARY),
+                    self.errors
+                ));
+                if let Some(handle) = &self.scan {
+                    let n = handle.files_seen.load(Ordering::Relaxed).max(total.files);
+                    ui.label(format!("走査済み {n}"));
+                    if self.model.pending_count() > 0 {
+                        ui.label(format!("残り {} フォルダ", self.model.pending_count()));
+                    }
+                }
             }
         });
+        if !self.error_details.is_empty() {
+            egui::CollapsingHeader::new("読み取りエラー (最大20件)").show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(100.0)
+                    .show(ui, |ui| {
+                        for message in &self.error_details {
+                            ui.label(message);
+                        }
+                    });
+            });
+        }
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add_enabled(
+                    self.complete && !self.scanning(),
+                    egui::Button::new("JSONへ保存"),
+                )
+                .clicked()
+            {
+                self.export(false);
+            }
+            if ui
+                .add_enabled(
+                    self.complete && !self.scanning(),
+                    egui::Button::new("CSVへ保存"),
+                )
+                .clicked()
+            {
+                self.export(true);
+            }
+            ui.label(&self.export_message);
+        });
+    }
+    fn export(&mut self, csv: bool) {
+        let extension = if csv { "csv" } else { "json" };
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter(extension, &[extension])
+            .set_file_name(format!("hyperdu-report.{extension}"))
+            .save_file()
+        {
+            let rows = self.model.rows();
+            let result = std::fs::File::create(&path)
+                .map_err(anyhow::Error::from)
+                .and_then(|file| {
+                    if csv {
+                        hyperdu_core::report::write_csv(file, &rows)
+                    } else {
+                        hyperdu_core::report::write_json(file, &rows)
+                    }
+                });
+            self.export_message = match result {
+                Ok(()) => format!("保存しました: {}", path.display()),
+                Err(e) => format!("保存できません: {e}"),
+            };
+        }
     }
 
     /// Breadcrumb from the scan root down to the directory on screen.
@@ -218,7 +400,8 @@ impl App {
         }
         let mut navigate = None;
         let mut toggles: Vec<PathBuf> = Vec::new();
-        self.tree_row(ui, &root, 0, &mut navigate, &mut toggles);
+        let mut budget = 1500;
+        self.tree_row(ui, &root, 0, &mut navigate, &mut toggles, &mut budget);
         for p in toggles {
             if !self.expanded.remove(&p) {
                 self.expanded.insert(p);
@@ -236,10 +419,12 @@ impl App {
         depth: usize,
         navigate: &mut Option<PathBuf>,
         toggles: &mut Vec<PathBuf>,
+        budget: &mut usize,
     ) {
-        if depth > MAX_TREE_DEPTH {
+        if depth > MAX_TREE_DEPTH || *budget == 0 {
             return;
         }
+        *budget -= 1;
         let open = self.expanded.contains(dir);
         let expandable = self.model.has_children(dir);
         let name = if depth == 0 {
@@ -249,7 +434,6 @@ impl App {
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| dir.display().to_string())
         };
-
         ui.horizontal(|ui| {
             ui.add_space(depth as f32 * 12.0);
             if expandable {
@@ -263,17 +447,14 @@ impl App {
             if ui.selectable_label(selected, name).clicked() {
                 *navigate = Some(dir.to_path_buf());
             }
-            if self.model.is_pending(dir) {
+            if self.scanning() && self.model.is_pending(dir) {
                 ui.spinner();
             }
         });
-
         if open {
-            for &i in self.model.children_of(dir) {
+            for &i in self.model.children_of(dir).iter().take(500) {
                 let (child, _) = self.model.entry(i);
-                if self.model.has_children(child) {
-                    self.tree_row(ui, child, depth + 1, navigate, toggles);
-                }
+                self.tree_row(ui, child, depth + 1, navigate, toggles, budget);
             }
         }
     }
@@ -281,7 +462,24 @@ impl App {
     /// Children of the current directory, largest first.
     fn table(&mut self, ui: &mut egui::Ui) {
         let current = self.current.clone();
-        let indices: Vec<u32> = self.model.children_of(&current).to_vec();
+        ui.horizontal_wrapped(|ui| {
+            ui.label("並び順");
+            ui.selectable_value(&mut self.sort, 0, "物理サイズ");
+            ui.selectable_value(&mut self.sort, 1, "論理サイズ");
+            ui.selectable_value(&mut self.sort, 2, "ファイル数");
+            ui.selectable_value(&mut self.sort, 3, "名前");
+        });
+        let direct = self.model.direct_files_of(&current);
+        if direct.files > 0 {
+            let s = direct;
+            ui.label(format!(
+                "直下のファイル合計: {} files · 物理 {} / 論理 {}",
+                s.files,
+                format_size(s.physical, BINARY),
+                format_size(s.logical, BINARY)
+            ));
+        }
+        let indices = self.model.children_sorted(&current, self.sort);
         if indices.is_empty() {
             ui.label(if self.scanning() {
                 "スキャン中…"
@@ -292,7 +490,6 @@ impl App {
         }
         let total = self.model.total_of(&current).physical.max(1);
         let mut navigate = None;
-
         TableBuilder::new(ui)
             .striped(true)
             .cell_layout(Layout::left_to_right(Align::Center))
@@ -309,7 +506,6 @@ impl App {
             .body(|body| {
                 body.rows(22.0, indices.len(), |mut row| {
                     let (path, stat) = self.model.entry(indices[row.index()]);
-                    let is_dir = self.model.has_children(path);
                     let name = path
                         .file_name()
                         .map(|s| s.to_string_lossy().into_owned())
@@ -317,12 +513,8 @@ impl App {
                     let (physical, logical, files) = (stat.physical, stat.logical, stat.files);
                     let path = path.to_path_buf();
                     row.col(|ui| {
-                        if is_dir {
-                            if ui.link(format!("📁 {name}")).clicked() {
-                                navigate = Some(path.clone());
-                            }
-                        } else {
-                            ui.label(name);
+                        if ui.link(format!("📁 {name}")).clicked() {
+                            navigate = Some(path.clone());
                         }
                     });
                     row.col(|ui| {
@@ -338,7 +530,6 @@ impl App {
                     });
                 });
             });
-
         if let Some(p) = navigate {
             self.current = p;
             self.expanded.insert(self.current.clone());
@@ -346,37 +537,119 @@ impl App {
     }
 }
 
-impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.drain();
-
+impl App {
+    fn show_ui(&mut self, ctx: &egui::Context) {
+        self.drain(ctx);
         egui::TopBottomPanel::top("controls").show(ctx, |ui| {
             self.controls(ui);
             self.status(ui);
         });
-
         egui::SidePanel::left("tree")
             .resizable(true)
-            .default_width(320.0)
+            .default_width(250.0)
             .show(ctx, |ui| {
-                ui.heading("ディレクトリツリー");
+                ui.heading("ディレクトリ");
+                ui.weak("各階層500件・全体1500行まで。全件は右の一覧で確認できます。");
                 // Without this the panel simply clipped everything past the
                 // window height, with no way to reach it.
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| self.tree(ui));
             });
-
         egui::CentralPanel::default().show(ctx, |ui| {
+            if self.model.root.as_os_str().is_empty() {
+                ui.add_space(60.0);
+                ui.heading("容量の内訳を調べる");
+                ui.label("対象フォルダを選び、スキャン開始を押してください。");
+                ui.label("インタラクティブモードなら、完了した子フォルダから閲覧できます。");
+                return;
+            }
             self.breadcrumb(ui);
             ui.separator();
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| self.table(ui));
         });
-
         if self.scanning() {
             ctx.request_repaint_after(std::time::Duration::from_millis(REFRESH_MS));
         }
+    }
+}
+
+impl eframe::App for App {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.show_ui(ctx);
+    }
+}
+
+#[cfg(test)]
+mod ui_tests;
+
+#[cfg(test)]
+mod tests {
+    use hyperdu_core::{ScanEvent, Stat};
+
+    use super::*;
+
+    #[test]
+    fn start_sets_working_state_before_any_result_is_drained() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = App::default();
+        app.start_scan(root.path().to_path_buf(), &egui::Context::default());
+        assert!(app.scanning() && !app.complete);
+        assert!(app.started_at.is_some() && app.finished_in.is_none());
+        assert_eq!(app.state, "スキャン中");
+        assert_eq!(app.model.entry_count(), 0);
+    }
+
+    #[test]
+    fn large_result_is_bounded_and_finished_waits_for_all_chunks() {
+        let (tx, handle) = scan::test_handle(8);
+        let root = PathBuf::from("root");
+        for chunk in 0..5 {
+            let nodes = (0..scan::CHUNK_NODES)
+                .map(|n| {
+                    let index = (chunk * scan::CHUNK_NODES + n) as u32;
+                    (index, root.join(index.to_string()), Stat::default(), false)
+                })
+                .collect();
+            tx.send(scan::Msg::Update(scan::Update::Nodes(nodes)))
+                .unwrap();
+        }
+        tx.send(scan::Msg::Core(ScanEvent::Finished)).unwrap();
+        let mut app = App {
+            scan: Some(handle),
+            model: scan::Model::new(root),
+            ..App::default()
+        };
+        let ctx = egui::Context::default();
+        app.drain(&ctx);
+        assert!(app.model.entry_count() <= NODES_PER_FRAME);
+        assert!(app.scanning() && !app.complete);
+        for _ in 0..20 {
+            if !app.scanning() {
+                break;
+            }
+            app.drain(&ctx);
+        }
+        assert_eq!(app.model.entry_count(), 5 * scan::CHUNK_NODES);
+        assert!(app.complete && !app.scanning());
+    }
+
+    #[test]
+    fn cancel_overrides_queued_finished_and_replaced_handles_isolate_events() {
+        let (old, handle) = scan::test_handle(1);
+        let (new, replacement) = scan::test_handle(1);
+        let mut app = App {
+            scan: Some(handle),
+            ..App::default()
+        };
+        app.scan = Some(replacement);
+        assert!(old.send(scan::Msg::Failed("stale".into())).is_err());
+        new.send(scan::Msg::Core(ScanEvent::Finished)).unwrap();
+        app.cancelling = true;
+        app.drain(&egui::Context::default());
+        assert!(!app.complete && !app.scanning());
+        assert!(app.state.starts_with("中断"));
     }
 }

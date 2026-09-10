@@ -18,7 +18,7 @@
     winget puts a shim on PATH and can uninstall it again.
 
 .PARAMETER Version
-    Package version. Defaults to `cargo pkgid -p hyperdu-cli`; the crate
+    Package version. Defaults to `cargo pkgid -p hyperdu`; the crate
     inherits version.workspace, so the literal is not in its Cargo.toml.
 
 .PARAMETER InstallerUrl
@@ -31,7 +31,7 @@
     Where to write the manifests. Defaults to dist/winget.
 
 .EXAMPLE
-    pwsh -File scripts/package/winget.ps1 -Version 0.5.0-beta.2 `
+    pwsh -File scripts/package/winget.ps1 -Version 0.5.0-beta.3 `
         -InstallerUrl https://example.invalid/hyperdu.exe `
         -InstallerSha256 0000000000000000000000000000000000000000000000000000000000000000
 #>
@@ -46,11 +46,11 @@ $ErrorActionPreference = 'Stop'
 
 if (-not $Version) {
   # Ask cargo rather than regex the manifest: the crate inherits
-  # `version.workspace = true`, so the literal is not in hyperdu-cli/Cargo.toml.
+  # `version.workspace = true`, so the literal is not in hyperdu/Cargo.toml.
   # pkgid prints `<url>#<version>` (or `#<name>@<version>`).
-  $Version = (cargo pkgid -p hyperdu-cli) -replace '^.*[#@]', ''
+  $Version = (cargo pkgid -p hyperdu) -replace '^.*[#@]', ''
 }
-if (-not $Version) { throw 'could not determine hyperdu-cli version from cargo pkgid' }
+if (-not $Version) { throw 'could not determine hyperdu version from cargo pkgid' }
 
 # Chosen deliberately: winget-pkgs keys packages by publisher folder, and that
 # folder is awkward to rename once other versions live under it.

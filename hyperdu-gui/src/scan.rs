@@ -1,217 +1,284 @@
-//! Scanning, and the index the UI reads.
-//!
-//! The window used to sit blank for the whole scan and then spend seconds more
-//! materialising a `Node` per entry -- 1.48M of them for a large tree, when the
-//! user can only ever see a few dozen rows.
-//!
-//! So this does two things differently. It scans the root's children one at a
-//! time and streams each subtree back as it lands, which puts rows on screen in
-//! milliseconds instead of at the end. And it stores the result as a flat entry
-//! vector plus a parent -> child-indices map, so the UI derives the rows it is
-//! actually drawing and nothing else.
-//!
-//! Measured on C:/Users/syska/.cargo/registry, minimum of three warm runs:
-//!
-//! | shape                                | total  | first row |
-//! |--------------------------------------|--------|-----------|
-//! | one scan of the whole root           | 230 ms | 230 ms    |
-//! | per-child, sequential, all threads   | 234 ms |   3 ms    |
-//! | per-child, 4 at once, threads/4 each | 335 ms |   3 ms    |
-//! | per-child, 8 at once, threads/8 each | 550 ms |   2 ms    |
-//!
-//! Hence one child at a time with the full thread budget: splitting threads
-//! across concurrent scans starves the scanner's own work stealing and costs
-//! more than it saves. Streaming is 2% slower in total and ~75x faster to first
-//! paint.
-
+//! GUI transport and directory index. All filesystem policy lives in hyperdu-core.
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc, Arc,
     },
 };
 
-use hyperdu_core::{self as core, Stat, StatMap};
+use hyperdu_core::{self as core, ScanEvent, ScanMode, Stat, StatMap};
 
-/// What the worker sends back as it goes.
-pub enum Msg {
-    /// The root's direct children, before any size is known. One `read_dir`, so
-    /// this arrives essentially immediately and gives the user something to look
-    /// at while the real work runs.
-    Listing {
-        dirs: Vec<PathBuf>,
-    },
-    /// One child subtree finished. `map` covers that subtree only.
-    Child {
-        path: PathBuf,
-        map: StatMap,
-    },
-    /// Files sitting directly in the root, which no child scan covers.
-    RootFiles(Vec<(PathBuf, Stat)>),
-    Done,
+pub const CHUNK_NODES: usize = 256;
+type Orders = [Arc<[u32]>; 4];
+type Node = (u32, PathBuf, Stat, bool);
+pub enum Update {
+    Nodes(Vec<Node>),
+    Parent(PathBuf, Orders),
+    Direct(Stat),
+    Resolved(PathBuf),
+    Reset,
 }
-
-/// A running scan. Dropping this asks the worker to stop at the next child.
+impl Update {
+    pub fn work(&self) -> usize {
+        match self {
+            Self::Nodes(nodes) => nodes.len(),
+            _ => 1,
+        }
+    }
+}
+struct Prepared {
+    nodes: Vec<Node>,
+    parents: Vec<(PathBuf, Orders)>,
+}
+pub enum Msg {
+    Update(Update),
+    Core(ScanEvent),
+    Failed(String),
+}
 pub struct Handle {
     pub rx: mpsc::Receiver<Msg>,
     pub files_seen: Arc<AtomicU64>,
+    pub errors: Arc<AtomicU64>,
+    pub error_details: Arc<std::sync::Mutex<Vec<String>>>,
     cancel: Arc<AtomicBool>,
 }
-
 impl Handle {
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::Relaxed);
     }
 }
-
 impl Drop for Handle {
     fn drop(&mut self) {
         self.cancel();
     }
 }
 
-/// Options a scan runs with, minus everything the UI does not expose.
 #[derive(Clone)]
 pub struct Params {
-    pub exclude: Vec<String>,
-    pub min_file_size: u64,
+    pub mode: ScanMode,
+    pub exclude: String,
+    pub glob: String,
+    pub regex: String,
+    pub min_size: String,
     pub max_depth: u32,
     pub follow_links: bool,
+    pub count_hardlinks: bool,
+    pub one_file_system: bool,
+    pub threads: usize,
+    pub size_mode: u8,
+    pub io_profile: core::IoProfile,
+    pub prefetch: u8,
+    pub dir_yield: usize,
+    pub use_mft: bool,
 }
-
+impl Default for Params {
+    fn default() -> Self {
+        Self {
+            mode: ScanMode::Interactive,
+            exclude: String::new(),
+            glob: String::new(),
+            regex: String::new(),
+            min_size: "0".into(),
+            max_depth: 0,
+            follow_links: false,
+            count_hardlinks: false,
+            one_file_system: false,
+            threads: 0,
+            size_mode: 0,
+            io_profile: core::IoProfile::Balanced,
+            prefetch: 0,
+            dir_yield: 0,
+            use_mft: false,
+        }
+    }
+}
+fn patterns(value: &str) -> Vec<String> {
+    value
+        .lines()
+        .map(str::trim)
+        .filter(|x| !x.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+fn size(value: &str) -> anyhow::Result<u64> {
+    let text = value.trim().to_ascii_lowercase().replace(' ', "");
+    let split = text
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(text.len());
+    let number = text[..split].parse::<u64>()?;
+    let multiplier = match &text[split..] {
+        "" | "b" => 1,
+        "k" | "kb" => 1000,
+        "kib" => 1024,
+        "m" | "mb" => 1000000,
+        "mib" => 1048576,
+        "g" | "gb" => 1000000000,
+        "gib" => 1073741824,
+        _ => anyhow::bail!("サイズは整数と B / KB / KiB / MB / MiB / GB / GiB で入力してください"),
+    };
+    number
+        .checked_mul(multiplier)
+        .ok_or_else(|| anyhow::anyhow!("サイズが大きすぎます"))
+}
 impl Params {
-    fn to_options(&self, files_seen: Arc<AtomicU64>) -> core::Options {
-        let counter = files_seen;
-        let mut opt = core::Options {
-            exclude_contains: self.exclude.clone(),
+    pub fn to_options(&self) -> anyhow::Result<core::Options> {
+        let opt = core::Options {
+            exclude_contains: patterns(&self.exclude),
+            exclude_glob: patterns(&self.glob),
+            exclude_regex: patterns(&self.regex),
+            min_file_size: size(&self.min_size)?,
             max_depth: self.max_depth,
-            min_file_size: self.min_file_size,
             follow_links: self.follow_links,
-            // Same deliberate oversubscription the CLI uses; see
-            // hyperdu_core::default_threads.
-            threads: core::default_threads(),
-            progress_every: 8192,
-            // Only the counter. The GUI used to install a copy of the CLI's
-            // hill-climbing tuner here; it was measured to fire ~13 times per
-            // 106k-file scan and, on Windows, to write a knob nothing reads.
-            progress_callback: Some(Arc::new(move |n| {
-                counter.store(n, Ordering::Relaxed);
-            })),
-            compute_physical: true,
+            count_hardlinks: self.count_hardlinks,
+            one_file_system: self.one_file_system,
+            threads: if self.threads == 0 {
+                core::default_threads()
+            } else {
+                self.threads
+            },
+            compute_physical: self.size_mode == 0,
+            approximate_sizes: self.size_mode == 2,
+            io_profile: self.io_profile,
+            prefetch: match self.prefetch {
+                1 => Some(true),
+                2 => Some(false),
+                _ => None,
+            },
+            dir_yield_every: Arc::new(AtomicUsize::new(self.dir_yield)),
+            use_mft: self.use_mft,
             ..core::Options::default()
         };
-        // A hand-built `Options` carries the raw patterns and none of the
-        // matchers. `scan_directory` compiles its own copy, but `is_excluded`
-        // reads the matchers directly, so it has to be done here too.
-        core::compile_filters_in_place(&mut opt);
-        opt
+        core::validate_options(&opt)?;
+        Ok(opt)
     }
 }
-
-/// Enumerate `root`'s children, then scan each in turn, streaming results.
-pub fn start(root: PathBuf, params: Params) -> Handle {
-    let (tx, rx) = mpsc::channel();
+pub fn start(
+    root: PathBuf,
+    params: Params,
+    wake: Arc<dyn Fn() + Send + Sync>,
+) -> anyhow::Result<Handle> {
+    let mut opt = params.to_options()?;
+    // Queue only bounded node chunks and already-sorted parent indices.
+    // Dropping the receiver unblocks a sender when the window closes.
+    let (tx, rx) = mpsc::sync_channel(2);
     let files_seen = Arc::new(AtomicU64::new(0));
-    let cancel = Arc::new(AtomicBool::new(false));
-
-    let worker_counter = files_seen.clone();
+    let counter = files_seen.clone();
+    opt.progress_every = 256;
+    opt.progress_callback = Some(Arc::new(move |n| {
+        counter.fetch_max(n, Ordering::Relaxed);
+    }));
+    let cancel = opt.cancel.clone();
     let worker_cancel = cancel.clone();
-    std::thread::spawn(move || {
-        // Built first: `list_root` needs the compiled excludes to decide which
-        // children to hand back, and the same options then drive every scan.
-        let opt = params.to_options(worker_counter);
-
-        let (dirs, files) = list_root(&root, &opt);
-        if tx.send(Msg::Listing { dirs: dirs.clone() }).is_err() {
-            return;
+    let errors = opt.error_count.clone();
+    let error_details = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let details = error_details.clone();
+    opt.error_report = Some(Arc::new(move |message| {
+        let mut messages = details.lock().unwrap_or_else(|e| e.into_inner());
+        if messages.len() < 20 {
+            messages.push(message.to_string());
         }
-        if !files.is_empty() && tx.send(Msg::RootFiles(files)).is_err() {
-            return;
-        }
-
-        for dir in dirs {
-            if worker_cancel.load(Ordering::Relaxed) {
-                return;
-            }
-            let map = core::scan_directory(&dir, &opt).unwrap_or_default();
-            if tx.send(Msg::Child { path: dir, map }).is_err() {
-                return;
-            }
-        }
-        let _ = tx.send(Msg::Done);
-    });
-
-    Handle {
-        rx,
-        files_seen,
-        cancel,
-    }
-}
-
-/// One `read_dir` of the root: directories to scan, and the files that live
-/// directly in it.
-///
-/// Both halves defer to `core` rather than deciding anything here, because both
-/// were wrong when this did decide:
-///
-///   - The directories become scan roots of their own, and the backends only
-///     test the *children* of a directory they are processing -- never the root
-///     they were handed. So an excluded directory sitting at the top level was
-///     scanned anyway: with `--exclude node_modules`, a nested `node_modules`
-///     was dropped and one directly under the root was not.
-///   - The files were reported with `metadata().len()` as both sizes. That is
-///     the logical size, so a 10 KiB file in the root showed 10 KiB next to the
-///     same file one level down showing its allocated 64 KiB -- the number
-///     meant something different depending on depth.
-fn list_root(root: &Path, opt: &core::Options) -> (Vec<PathBuf>, Vec<(PathBuf, Stat)>) {
-    let mut dirs = Vec::new();
-    let mut files = Vec::new();
-    let Ok(rd) = std::fs::read_dir(root) else {
-        return (dirs, files);
-    };
-    for entry in rd.flatten() {
-        let path = entry.path();
-        if core::is_excluded(&path, opt) {
-            continue;
-        }
-        match entry.file_type() {
-            Ok(ft) if ft.is_dir() => dirs.push(path),
-            Ok(_) => {
-                if let Some(stat) = core::file_stat(&path, opt) {
-                    files.push((path, stat));
+    }));
+    std::thread::Builder::new()
+        .name("hyperdu-gui-scan".into())
+        .spawn(move || {
+            let mut model = Model::new(root.clone());
+            model.cancel = Some(worker_cancel.clone());
+            let send = |message| {
+                let sent = tx.send(message).is_ok();
+                if sent {
+                    wake();
+                } else {
+                    worker_cancel.store(true, Ordering::Relaxed);
+                }
+                sent
+            };
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                core::scan_directory_mode(&root, &opt, params.mode, |event| {
+                    let (prepared, resolved) = match event {
+                        ScanEvent::RootListed {
+                            directories,
+                            direct_files,
+                            ..
+                        } => {
+                            model.direct_files = direct_files;
+                            (model.expect(directories), None)
+                        }
+                        ScanEvent::ChildCompleted { root, map } => {
+                            (model.absorb(&root, map), Some(root))
+                        }
+                        ScanEvent::BatchCompleted { map } => {
+                            let prepared = model.replace_batch(map);
+                            if !send(Msg::Update(Update::Reset)) {
+                                return;
+                            }
+                            (prepared, None)
+                        }
+                        event => {
+                            send(Msg::Core(event));
+                            return;
+                        }
+                    };
+                    if !send(Msg::Update(Update::Direct(model.direct_files))) {
+                        return;
+                    }
+                    let mut nodes = prepared.nodes.into_iter();
+                    loop {
+                        if worker_cancel.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        let chunk: Vec<_> = nodes.by_ref().take(CHUNK_NODES).collect();
+                        if chunk.is_empty() {
+                            break;
+                        }
+                        if !send(Msg::Update(Update::Nodes(chunk))) {
+                            return;
+                        }
+                    }
+                    // FIFO guarantees all referenced IDs exist before publication.
+                    for (parent, orders) in prepared.parents {
+                        if worker_cancel.load(Ordering::Relaxed)
+                            || !send(Msg::Update(Update::Parent(parent, orders)))
+                        {
+                            return;
+                        }
+                    }
+                    if let Some(root) = resolved {
+                        send(Msg::Update(Update::Resolved(root)));
+                    }
+                })
+            }));
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    send(Msg::Failed(e.to_string()));
+                }
+                Err(_) => {
+                    send(Msg::Failed("走査スレッドが異常終了しました".into()));
                 }
             }
-            Err(_) => {}
-        }
-    }
-    dirs.sort_unstable();
-    (dirs, files)
+        })?;
+    Ok(Handle {
+        rx,
+        files_seen,
+        errors,
+        error_details,
+        cancel,
+    })
 }
 
-/// Flat entries plus a parent -> children index.
-///
-/// The alternative shapes were measured on a 1.48M-entry tree:
-///
-/// | shape                            | build   | children lookup |
-/// |----------------------------------|---------|-----------------|
-/// | materialise the whole `Node` tree | 4.1 s  | (prebuilt)      |
-/// | path-sorted vec + binary search   | 14.5 s | 768 ms          |
-/// | this one                          | 2.5 s  | 11 us           |
-///
-/// The path-sorted variant loses because finding direct children means walking
-/// the whole descendant range, and sorting paths lexicographically is dear.
 #[derive(Default)]
 pub struct Model {
     pub root: PathBuf,
+    cancel: Option<Arc<AtomicBool>>,
     entries: Vec<(PathBuf, Stat)>,
-    /// Values index into `entries`, ordered by physical size descending.
-    children: HashMap<PathBuf, Vec<u32>>,
-    /// Roots of subtrees still being scanned, so the UI can say so.
-    pending: Vec<PathBuf>,
+    paths: HashMap<PathBuf, u32>,
+    children: HashMap<PathBuf, Orders>,
+    child_sums: HashMap<PathBuf, Stat>,
+    pending: HashSet<PathBuf>,
+    pub direct_files: Stat,
 }
-
 impl Model {
     pub fn new(root: PathBuf) -> Self {
         Self {
@@ -219,308 +286,401 @@ impl Model {
             ..Self::default()
         }
     }
-
-    pub fn is_pending(&self, path: &Path) -> bool {
-        self.pending.iter().any(|p| p == path)
+    fn expect(&mut self, dirs: Vec<PathBuf>) -> Prepared {
+        self.pending = dirs.iter().cloned().collect();
+        self.insert_all(dirs.into_iter().map(|p| (p, Stat::default())))
     }
-
+    pub fn is_pending(&self, path: &Path) -> bool {
+        self.pending.contains(path)
+    }
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }
-
     pub fn entry_count(&self) -> usize {
         self.entries.len()
     }
-
-    /// Record which children exist before any of them has been scanned, so the
-    /// list is complete from the first frame and only the sizes fill in.
-    pub fn expect(&mut self, dirs: Vec<PathBuf>) {
-        self.pending = dirs;
+    fn absorb(&mut self, root: &Path, map: StatMap) -> Prepared {
+        self.pending.remove(root);
+        self.insert_all(map.into_iter())
     }
-
-    /// Fold one finished subtree in.
-    pub fn absorb(&mut self, root_of_subtree: &Path, map: StatMap) {
-        self.pending.retain(|p| p != root_of_subtree);
-        self.insert_all(map.into_iter());
+    fn replace_batch(&mut self, mut map: StatMap) -> Prepared {
+        let total = map.remove(&self.root).unwrap_or_default();
+        let children = map
+            .iter()
+            .filter(|(p, _)| p.parent() == Some(self.root.as_path()))
+            .fold(Stat::default(), |mut a, (_, s)| {
+                a.logical += s.logical;
+                a.physical += s.physical;
+                a.files += s.files;
+                a
+            });
+        self.entries.clear();
+        self.paths.clear();
+        self.children.clear();
+        self.child_sums.clear();
+        self.pending.clear();
+        self.direct_files = Stat {
+            logical: total.logical.saturating_sub(children.logical),
+            physical: total.physical.saturating_sub(children.physical),
+            files: total.files.saturating_sub(children.files),
+        };
+        self.insert_all(map.into_iter())
     }
-
-    /// Files that sit directly in the root.
-    pub fn absorb_files(&mut self, files: Vec<(PathBuf, Stat)>) {
-        self.insert_all(files.into_iter());
-    }
-
-    fn insert_all(&mut self, items: impl Iterator<Item = (PathBuf, Stat)>) {
-        let mut touched: Vec<PathBuf> = Vec::new();
+    fn insert_all(&mut self, items: impl Iterator<Item = (PathBuf, Stat)>) -> Prepared {
+        let mut touched: HashMap<PathBuf, Vec<u32>> = HashMap::new();
+        let mut nodes = Vec::new();
         for (path, stat) in items {
+            if nodes.len() % CHUNK_NODES == 0
+                && self
+                    .cancel
+                    .as_ref()
+                    .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                break;
+            }
             let Some(parent) = path.parent().map(Path::to_path_buf) else {
                 continue;
             };
-            let idx = self.entries.len() as u32;
-            self.entries.push((path, stat));
-            self.children.entry(parent.clone()).or_default().push(idx);
-            if !touched.contains(&parent) {
-                touched.push(parent);
+            let indices = touched
+                .entry(parent)
+                .or_insert_with(|| self.children_of(path.parent().unwrap()).to_vec());
+            let existing = self.paths.get(&path).copied();
+            let index = existing.unwrap_or(self.entries.len() as u32);
+            let pending = self.pending.contains(&path);
+            self.set_node(index, path.clone(), stat, pending);
+            if existing.is_none() {
+                indices.push(index);
             }
+            nodes.push((index, path, stat, pending));
         }
-        // Re-sort only the parents this batch actually changed.
-        for parent in touched {
-            if let Some(v) = self.children.get_mut(&parent) {
-                let entries = &self.entries;
-                v.sort_unstable_by_key(|&i| std::cmp::Reverse(entries[i as usize].1.physical));
+        let mut parents = Vec::with_capacity(touched.len());
+        for (parent, indices) in touched {
+            if self
+                .cancel
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                break;
             }
+            let orders: Orders = std::array::from_fn(|sort| {
+                if self
+                    .cancel
+                    .as_ref()
+                    .is_some_and(|flag| flag.load(Ordering::Relaxed))
+                {
+                    return Arc::from([]);
+                }
+                let mut sorted = indices.clone();
+                sorted.sort_unstable_by(|a, b| {
+                    let (pa, sa) = self.entry(*a);
+                    let (pb, sb) = self.entry(*b);
+                    match sort {
+                        1 => sb.logical.cmp(&sa.logical),
+                        2 => sb.files.cmp(&sa.files),
+                        3 => pa.cmp(pb),
+                        _ => sb.physical.cmp(&sa.physical),
+                    }
+                    .then_with(|| pa.cmp(pb))
+                });
+                Arc::from(sorted)
+            });
+            self.children.insert(parent.clone(), orders.clone());
+            parents.push((parent, orders));
+        }
+        Prepared { nodes, parents }
+    }
+    fn set_node(&mut self, index: u32, path: PathBuf, stat: Stat, pending: bool) {
+        let old = if (index as usize) < self.entries.len() {
+            std::mem::replace(&mut self.entries[index as usize].1, stat)
+        } else {
+            assert_eq!(
+                index as usize,
+                self.entries.len(),
+                "ordered display node IDs"
+            );
+            self.paths.insert(path.clone(), index);
+            self.entries.push((path.clone(), stat));
+            Stat::default()
+        };
+        if let Some(parent) = path.parent() {
+            let sum = self.child_sums.entry(parent.to_path_buf()).or_default();
+            sum.files = sum.files.saturating_sub(old.files) + stat.files;
+            sum.logical = sum.logical.saturating_sub(old.logical) + stat.logical;
+            sum.physical = sum.physical.saturating_sub(old.physical) + stat.physical;
+        }
+        if pending {
+            self.pending.insert(path);
+        } else {
+            self.pending.remove(&path);
         }
     }
-
-    /// Direct children of `dir`, largest first. Empty when nothing is known yet.
+    pub fn apply(&mut self, update: Update) {
+        match update {
+            Update::Nodes(nodes) => {
+                for (index, path, stat, pending) in nodes {
+                    self.set_node(index, path, stat, pending);
+                }
+            }
+            Update::Parent(parent, orders) => {
+                self.children.insert(parent, orders);
+            }
+            Update::Direct(stat) => self.direct_files = stat,
+            Update::Resolved(path) => {
+                self.pending.remove(&path);
+            }
+            Update::Reset => *self = Self::new(self.root.clone()),
+        }
+    }
+    pub fn children_sorted(&self, dir: &Path, sort: u8) -> &[u32] {
+        self.children
+            .get(dir)
+            .map(|orders| orders[usize::from(sort.min(3))].as_ref())
+            .unwrap_or(&[])
+    }
     pub fn children_of(&self, dir: &Path) -> &[u32] {
-        self.children.get(dir).map(Vec::as_slice).unwrap_or(&[])
+        self.children_sorted(dir, 0)
     }
-
     pub fn entry(&self, index: u32) -> (&Path, &Stat) {
         let (p, s) = &self.entries[index as usize];
-        (p.as_path(), s)
+        (p, s)
     }
-
-    /// Whether `dir` has anything under it, used to decide if a row is
-    /// expandable without materialising its children.
     pub fn has_children(&self, dir: &Path) -> bool {
-        self.children.get(dir).is_some_and(|v| !v.is_empty())
+        !self.children_of(dir).is_empty()
     }
-
-    /// Total for a directory. The root's own total is the sum of its children,
-    /// because no single scan covered the whole root.
     pub fn total_of(&self, dir: &Path) -> Stat {
         if dir == self.root {
-            return self
-                .children_of(dir)
-                .iter()
-                .fold(Stat::default(), |mut acc, &i| {
-                    let (_, s) = self.entry(i);
-                    acc.logical += s.logical;
-                    acc.physical += s.physical;
-                    acc.files += s.files;
-                    acc
-                });
+            let mut total = self.child_sums.get(dir).copied().unwrap_or_default();
+            total.files += self.direct_files.files;
+            total.logical += self.direct_files.logical;
+            total.physical += self.direct_files.physical;
+            return total;
         }
-        self.children
-            .get(dir.parent().unwrap_or(dir))
-            .and_then(|v| {
-                v.iter()
-                    .map(|&i| self.entry(i))
-                    .find(|(p, _)| *p == dir)
-                    .map(|(_, s)| *s)
-            })
+        self.paths
+            .get(dir)
+            .map(|&i| self.entries[i as usize].1)
             .unwrap_or_default()
     }
+    pub fn direct_files_of(&self, dir: &Path) -> Stat {
+        if dir == self.root {
+            return self.direct_files;
+        }
+        let mut total = self.total_of(dir);
+        let children = self.child_sums.get(dir).copied().unwrap_or_default();
+        total.logical = total.logical.saturating_sub(children.logical);
+        total.physical = total.physical.saturating_sub(children.physical);
+        total.files = total.files.saturating_sub(children.files);
+        total
+    }
+    pub fn rows(&self) -> Vec<(PathBuf, Stat)> {
+        let mut rows = self.entries.clone();
+        rows.push((self.root.clone(), self.total_of(&self.root)));
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        rows
+    }
+}
+
+#[cfg(test)]
+pub fn test_handle(capacity: usize) -> (mpsc::SyncSender<Msg>, Handle) {
+    let (tx, rx) = mpsc::sync_channel(capacity);
+    (
+        tx,
+        Handle {
+            rx,
+            files_seen: Arc::default(),
+            errors: Arc::default(),
+            error_details: Arc::default(),
+            cancel: Arc::default(),
+        },
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn stat(physical: u64) -> Stat {
-        Stat {
-            logical: physical,
-            physical,
+    #[test]
+    fn options_and_invalid_patterns() {
+        let p = Params {
+            min_size: "2 MiB".into(),
+            regex: "[".into(),
+            ..Params::default()
+        };
+        assert!(p.to_options().is_err());
+        let p = Params {
+            regex: "ignored$".into(),
+            threads: 3,
+            max_depth: 2,
+            follow_links: true,
+            count_hardlinks: true,
+            one_file_system: true,
+            size_mode: 1,
+            io_profile: core::IoProfile::Gentle,
+            prefetch: 2,
+            ..p
+        };
+        let o = p.to_options().unwrap();
+        assert_eq!(o.min_file_size, 2097152);
+        assert_eq!(o.threads, 3);
+        assert_eq!(o.max_depth, 2);
+        assert!(o.follow_links && o.count_hardlinks && o.one_file_system);
+        assert!(!o.compute_physical);
+        assert_eq!(o.prefetch, Some(false));
+    }
+    #[test]
+    fn placeholders_are_replaced_and_direct_files_have_no_fake_path() {
+        let root = PathBuf::from("root");
+        let child = root.join("a");
+        let mut m = Model::new(root.clone());
+        let pending = root.join("pending");
+        m.expect(vec![child.clone(), pending]);
+        m.direct_files = Stat {
+            logical: 7,
+            physical: 8,
             files: 1,
-        }
-    }
-
-    fn params_excluding(exclude: &[&str]) -> Params {
-        Params {
-            exclude: exclude.iter().map(|s| s.to_string()).collect(),
-            min_file_size: 0,
-            max_depth: 0,
-            follow_links: false,
-        }
-    }
-
-    /// The excluded directory sits at the top level, which is the case the
-    /// backends cannot cover: they filter the children of whatever directory
-    /// they are walking, and each of these becomes a scan root of its own. Left
-    /// to `read_dir` alone, `node_modules` came back and got scanned.
-    #[test]
-    fn list_root_drops_excluded_top_level_directories() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::create_dir(root.join("node_modules")).unwrap();
-        std::fs::create_dir(root.join("keep")).unwrap();
-
-        let opt = params_excluding(&["node_modules"]).to_options(Arc::new(AtomicU64::new(0)));
-        let (dirs, _) = list_root(root, &opt);
-
-        let names: Vec<_> = dirs
-            .iter()
-            .filter_map(|p| p.file_name()?.to_str())
-            .collect();
-        assert_eq!(names, ["keep"], "excluded top-level directory came back");
-    }
-
-    #[test]
-    fn list_root_drops_excluded_top_level_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("keep.txt"), b"x").unwrap();
-        std::fs::write(root.join("skip.log"), b"x").unwrap();
-
-        let opt = params_excluding(&[".log"]).to_options(Arc::new(AtomicU64::new(0)));
-        let (_, files) = list_root(root, &opt);
-
-        let names: Vec<_> = files
-            .iter()
-            .filter_map(|(p, _)| p.file_name()?.to_str())
-            .collect();
-        assert_eq!(names, ["keep.txt"], "excluded top-level file came back");
-    }
-
-    /// `metadata().len()` is the logical size, so using it for both made a
-    /// root-level file report a different number than the same file one level
-    /// down, where the scan reports the allocated size. Asking core keeps the
-    /// two consistent; on a filesystem that rounds up they differ, and on one
-    /// that does not they are equal -- either way both halves now agree.
-    #[test]
-    fn list_root_reports_the_size_core_would() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        let path = root.join("f.bin");
-        std::fs::write(&path, vec![b'x'; 10240]).unwrap();
-
-        let opt = params_excluding(&[]).to_options(Arc::new(AtomicU64::new(0)));
-        let (_, files) = list_root(root, &opt);
-
-        assert_eq!(files.len(), 1);
-        let (_, got) = &files[0];
-        let expected = core::file_stat(&path, &opt).expect("core stats a regular file");
-        assert_eq!(got.logical, expected.logical);
-        assert_eq!(
-            got.physical, expected.physical,
-            "root-level file must carry the same physical size the scan would report"
+        };
+        let mut map = StatMap::default();
+        map.insert(
+            child.clone(),
+            Stat {
+                logical: 3,
+                physical: 4,
+                files: 1,
+            },
         );
-        assert_eq!(got.logical, 10240, "logical size is the byte count");
-    }
-
-    /// Directories are handed on as scan roots and must not be mistaken for
-    /// files, and a file must not be enqueued as a directory to scan.
-    #[test]
-    fn list_root_separates_directories_from_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::create_dir(root.join("d")).unwrap();
-        std::fs::write(root.join("f"), b"x").unwrap();
-
-        let opt = params_excluding(&[]).to_options(Arc::new(AtomicU64::new(0)));
-        let (dirs, files) = list_root(root, &opt);
-
-        assert_eq!(dirs.len(), 1);
-        assert!(dirs[0].ends_with("d"));
-        assert_eq!(files.len(), 1);
-        assert!(files[0].0.ends_with("f"));
-    }
-
-    /// Synthetic paths only; nothing here touches a filesystem.
-    fn subtree(pairs: &[(&str, u64)]) -> StatMap {
-        pairs
-            .iter()
-            .map(|(p, size)| (PathBuf::from(p), stat(*size)))
-            .collect()
-    }
-
-    #[test]
-    fn children_are_ordered_by_physical_size_descending() {
-        let mut m = Model::new(PathBuf::from("/root"));
-        m.absorb(
-            Path::new("/root/a"),
-            subtree(&[("/root/a", 10), ("/root/a/small", 1), ("/root/a/big", 9)]),
-        );
-
-        let names: Vec<_> = m
-            .children_of(Path::new("/root/a"))
-            .iter()
-            .map(|&i| m.entry(i).0.file_name().unwrap().to_str().unwrap())
-            .collect();
-        assert_eq!(names, ["big", "small"]);
-    }
-
-    #[test]
-    fn ordering_survives_a_later_subtree_landing_in_the_same_parent() {
-        // Subtrees stream in one at a time, so a parent gets appended to more
-        // than once and must be re-sorted each time, not just on first insert.
-        let mut m = Model::new(PathBuf::from("/root"));
-        m.absorb(Path::new("/root/a"), subtree(&[("/root/a", 5)]));
-        m.absorb(Path::new("/root/b"), subtree(&[("/root/b", 50)]));
-        m.absorb(Path::new("/root/c"), subtree(&[("/root/c", 20)]));
-
-        let names: Vec<_> = m
-            .children_of(Path::new("/root"))
-            .iter()
-            .map(|&i| m.entry(i).0.file_name().unwrap().to_str().unwrap())
-            .collect();
-        assert_eq!(names, ["b", "c", "a"]);
-    }
-
-    #[test]
-    fn root_total_is_the_sum_of_its_children() {
-        // No single scan covers the root, so its total has to be derived.
-        let mut m = Model::new(PathBuf::from("/root"));
-        m.absorb(Path::new("/root/a"), subtree(&[("/root/a", 30)]));
-        m.absorb(Path::new("/root/b"), subtree(&[("/root/b", 12)]));
-
-        let total = m.total_of(Path::new("/root"));
-        assert_eq!(total.physical, 42);
-        assert_eq!(total.files, 2);
-    }
-
-    #[test]
-    fn total_of_a_child_reads_the_entry_recorded_for_it() {
-        let mut m = Model::new(PathBuf::from("/root"));
-        m.absorb(Path::new("/root/a"), subtree(&[("/root/a", 7)]));
-        assert_eq!(m.total_of(Path::new("/root/a")).physical, 7);
-    }
-
-    #[test]
-    fn unknown_directory_has_no_children_and_no_total() {
-        let m = Model::new(PathBuf::from("/root"));
-        assert!(m.children_of(Path::new("/root/nope")).is_empty());
-        assert!(!m.has_children(Path::new("/root/nope")));
-        assert_eq!(m.total_of(Path::new("/root/nope")).physical, 0);
-    }
-
-    #[test]
-    fn a_leaf_reports_no_children_so_the_tree_does_not_offer_to_expand_it() {
-        let mut m = Model::new(PathBuf::from("/root"));
-        m.absorb(
-            Path::new("/root/a"),
-            subtree(&[("/root/a", 3), ("/root/a/file", 3)]),
-        );
-        assert!(m.has_children(Path::new("/root/a")));
-        assert!(!m.has_children(Path::new("/root/a/file")));
-    }
-
-    #[test]
-    fn absorbing_a_subtree_clears_it_from_pending() {
-        let mut m = Model::new(PathBuf::from("/root"));
-        m.expect(vec![PathBuf::from("/root/a"), PathBuf::from("/root/b")]);
-        assert_eq!(m.pending_count(), 2);
-        assert!(m.is_pending(Path::new("/root/a")));
-
-        m.absorb(Path::new("/root/a"), subtree(&[("/root/a", 1)]));
-        assert_eq!(m.pending_count(), 1);
-        assert!(!m.is_pending(Path::new("/root/a")));
-        assert!(m.is_pending(Path::new("/root/b")));
-    }
-
-    #[test]
-    fn root_files_are_listed_beside_the_directories() {
-        let mut m = Model::new(PathBuf::from("/root"));
-        m.absorb(Path::new("/root/a"), subtree(&[("/root/a", 5)]));
-        m.absorb_files(vec![(PathBuf::from("/root/loose.txt"), stat(100))]);
-
-        let names: Vec<_> = m
-            .children_of(Path::new("/root"))
-            .iter()
-            .map(|&i| m.entry(i).0.file_name().unwrap().to_str().unwrap())
-            .collect();
-        assert_eq!(names, ["loose.txt", "a"]);
+        m.absorb(&child, map);
         assert_eq!(m.entry_count(), 2);
+        assert_eq!(m.pending_count(), 1);
+        assert_eq!(m.total_of(&root).logical, 10);
+        assert_eq!(m.rows().len(), 3);
+    }
+    #[test]
+    fn both_gui_modes_match_core_total_and_exports() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("a")).unwrap();
+        std::fs::write(temp.path().join("root"), [1; 17]).unwrap();
+        std::fs::write(temp.path().join("a/data"), [2; 9]).unwrap();
+        std::fs::create_dir(temp.path().join("empty")).unwrap();
+        std::fs::create_dir(temp.path().join("b")).unwrap();
+        std::fs::hard_link(temp.path().join("a/data"), temp.path().join("b/link")).unwrap();
+        std::fs::create_dir(temp.path().join("a/deep")).unwrap();
+        std::fs::write(temp.path().join("a/deep/ignored"), [3; 25]).unwrap();
+        for mode in [ScanMode::Interactive, ScanMode::Batch] {
+            for filtered in [false, true] {
+                let params = Params {
+                    mode,
+                    min_size: if filtered { "10" } else { "0" }.into(),
+                    max_depth: if filtered { 1 } else { 0 },
+                    regex: if filtered { "ignored$" } else { "" }.into(),
+                    follow_links: true,
+                    ..Params::default()
+                };
+                let expected =
+                    core::scan_directory(temp.path(), &params.to_options().unwrap()).unwrap();
+                let wakes = Arc::new(AtomicUsize::new(0));
+                let observed = wakes.clone();
+                let handle = start(
+                    temp.path().to_path_buf(),
+                    params,
+                    Arc::new(move || {
+                        observed.fetch_add(1, Ordering::Relaxed);
+                    }),
+                )
+                .unwrap();
+                let mut model = Model::new(temp.path().to_path_buf());
+                loop {
+                    match handle
+                        .rx
+                        .recv_timeout(std::time::Duration::from_secs(10))
+                        .unwrap()
+                    {
+                        Msg::Update(update) => model.apply(update),
+                        Msg::Core(ScanEvent::Finished) => break,
+                        _ => panic!("unexpected scan event"),
+                    }
+                }
+                assert!(
+                    wakes.load(Ordering::Relaxed) > 0,
+                    "event arrival requests repaint"
+                );
+                let total = model.total_of(temp.path());
+                let expected = expected.get(temp.path()).unwrap();
+                assert_eq!(
+                    (total.logical, total.physical, total.files),
+                    (expected.logical, expected.physical, expected.files)
+                );
+                let mut json = Vec::new();
+                core::report::write_json(&mut json, &model.rows()).unwrap();
+                assert!(!json.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn worker_orders_and_cached_totals_match_after_bounded_updates() {
+        let root = PathBuf::from("root");
+        let mut worker = Model::new(root.clone());
+        let mut ui = Model::new(root.clone());
+        let prepared = worker.insert_all(
+            [("a", 10, 1, 3), ("b", 3, 9, 1), ("c", 6, 5, 2)]
+                .into_iter()
+                .map(|(name, logical, physical, files)| {
+                    (
+                        root.join(name),
+                        Stat {
+                            logical,
+                            physical,
+                            files,
+                        },
+                    )
+                }),
+        );
+        for node in prepared.nodes {
+            ui.apply(Update::Nodes(vec![node]));
+        }
+        for (parent, orders) in prepared.parents {
+            ui.apply(Update::Parent(parent, orders));
+        }
+        for (sort, names) in ["bca", "acb", "acb", "abc"].into_iter().enumerate() {
+            let actual: String = ui
+                .children_sorted(&root, sort as u8)
+                .iter()
+                .map(|id| {
+                    ui.entry(*id)
+                        .0
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect();
+            assert_eq!(actual, names);
+        }
+        assert_eq!(ui.total_of(&root).files, 6);
+        assert_eq!(ui.total_of(&root).physical, 15);
+        let unchanged = ui.children[&root][0].clone();
+        let other = worker.insert_all(std::iter::once((root.join("a/deep"), Stat::default())));
+        for node in other.nodes {
+            ui.apply(Update::Nodes(vec![node]));
+        }
+        for (parent, orders) in other.parents {
+            ui.apply(Update::Parent(parent, orders));
+        }
+        assert!(
+            Arc::ptr_eq(&unchanged, &ui.children[&root][0]),
+            "unrelated parent order remains shared"
+        );
+    }
+
+    #[test]
+    fn disconnect_releases_a_blocked_sender_and_cancels_its_handle() {
+        let (tx, handle) = test_handle(0);
+        let flag = handle.cancel.clone();
+        let (done, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            done.send(tx.send(Msg::Core(ScanEvent::Finished)).is_err())
+                .unwrap();
+        });
+        drop(handle);
+        assert!(flag.load(Ordering::Relaxed));
+        assert!(rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap());
     }
 }

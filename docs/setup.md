@@ -1,5 +1,7 @@
 # Setup and build environment
 
+**日本語** · [English](en/setup.md) · [简体中文](zh-CN/setup.md)
+
 この文書では、HyperDU を**実行するだけの場合**と、**Rust からコンパイル・開発する場合**を分けて説明します。
 
 ## 1. 実行するだけの場合
@@ -45,11 +47,10 @@ crate ごとの minimum Rust version は次のとおりです。
 | Crate | Minimum Rust |
 |---|---:|
 | `hyperdu-core` | 1.75+ |
-| `hyperdu-cli` | 1.75+ |
+| `hyperdu` (CLI + MCP) | 1.88+ |
 | `hyperdu-gui` | 1.75+ |
-| `hyperdu-mcp` | 1.88+ |
 
-**workspace 全体を一度に build/test する場合は `hyperdu-mcp` を含むため Rust 1.88+ が必要です。**
+**workspace 全体を一度に build/test する場合は CLI の MCP 実装を含むため Rust 1.88+ が必要です。**
 
 開発環境では stable toolchain を推奨します。
 
@@ -71,7 +72,7 @@ cd HyperDiskUsage
 ### CLI only
 
 ```bash
-cargo build --release -p hyperdu-cli
+cargo build --release -p hyperdu
 ```
 
 実行:
@@ -117,8 +118,8 @@ x86_64-pc-windows-msvc
 build:
 
 ```powershell
-cargo build --release -p hyperdu-cli
-cargo test -p hyperdu-core -p hyperdu-cli
+cargo build --release -p hyperdu
+cargo test -p hyperdu-core -p hyperdu
 ```
 
 `--mft` の実 volume 検証は通常 build とは別です。NTFS volume root と管理者権限が必要で、条件を満たさない場合 HyperDU は通常の directory enumeration に fallback します。
@@ -137,8 +138,8 @@ sudo apt-get install -y build-essential pkg-config
 その後:
 
 ```bash
-cargo build --release -p hyperdu-cli
-cargo test -p hyperdu-core -p hyperdu-cli
+cargo build --release -p hyperdu
+cargo test -p hyperdu-core -p hyperdu
 ```
 
 release packaging や cross build を行う場合は追加 toolchain が必要です。CI の release workflow では、用途に応じて `musl-tools`、`gcc-aarch64-linux-gnu`、`mingw-w64`、`zip`、`jq`、`rpm` なども使用しています。
@@ -164,21 +165,22 @@ GUI は現在 release target に含めていません。
 
 ## 4. MCP server をビルドする
 
-`hyperdu-mcp` は `rmcp` の要件により **Rust 1.88+** が必要です。
+`hyperdu mcp` は `rmcp` の要件により **Rust 1.88+** が必要です。
 
 ```bash
 rustup toolchain install stable
-cargo build --release -p hyperdu-mcp
-cargo install --path hyperdu-mcp
+cargo build --release -p hyperdu
+cargo install --path hyperdu
+hyperdu mcp
 ```
 
-`hyperdu-mcp` は通常の対話型 CLI ではなく、**stdio 上で MCP client から接続される server** です。直接起動すると protocol input を待機します。
+`hyperdu mcp` は通常の対話型 CLI ではなく、**stdio 上で MCP client から接続される server** です。直接起動すると protocol input を待機します。
 
 登録例:
 
 ```bash
-claude mcp add --transport stdio hyperdu -- hyperdu-mcp
-codex mcp add hyperdu -- hyperdu-mcp
+claude mcp add --transport stdio hyperdu -- hyperdu mcp
+codex mcp add hyperdu -- hyperdu mcp
 ```
 
 動作確認は利用する MCP client 側から server が起動・接続できることを確認してください。
@@ -219,13 +221,13 @@ cargo test --workspace \
 通常の比較では、必ず release build を使います。
 
 ```bash
-cargo build --release -p hyperdu-cli
+cargo build --release -p hyperdu
 ```
 
 ローカル CPU 専用の比較を行う場合のみ、条件を記録したうえで native optimization を使用します。
 
 ```bash
-RUSTFLAGS="-C target-cpu=native" cargo build --release -p hyperdu-cli
+RUSTFLAGS="-C target-cpu=native" cargo build --release -p hyperdu
 ```
 
 `target-cpu=native` の結果を generic prebuilt binary の性能値と混同しないでください。
@@ -245,7 +247,7 @@ hyperdu . --top 10
 開発 checkout では:
 
 ```bash
-cargo run -p hyperdu-cli -- --help
+cargo run -p hyperdu -- --help
 ```
 
 問題が performance path に関係する場合は、OS、filesystem、Rust version、build profile、CPU、storage、実行 command をセットで記録してください。

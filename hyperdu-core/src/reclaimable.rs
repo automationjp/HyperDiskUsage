@@ -118,11 +118,6 @@ const RULES: &[Rule] = &[
         kind: Kind::PythonCache,
         requires_sibling: None,
     },
-    Rule {
-        dir_name: ".gradle",
-        kind: Kind::GradleCache,
-        requires_sibling: None,
-    },
 ];
 
 /// Depth of the mtime sample taken inside each candidate.
@@ -131,8 +126,8 @@ const RULES: &[Rule] = &[
 /// on a 20 GiB target directory -- measured, not guessed -- which is more than
 /// a tool call should spend. Two levels catch what actually gets touched: cargo
 /// rewrites `target/debug/` and `target/.rustc_info.json` on every build, npm
-/// rewrites `node_modules/.package-lock.json`. A directory whose top two levels
-/// are cold has not been built in recently.
+/// rewrites `node_modules/.package-lock.json`. This is only a modification-age
+/// sample: writes deeper in a tree and processes reading files are not detected.
 const MTIME_SAMPLE_DEPTH: u32 = 2;
 
 /// Directories never descended into, regardless of depth.
@@ -145,9 +140,8 @@ const SECONDS_PER_DAY: u64 = 60 * 60 * 24;
 /// Find regenerable directories under `root`.
 ///
 /// `min_size_bytes` drops small fry, and `unused_for_days` keeps only
-/// candidates whose sampled timestamps are at least that old -- the filter that
-/// makes this safe to act on, since a directory an active build is writing to
-/// is never idle.
+/// candidates whose sampled timestamps are at least that old. This heuristic
+/// does not establish that a directory is unused or safe to delete.
 ///
 /// `max_depth` bounds the search, not the size measurement: a candidate found
 /// at the limit is still measured in full. Zero means unlimited, matching
@@ -182,7 +176,7 @@ pub fn find(
 /// inside it. A `node_modules` nested in a `target` is already accounted for by
 /// the enclosing directory's size, and reporting both would double-count.
 fn collect(dir: &Path, depth: u32, max_depth: u32, out: &mut Vec<(PathBuf, Kind)>) {
-    if max_depth != 0 && depth > max_depth {
+    if max_depth != 0 && depth >= max_depth {
         return;
     }
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -218,6 +212,21 @@ fn collect(dir: &Path, depth: u32, max_depth: u32, out: &mut Vec<(PathBuf, Kind)
 /// Decide whether `path` is build output, given its own name and what sits
 /// beside it.
 fn classify(path: &Path, name: &str) -> Option<Kind> {
+    // Gradle User Home also holds user-authored gradle.properties and init.d.
+    // Only its generated cache/distribution subtrees are reclaimable.
+    let parent = path.parent()?;
+    if name == "caches" && parent.file_name().is_some_and(|n| n == ".gradle") {
+        return Some(Kind::GradleCache);
+    }
+    if name == "dists"
+        && parent.file_name().is_some_and(|n| n == "wrapper")
+        && parent
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|n| n == ".gradle")
+    {
+        return Some(Kind::GradleCache);
+    }
     let rule = RULES.iter().find(|r| r.dir_name == name)?;
     match rule.requires_sibling {
         Some(sibling) => {
@@ -252,27 +261,21 @@ fn measure(path: &Path, kind: Kind, now: SystemTime) -> Option<Candidate> {
 /// negative age as a huge positive one, so callers treat `duration_since`
 /// failure as "unknown" rather than "ancient".
 fn newest_mtime(dir: &Path, depth: u32) -> Option<SystemTime> {
-    let own = std::fs::metadata(dir).and_then(|m| m.modified()).ok();
+    let mut newest = std::fs::metadata(dir).and_then(|m| m.modified()).ok()?;
     if depth == 0 {
-        return own;
+        return Some(newest);
     }
-
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return own;
-    };
-
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            match entry.file_type() {
-                Ok(ft) if ft.is_dir() => newest_mtime(&path, depth - 1),
-                Ok(_) => entry.metadata().and_then(|m| m.modified()).ok(),
-                Err(_) => None,
-            }
-        })
-        .chain(own)
-        .max()
+    // A partially unreadable sample is unknown, not evidence of old age.
+    for entry in std::fs::read_dir(dir).ok()? {
+        let entry = entry.ok()?;
+        let modified = if entry.file_type().ok()?.is_dir() {
+            newest_mtime(&entry.path(), depth - 1)?
+        } else {
+            entry.metadata().and_then(|m| m.modified()).ok()?
+        };
+        newest = newest.max(modified);
+    }
+    Some(newest)
 }
 
 #[cfg(test)]
@@ -379,12 +382,12 @@ mod tests {
 
     #[test]
     fn freshly_written_candidates_fail_an_idle_filter() {
-        // This is the safety property that made the filter worth having: a
-        // directory an active build is writing to must never be offered up.
+        // A recent timestamp inside the sampled levels rejects the candidate.
+        // Timestamps do not establish whether a process is using the tree.
         let dir = tree(&["Cargo.toml", "target/debug/just-built.o"]);
         assert!(
             find(dir.path(), 0, Some(1), 0).is_empty(),
-            "a directory written to seconds ago is not idle"
+            "a sampled timestamp from seconds ago fails the age threshold"
         );
         assert_eq!(
             find(dir.path(), 0, None, 0).len(),
@@ -447,11 +450,11 @@ mod tests {
 
     #[test]
     fn every_kind_names_a_rebuild_command() {
-        for rule in RULES {
+        for kind in RULES.iter().map(|r| r.kind).chain([Kind::GradleCache]) {
             assert!(
-                !rule.kind.rebuild_hint().is_empty(),
+                !kind.rebuild_hint().is_empty(),
                 "{} must explain how to regenerate it",
-                rule.kind.as_str()
+                kind.as_str()
             );
         }
     }
@@ -460,5 +463,47 @@ mod tests {
     fn returns_nothing_for_a_missing_root() {
         let missing = Path::new("/hyperdu-nonexistent-root-probe-4c81ff");
         assert!(find(missing, 0, None, 0).is_empty());
+    }
+    #[test]
+    fn gradle_user_home_does_not_include_user_configuration() {
+        let dir = tree(&[
+            "build.gradle.kts",
+            ".gradle/gradle.properties",
+            ".gradle/init.d/company.gradle",
+            ".gradle/caches/modules-2/dependency.jar",
+            ".gradle/wrapper/dists/gradle.zip",
+        ]);
+        let found = find(dir.path(), 0, None, 0);
+        let mut paths: Vec<_> = found
+            .iter()
+            .map(|c| c.path.strip_prefix(dir.path()).unwrap())
+            .collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec![
+                Path::new(".gradle/caches"),
+                Path::new(".gradle/wrapper/dists")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_manifest_does_not_make_the_whole_gradle_directory_reclaimable() {
+        let dir = tree(&["build.gradle.kts", ".gradle/8.0/fileHashes/fileHashes.bin"]);
+        assert!(find(dir.path(), 0, None, 0).is_empty());
+    }
+
+    #[test]
+    fn depth_limit_applies_to_the_candidate_not_just_its_parent() {
+        let dir = tree(&["project/Cargo.toml", "project/target/debug/x.o"]);
+        assert!(find(dir.path(), 0, None, 1).is_empty());
+        assert_eq!(names(&find(dir.path(), 0, None, 2)), vec!["target"]);
+    }
+
+    #[test]
+    fn a_failed_directory_sample_does_not_use_its_own_old_timestamp() {
+        let dir = tree(&["not-a-directory"]);
+        assert!(newest_mtime(&dir.path().join("not-a-directory"), 2).is_none());
     }
 }

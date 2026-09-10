@@ -22,11 +22,11 @@ mkdir -p "$snap_dir"
 # committed copy could never have stuck.
 #
 # Ask cargo instead, like brew.sh and scoop.ps1 do -- the crate inherits
-# `version.workspace = true`, so the literal is not in hyperdu-cli/Cargo.toml.
+# `version.workspace = true`, so the literal is not in hyperdu/Cargo.toml.
 # pkgid prints `<url>#<version>`.
-version="$(cargo pkgid -p hyperdu-cli --manifest-path "$root_dir/Cargo.toml" | sed 's/.*[#@]//')"
+version="$(cargo pkgid -p hyperdu --manifest-path "$root_dir/Cargo.toml" | sed 's/.*[#@]//')"
 if [[ -z "$version" ]]; then
-  echo "error: could not determine hyperdu-cli version from cargo pkgid" >&2
+  echo "error: could not determine hyperdu version from cargo pkgid" >&2
   exit 1
 fi
 
@@ -57,9 +57,9 @@ parts:
     # makes `cargo read-manifest` fail against a virtual workspace root -- and
     # that drags in hyperdu-gui, whose GTK build dependencies are not declared
     # below. With a real package path the plugin runs `cargo install --locked
-    # --path hyperdu-cli --root <install>`, which lands exactly the bin/hyperdu
+    # --path hyperdu --root <install>`, which lands exactly the bin/hyperdu
     # that `apps` and `prime` expect.
-    rust-path: [hyperdu-cli]
+    rust-path: [hyperdu]
     build-packages: [pkg-config]
     stage-packages: []
     prime:

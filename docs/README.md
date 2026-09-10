@@ -1,61 +1,36 @@
-# HyperDU Documentation
+# HyperDU ドキュメント
 
-HyperDU のドキュメントは、**高速なディスク使用量解析をどう実現し、どうセットアップし、どう検証するか**を中心に整理しています。
+**日本語** · [English](en/README.md) · [简体中文](zh-CN/README.md)
 
-現在公開する性能数値は再計測中です。過去の計測値は `old/` に保存し、現行ドキュメントでは新しい測定が完了するまで `TBD` としています。
+導入方法、スキャンエンジンの設計、検証方法をまとめています。
 
-## まず読む
-
-| 目的 | ドキュメント |
+| 目的 | 文書 |
 |---|---|
-| インストール、Rust、OS依存、build/test環境を準備したい | [Setup and build environment](setup.md) |
-| HyperDU がなぜ速いのか知りたい | [Performance design](performance.md) |
-| 性能を再計測・比較したい | [Benchmark plan](benchmarks.md) |
-| CLI / GUI / MCP と scanner の関係を知りたい | [Architecture](architecture.md) |
-| Linux の保存済み snapshot を使いたい | [Linux directory snapshots](index-snapshots.md) |
-| AI Agent / MCP / Skill を使いたい | [Agent Plugin / Skill](../plugin/README.md) |
+| CLI引数の既定値・出力形式・対応OS | [CLIパラメータリファレンス](cli-reference.md) |
+| インストール・Rust・OS依存・build/test環境 | [セットアップ](setup.md) |
+| 高速化の仕組みとトレードオフ | [性能設計](performance.md) |
+| GNU duとの同一条件比較・全試行・測定条件 | [ベンチマーク](benchmarks.md) |
+| CLI・GUI・MCPとコア、インタラクティブ走査 | [アーキテクチャ](architecture.md) |
+| Linuxの保存済みディレクトリ情報 | [スナップショット](index-snapshots.md) |
+| AIエージェントとの連携 | [Plugin / Skill / MCP](../plugin/README.md) |
+| 2026-09-10時点のセキュリティ監査 | [セキュリティ監査報告書](security-audit-2026-09-10.md) |
 
-## Setup first
+## 環境の準備
 
-HyperDU は導入方法によって必要な環境が異なります。
+配布済みバイナリの実行にRustは不要です。ソースからのCLI（MCP同梱）またはworkspace全体の
+ビルドにはRust 1.88+、core/GUIの宣言上の最低版は1.75です。WindowsはMSVCとWindows SDK、
+Linuxはネイティブビルドツール、Linux GUIはX11/Waylandの開発ライブラリが必要です。
+詳しいコマンドと検証範囲は[セットアップ](setup.md)を参照してください。
 
-- **prebuilt / Scoop / `.deb` を使うだけ**: Rust toolchain は不要
-- **CLI / Core / GUI をソースから build**: Rust 1.75+ が最低要件
-- **MCP または workspace 全体を build/test**: Rust 1.88+ が必要
-- **Windows source build**: MSVC toolchain + Windows SDK を推奨
-- **Linux source build**: Rust に加えて native build toolchain が必要
-- **Linux GUI**: X11 / Wayland development libraries が必要
+## 性能の読み方
 
-コマンドを含む詳細は [Setup and build environment](setup.md) を参照してください。
+OS固有の列挙と並列処理の設計は[性能設計](performance.md)を参照してください。現在はAWS EC2で、GNU `du` と同じ集計条件・直接一致する出力による再計測を準備中です。旧WSL2比較の倍率は現行速度の根拠に使用しません。[比較条件と取得状況](benchmarks.md)を確認してください。
 
-## Performance first
+## 現行文書と過去の記録
 
-HyperDU の主題は、単に Rust で `du` を再実装することではありません。
+`docs/` 直下が日本語版、`docs/en/` が英語版、`docs/zh-CN/` が簡体字中国語版です。
+コマンド・版・測定表は共通です。`docs/old/` は過去のベンチマークやIssue固有の設計・検証記録を
+原文のまま保存しています。現在の仕様や速度の根拠として使わないでください。
+[過去資料の一覧](old/README.md)を参照できます。
 
-- OS 固有の高速な列挙 API を使う
-- syscall / handle open をできるだけ減らす
-- サブツリー単位で並列化し、work stealing で負荷を均す
-- filesystem の性格に応じて走査戦略を変える
-- Windows では条件を満たす場合に NTFS `$MFT` を直接読む
-
-詳細は [Performance design](performance.md) を参照してください。
-
-## Benchmark status
-
-**現在の公開用 benchmark は再計測待ちです。**
-
-| Platform | Dataset | HyperDU | Comparison | Ratio |
-|---|---|---:|---:|---:|
-| Windows / NTFS | TBD | TBD | TBD | TBD |
-| Linux / ext4 | TBD | TBD | TBD | TBD |
-| Linux / XFS | TBD | TBD | TBD | TBD |
-
-数値を埋める前に必要な作業は [Benchmark plan](benchmarks.md) にチェックリストとして記載しています。
-
-## Current docs と old docs の区別
-
-`docs/` 直下は、現在の利用者・開発者が参照する文書です。
-
-`docs/old/` は過去の benchmark、Issue 固有の設計、実装・検証記録です。履歴として残しますが、**現在仕様や現在の性能主張の根拠としては使用しません**。
-
-過去資料の一覧は [old/README.md](old/README.md) を参照してください。
+[POSIX du compatibility audit](posix-compatibility.md)

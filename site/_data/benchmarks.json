@@ -1,0 +1,104 @@
+{
+  "date": "2026-09-09",
+  "commit": "0a089c90c0e2995ef702ff053820d129265c3659",
+  "platforms": [
+    {
+      "id": "windows",
+      "title": "Windows",
+      "subtitle": "NTFS / Native",
+      "machine": "Ryzen 9 3900X · 24 threads · Windows 11",
+      "baseline": "robocopy",
+      "rows": [
+        {
+          "label": "wide",
+          "shape": "500 dirs × 40 files",
+          "files": "20,000",
+          "hyperdu_ms": 30.7,
+          "baseline_ms": 57.4,
+          "ratio": 1.87,
+          "hyperdu_width": 53.5,
+          "baseline_width": 100.0
+        },
+        {
+          "label": "deep",
+          "shape": "400 levels × 5 files",
+          "files": "2,000",
+          "hyperdu_ms": 77.1,
+          "baseline_ms": 72.0,
+          "ratio": 0.93,
+          "hyperdu_width": 100.0,
+          "baseline_width": 93.41
+        },
+        {
+          "label": "flat",
+          "shape": "1 dir × 20,000 files",
+          "files": "20,000",
+          "hyperdu_ms": 34.1,
+          "baseline_ms": 42.8,
+          "ratio": 1.26,
+          "hyperdu_width": 79.58,
+          "baseline_width": 100.0
+        },
+        {
+          "label": "registry",
+          "shape": "Cargo registry",
+          "files": "111,813",
+          "hyperdu_ms": 332.2,
+          "baseline_ms": 1838.5,
+          "ratio": 5.53,
+          "hyperdu_width": 18.07,
+          "baseline_width": 100.0
+        }
+      ]
+    },
+    {
+      "id": "linux",
+      "title": "Linux",
+      "subtitle": "ext4 / WSL2",
+      "machine": "Ubuntu 26.04 · 16 vCPU · uutils 0.8.0",
+      "baseline": "du",
+      "rows": [
+        {
+          "label": "wide",
+          "shape": "500 dirs × 40 files",
+          "files": "20,000",
+          "hyperdu_ms": 47.3,
+          "baseline_ms": 208.6,
+          "ratio": 4.41,
+          "hyperdu_width": 22.7,
+          "baseline_width": 100.0
+        },
+        {
+          "label": "deep",
+          "shape": "400 levels × 5 files",
+          "files": "2,000",
+          "hyperdu_ms": 89.1,
+          "baseline_ms": 143.4,
+          "ratio": 1.61,
+          "hyperdu_width": 62.16,
+          "baseline_width": 100.0
+        },
+        {
+          "label": "flat",
+          "shape": "1 dir × 20,000 files",
+          "files": "20,000",
+          "hyperdu_ms": 130.5,
+          "baseline_ms": 184.4,
+          "ratio": 1.41,
+          "hyperdu_width": 70.76,
+          "baseline_width": 100.0
+        },
+        {
+          "label": "registry",
+          "shape": "Cargo registry",
+          "files": "37,814",
+          "hyperdu_ms": 144.6,
+          "baseline_ms": 978.9,
+          "ratio": 6.77,
+          "hyperdu_width": 14.77,
+          "baseline_width": 100.0
+        }
+      ]
+    }
+  ]
+}

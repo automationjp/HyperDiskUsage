@@ -11,20 +11,20 @@ on:
   # Inherited from windows-msi.yml, which is gone: it ran this same
   # scripts/package/release.ps1 on every tag and uploaded a second copy of the
   # artifacts the `windows` job below already produces. A manual run here builds
-  # without publishing -- every upload step is guarded by
-  # `startsWith(github.ref, 'refs/tags/')`, and so is `publish`.
+  # without publishing. Only tag runs can enter the privileged publish job.
   workflow_dispatch: {}
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
       # cargo-deb was compiled from source on every tag, inside a step that took
@@ -32,7 +32,7 @@ jobs:
       # cargo-generate-rpm cannot follow: neither publishes release binaries
       # (checked at 0.3.9 and v0.21.0) and install-action carries no manifest
       # for either, so they stay source builds -- here and in the windows job.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@c3ec0de9ae7f1019cea21aa96aa0a895b9552063 # v2
         with:
           tool: cargo-deb
       - name: Install build dependencies
@@ -51,11 +51,8 @@ jobs:
         run: |
           # Build Linux targets only here; Windows artifacts are built on the Windows runner to avoid duplicates.
           #
-          # linux-appimage goes through release.sh rather than calling
-          # scripts/package/appimage.sh directly. Only release.sh downloads
-          # linuxdeploy and appimagetool first, and the direct call this replaces
-          # failed every release with "error: linuxdeploy not found" -- into a
-          # step that ended in `|| true`, so nothing said so.
+          # AppImage is optional. Only independently verified local tools are used;
+          # absent/invalid tools produce a warning and an archived diagnostic log.
           bash scripts/package/release.sh --targets "linux-gnu,linux-musl,linux-aarch64,linux-appimage" \
             --cpu-flavors "generic" --deb --rpm --verbose
       - name: Generate Snap/Flatpak manifests
@@ -68,7 +65,7 @@ jobs:
       - name: Drop the build tree before the snap build
         run: rm -rf target
       - name: Build Snap (CLI) via Snapcraft
-        uses: snapcore/action-build@v1
+        uses: snapcore/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1
         with:
           # The repository root, not snap/. `path` names the project directory,
           # and pointing it at snap/ made the part's `source: .` resolve there
@@ -90,7 +87,7 @@ jobs:
       # is a packaging task of its own. A step that cannot succeed is worse than
       # no step, because continue-on-error turns it into silence.
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux-artifacts
           path: |
@@ -111,27 +108,20 @@ jobs:
       - name: Report packaged artifacts
         run: |
           bash scripts/package/report_artifacts.sh \
-            --required 'hyperdu-cli-linux-x86_64-generic.zip' \
+            --required 'hyperdu-linux-x86_64-generic.zip' \
             --required 'hyperdu-gui-linux-x86_64-generic.zip' \
-            --required 'hyperdu-cli_*.deb' \
+            --required 'hyperdu_*.deb' \
             --required 'hyperdu-gui_*.deb' \
             --optional '*.rpm' \
             --optional '*.snap' \
             --optional '*.AppImage'
-      - name: Create GitHub Release (upload assets)
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          draft: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          files: |
-            dist/*
-
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
       - name: Install packagers
@@ -152,9 +142,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           # cargo resolves the version, not a regex over the manifest: the crate
           # inherits `version.workspace = true`, so the literal is not in
-          # hyperdu-cli/Cargo.toml any more. pkgid prints `<url>#<version>`.
-          $ver = (cargo pkgid -p hyperdu-cli) -replace '^.*[#@]', ''
-          if (-not $ver) { throw 'cargo pkgid returned no version for hyperdu-cli' }
+          # hyperdu/Cargo.toml any more. pkgid prints `<url>#<version>`.
+          $ver = (cargo pkgid -p hyperdu) -replace '^.*[#@]', ''
+          if (-not $ver) { throw 'cargo pkgid returned no version for hyperdu' }
           $tag = "$env:GITHUB_REF_NAME"
           $base = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag"
 
@@ -170,8 +160,8 @@ jobs:
           # Different assets on purpose. winget installs the bare executable as
           # a `portable` package; Scoop extracts the zip and resolves `bin`
           # inside it, which keeps the shim name stable.
-          $exe = Get-Asset 'dist\hyperdu-cli-windows-*.exe'
-          $zip = Get-Asset 'dist\hyperdu-cli-windows-*.zip'
+          $exe = Get-Asset 'dist\hyperdu-windows-*.exe'
+          $zip = Get-Asset 'dist\hyperdu-windows-*.zip'
 
           pwsh -File scripts/package/winget.ps1 -Version $ver `
             -InstallerUrl $exe.Url -InstallerSha256 $exe.Hash
@@ -180,6 +170,60 @@ jobs:
 
           Write-Host "winget manifests:"
           Get-ChildItem dist\winget | ForEach-Object { Write-Host "  $($_.Name)" }
+      - name: Upload artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-artifacts
+          path: |
+            dist/*
+
+  # Only immutable same-run artifacts cross this boundary. Never execute them.
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: linux-artifacts
+          path: assets/linux
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-artifacts
+          path: assets/windows
+      - name: Collect release files (data only)
+        run: |
+          mkdir release-assets
+          # Linux artifact paths retain dist/ because manifests share their root;
+          # Windows has a single dist/* root and is flattened by upload-artifact.
+          find assets/linux/dist assets/windows -maxdepth 1 -type f ! -name '*.log' -exec cp -- {} release-assets/ \;
+      - name: Create draft with all assets
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          files: release-assets/*
+      - name: Publish the complete draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false -R "$GITHUB_REPOSITORY"
+
+  scoop-pr:
+    needs: publish
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download Windows manifests (data only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-artifacts
+          path: dist
       - name: Open PR to Scoop bucket
         env:
           GH_TOKEN: ${{ secrets.SCOOP_GH_TOKEN }}
@@ -203,6 +247,18 @@ jobs:
           git commit -m "hyperdu $env:GITHUB_REF_NAME"
           git push -u origin $BR
           gh pr create -R "$env:BUCKET_REPO" -t "hyperdu $env:GITHUB_REF_NAME" -b "Automated scoop manifest update" -B main
+
+  winget-pr:
+    needs: publish
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download Windows manifests (data only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-artifacts
+          path: dist
       - name: Open PR to winget-pkgs
         env:
           GH_TOKEN: ${{ secrets.WINGET_GH_TOKEN }}
@@ -235,33 +291,3 @@ jobs:
           git commit -m "Add HyperDU $ver"
           git push -u origin $BR
           gh pr create -R "$env:WINGET_REPO" -t "Add HyperDU $ver" -b "Automated manifest" -B master
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-artifacts
-          path: |
-            dist/*
-      - name: Create GitHub Release (upload assets)
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          draft: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          files: |
-            dist/*
-
-  # Both build jobs each upload to the same tag as a DRAFT. Without this,
-  # whichever job finished first published the release, so a user could see a
-  # "release" carrying only Linux assets while Windows was still compiling --
-  # and a failing job would leave that partial release public. Publishing once,
-  # here, makes the release atomic: it appears only after both platforms
-  # succeeded. GitHub keeps the pre-release flag set by the upload steps.
-  publish:
-    needs: [linux, windows]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - name: Publish the draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$GITHUB_REF_NAME" --draft=false -R "$GITHUB_REPOSITORY"

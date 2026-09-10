@@ -1,0 +1,273 @@
+{
+  "baseline_environment": "du (uutils coreutils) 0.8.0",
+  "commit": "0a089c90c0e2995ef702ff053820d129265c3659",
+  "date": "2026-09-09",
+  "cache": "warm",
+  "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+  "runs": 8,
+  "complete": true,
+  "binary_sha256": "a43fff5f5b7a7663b15f081c1361256ef111461848f1fe49419b0e829bd32eb4",
+  "binary_version": "hyperdu 0.5.0-beta.3",
+  "datasets": [
+    {
+      "name": "wide",
+      "root": "/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/wide",
+      "commands": {
+        "hyperdu": [
+          "/root/hyperdu-site-review-20260909/hyperdu-bench-0a089c9",
+          "/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/wide",
+          "--top",
+          "1",
+          "--exclude",
+          "",
+          "--one-file-system"
+        ],
+        "baseline": [
+          "/usr/bin/du",
+          "-sx",
+          "--block-size=1",
+          "/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/wide"
+        ]
+      },
+      "oracle": {
+        "files": 20000,
+        "logical": 81920000,
+        "physical": 81920000,
+        "entries": 20000,
+        "directories": 501,
+        "directory_and_link_physical": 2060288
+      },
+      "physical_unverified": false,
+      "hyperdu": {
+        "path": "/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/wide",
+        "logical": 81920000,
+        "physical": 81920000,
+        "files": 20000
+      },
+      "baseline_gate_output": "83980288\t/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/wide\n",
+      "hyperdu_gate_output": "Top 1 under /root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/wide (physical desc):\n  1. /root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/wide | phys=78.12 MiB | log=78.12 MiB | files=20000\n\nSummary:\n  Root: /root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/wide\n  Elapsed: 0.134s\n  Threads: 32\n  Excludes: (none)\n  Follow links: false\n  Total: files=20000 | phys=78.12 MiB | log=78.12 MiB | dirs=501\n  Disk: total=1006.85 GiB | used=70.50 GiB | free=936.36 GiB | usage=7.0%\nwrote JSON: /root/hyperdu-site-review-20260909/data/hyperdu-gate-7rar8o58/gate.json\n",
+      "samples_ms": {
+        "hyperdu": [
+          24.96,
+          19.303,
+          27.865,
+          57.863,
+          83.76,
+          57.849,
+          77.518,
+          36.838
+        ],
+        "baseline": [
+          219.142,
+          186.493,
+          265.028,
+          186.324,
+          211.074,
+          259.606,
+          206.119,
+          145.009
+        ]
+      },
+      "median_ms": {
+        "hyperdu": 47.343,
+        "baseline": 208.596
+      },
+      "ratio": 4.406
+    },
+    {
+      "name": "deep",
+      "root": "/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/deep",
+      "commands": {
+        "hyperdu": [
+          "/root/hyperdu-site-review-20260909/hyperdu-bench-0a089c9",
+          "/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/deep",
+          "--top",
+          "1",
+          "--exclude",
+          "",
+          "--one-file-system"
+        ],
+        "baseline": [
+          "/usr/bin/du",
+          "-sx",
+          "--block-size=1",
+          "/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/deep"
+        ]
+      },
+      "oracle": {
+        "files": 2000,
+        "logical": 8192000,
+        "physical": 8192000,
+        "entries": 2000,
+        "directories": 401,
+        "directory_and_link_physical": 1642496
+      },
+      "physical_unverified": false,
+      "hyperdu": {
+        "path": "/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/deep",
+        "logical": 8192000,
+        "physical": 8192000,
+        "files": 2000
+      },
+      "baseline_gate_output": "9834496\t/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/deep\n",
+      "hyperdu_gate_output": "Top 1 under /root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/deep (physical desc):\n  1. /root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/deep | phys=7.81 MiB | log=7.81 MiB | files=2000\n\nSummary:\n  Root: /root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/deep\n  Elapsed: 0.063s\n  Threads: 32\n  Excludes: (none)\n  Follow links: false\n  Total: files=2000 | phys=7.81 MiB | log=7.81 MiB | dirs=401\n  Disk: total=1006.85 GiB | used=70.50 GiB | free=936.36 GiB | usage=7.0%\nwrote JSON: /root/hyperdu-site-review-20260909/data/hyperdu-gate-7rar8o58/gate.json\n",
+      "samples_ms": {
+        "hyperdu": [
+          88.301,
+          82.276,
+          80.782,
+          89.913,
+          103.993,
+          111.027,
+          110.154,
+          84.604
+        ],
+        "baseline": [
+          161.231,
+          157.352,
+          143.158,
+          148.519,
+          141.402,
+          114.486,
+          143.561,
+          133.878
+        ]
+      },
+      "median_ms": {
+        "hyperdu": 89.107,
+        "baseline": 143.359
+      },
+      "ratio": 1.609
+    },
+    {
+      "name": "flat",
+      "root": "/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/flat",
+      "commands": {
+        "hyperdu": [
+          "/root/hyperdu-site-review-20260909/hyperdu-bench-0a089c9",
+          "/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/flat",
+          "--top",
+          "1",
+          "--exclude",
+          "",
+          "--one-file-system"
+        ],
+        "baseline": [
+          "/usr/bin/du",
+          "-sx",
+          "--block-size=1",
+          "/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/flat"
+        ]
+      },
+      "oracle": {
+        "files": 20000,
+        "logical": 81920000,
+        "physical": 81920000,
+        "entries": 20000,
+        "directories": 1,
+        "directory_and_link_physical": 425984
+      },
+      "physical_unverified": false,
+      "hyperdu": {
+        "path": "/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/flat",
+        "logical": 81920000,
+        "physical": 81920000,
+        "files": 20000
+      },
+      "baseline_gate_output": "82345984\t/root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/flat\n",
+      "hyperdu_gate_output": "Top 1 under /root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/flat (physical desc):\n  1. /root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/flat | phys=78.12 MiB | log=78.12 MiB | files=20000\n\nSummary:\n  Root: /root/hyperdu-site-review-20260909/data/hyperdu-warm-l799wba5/flat\n  Elapsed: 0.121s\n  Threads: 32\n  Excludes: (none)\n  Follow links: false\n  Total: files=20000 | phys=78.12 MiB | log=78.12 MiB | dirs=1\n  Disk: total=1006.85 GiB | used=70.50 GiB | free=936.36 GiB | usage=7.0%\nwrote JSON: /root/hyperdu-site-review-20260909/data/hyperdu-gate-7rar8o58/gate.json\n",
+      "samples_ms": {
+        "hyperdu": [
+          118.474,
+          105.591,
+          140.027,
+          130.245,
+          151.339,
+          181.407,
+          89.872,
+          130.685
+        ],
+        "baseline": [
+          173.565,
+          138.248,
+          179.544,
+          193.533,
+          189.211,
+          237.937,
+          189.578,
+          157.039
+        ]
+      },
+      "median_ms": {
+        "hyperdu": 130.465,
+        "baseline": 184.377
+      },
+      "ratio": 1.413
+    },
+    {
+      "name": "registry",
+      "root": "/root/.cargo/registry",
+      "commands": {
+        "hyperdu": [
+          "/root/hyperdu-site-review-20260909/hyperdu-bench-0a089c9",
+          "/root/.cargo/registry",
+          "--top",
+          "1",
+          "--exclude",
+          "",
+          "--one-file-system"
+        ],
+        "baseline": [
+          "/usr/bin/du",
+          "-sx",
+          "--block-size=1",
+          "/root/.cargo/registry"
+        ]
+      },
+      "oracle": {
+        "files": 37814,
+        "logical": 948795522,
+        "physical": 1043828736,
+        "entries": 37814,
+        "directories": 6880,
+        "directory_and_link_physical": 28418048
+      },
+      "physical_unverified": false,
+      "hyperdu": {
+        "path": "/root/.cargo/registry",
+        "logical": 948795522,
+        "physical": 1043828736,
+        "files": 37814
+      },
+      "baseline_gate_output": "1072246784\t/root/.cargo/registry\n",
+      "hyperdu_gate_output": "Top 1 under /root/.cargo/registry (physical desc):\n  1. /root/.cargo/registry | phys=995.47 MiB | log=904.84 MiB | files=37814\n\nSummary:\n  Root: /root/.cargo/registry\n  Elapsed: 0.108s\n  Threads: 32\n  Excludes: (none)\n  Follow links: false\n  Total: files=37814 | phys=995.47 MiB | log=904.84 MiB | dirs=6880\n  Disk: total=1006.85 GiB | used=70.50 GiB | free=936.36 GiB | usage=7.0%\nwrote JSON: /root/hyperdu-site-review-20260909/data/hyperdu-gate-7rar8o58/gate.json\n",
+      "samples_ms": {
+        "hyperdu": [
+          115.01,
+          142.254,
+          146.913,
+          107.35,
+          150.306,
+          153.823,
+          178.075,
+          112.644
+        ],
+        "baseline": [
+          944.617,
+          947.984,
+          908.689,
+          1558.686,
+          1043.559,
+          1187.297,
+          1009.872,
+          839.885
+        ]
+      },
+      "median_ms": {
+        "hyperdu": 144.584,
+        "baseline": 978.928
+      },
+      "ratio": 6.771
+    }
+  ]
+}

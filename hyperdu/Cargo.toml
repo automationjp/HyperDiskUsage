@@ -1,0 +1,113 @@
+[package]
+name = "hyperdu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HyperDU CLI and MCP server for disk usage analysis"
+rust-version = "1.88"
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["disk-usage", "du", "filesystem", "cli", "performance"]
+categories = ["command-line-utilities", "filesystem"]
+
+# The package and installed command share the public name `hyperdu`.
+[[bin]]
+name = "hyperdu"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+humansize = "2.1"
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+csv = "1.3"
+env_logger = "0.11"
+log = "0.4"
+hyperdu-core = { workspace = true }
+color-eyre = { version = "0.6", optional = true }
+profiling = { version = "1", optional = true }
+chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
+dashmap = "5.5"
+ctrlc = "3"
+libc = { version = "0.2", optional = true }
+rmcp = { version = "3.2", features = ["server", "macros", "transport-io"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2" }
+
+[dev-dependencies]
+tempfile = "3.10"
+# Use the official SDK client against the real stdio binary in integration tests.
+rmcp = { version = "3.2", features = ["client"] }
+tokio = { version = "1", features = ["process"] }
+
+
+[features]
+default = ["time-format"]
+time-format = ["dep:chrono"]
+debug-eyre = ["dep:color-eyre"]
+prof-tracy = ["dep:profiling", "hyperdu-core/prof-tracy"]
+prof-puffin = ["dep:profiling", "hyperdu-core/prof-puffin"]
+rayon-par = ["hyperdu-core/rayon-par"]
+
+# Enable mimalloc for non-MinGW targets to avoid cross issues on windows-gnu
+[target.'cfg(not(all(target_os = "windows", target_env = "gnu")))'.dependencies]
+hyperdu-core = { workspace = true, features = ["mimalloc"] }
+
+# Debian packaging (cargo-deb)
+[package.metadata.deb]
+section = "utils"
+priority = "optional"
+depends = "$auto"
+maintainer = "HyperDU Maintainers <maintainers@example.com>"
+extended-description = "Hyper-fast disk usage analyzer CLI."
+maintainer-scripts = "../packaging/deb"
+# An explicit assets list turns OFF cargo-deb's automatic binary inclusion, so the
+# executable has to be listed here too. Without this line the .deb installed the
+# man page, the completions and the docs -- and no `hyperdu` command at all.
+# Same source path as [package.metadata.generate-rpm] below, for the same reason.
+assets = [
+  ["../target/release/hyperdu", "/usr/bin/hyperdu", "755"],
+  ["../README.md", "/usr/share/doc/hyperdu/README.md", "644"],
+  ["../LICENSE", "/usr/share/doc/hyperdu/LICENSE", "644"],
+  ["../packaging/man/hyperdu.1", "/usr/share/man/man1/hyperdu.1", "644"],
+  ["../packaging/completions/hyperdu.bash", "/usr/share/bash-completion/completions/hyperdu", "644"],
+  ["../packaging/completions/hyperdu.zsh", "/usr/share/zsh/site-functions/_hyperdu", "644"],
+  ["../packaging/completions/hyperdu.fish", "/usr/share/fish/vendor_completions.d/hyperdu.fish", "644"],
+]
+
+# RPM packaging (cargo-generate-rpm)
+[package.metadata.generate-rpm]
+summary = "Hyper-fast disk usage analyzer CLI"
+license = "MIT"
+group = "Applications/System"
+# Two type errors here are why no .rpm has ever shipped; the release workflow
+# swallowed both, so the job stayed green with nothing to show for it.
+#
+#   requires = []    cargo-generate-rpm reads `requires` as a table of
+#                    name -> constraint, so an array fails the manifest with
+#                    "must be string or integer". Dropped: auto-req derives the
+#                    shared-library dependencies on its own.
+#   auto-req = true  the field takes a string, not a bool. "auto" is the
+#                    documented default and matches what the bool meant.
+#
+# Removing only the first moves the failure to the second, which is what the CI
+# log could never show: it stops at the first bad field.
+auto-req = "auto"
+assets = [
+  { source = "../target/release/hyperdu", dest = "/usr/bin/hyperdu", mode = "755" },
+  { source = "../README.md", dest = "/usr/share/doc/hyperdu/README.md", mode = "644" },
+  { source = "../LICENSE", dest = "/usr/share/doc/hyperdu/LICENSE", mode = "644" },
+  { source = "../packaging/man/hyperdu.1", dest = "/usr/share/man/man1/hyperdu.1", mode = "644" },
+  { source = "../packaging/completions/hyperdu.bash", dest = "/usr/share/bash-completion/completions/hyperdu", mode = "644" },
+  { source = "../packaging/completions/hyperdu.zsh", dest = "/usr/share/zsh/site-functions/_hyperdu", mode = "644" },
+  { source = "../packaging/completions/hyperdu.fish", dest = "/usr/share/fish/vendor_completions.d/hyperdu.fish", mode = "644" },
+]
+post_install_script_file = "../packaging/rpm/hyperdu-cli.post"
+pre_uninstall_script_file = "../packaging/rpm/hyperdu-cli.preun"
