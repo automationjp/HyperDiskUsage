@@ -118,7 +118,9 @@ try {
     # Only this new image receives a journal. Never create or change one on a
     # user volume. Mutable replay tests precede the immutable MFT comparison.
     Assert-OwnedVolume
-    & fsutil usn createjournal m=8388608 a=1048576 $root
+    # fsutil createjournal expects a drive designator (Z:), not a root path (Z:\).
+    # https://learn.microsoft.com/windows-server/administration/windows-commands/fsutil-usn
+    & fsutil usn createjournal m=8388608 a=1048576 "${letter}:"
     if ($LASTEXITCODE -ne 0) { throw 'Could not create journal on the owned fixture.' }
     $usn = Join-Path $root 'hyperdu-usn'
     $null = New-Item -ItemType Directory -Path $usn

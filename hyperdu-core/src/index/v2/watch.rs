@@ -197,6 +197,7 @@ impl IndexWatcher {
                     if path.as_os_str().is_empty() {
                         self.index.sync_subtree(
                             &self.root,
+                            &self.root,
                             self.index.root,
                             Some(self.source.as_mut()),
                             cancel,

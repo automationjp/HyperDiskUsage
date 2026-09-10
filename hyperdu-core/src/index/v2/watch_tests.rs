@@ -349,3 +349,134 @@ fn settle(watcher: &mut IndexWatcher) {
     }
     assert_baseline(watcher);
 }
+
+#[test]
+fn arrived_directory_retires_a_deleted_file_identity_before_subtree_removal() {
+    for reused_path in ["arrived", "arrived/inner"] {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("removed/child")).unwrap();
+        fs::write(temp.path().join("removed/child/f"), [0; 7]).unwrap();
+        let (mut watcher, events) = start(temp.path());
+        let root = watcher.index.root();
+        let removed = observe(&temp.path().join("removed")).unwrap().id;
+        let child = observe(&temp.path().join("removed/child")).unwrap().id;
+        fs::create_dir_all(temp.path().join("arrived/inner")).unwrap();
+        fs::write(temp.path().join("arrived/inner/g"), [0; 103]).unwrap();
+        let arrived = observe(&temp.path().join(reused_path)).unwrap();
+        // Model inode recycling deterministically, independent of the host allocator.
+        let stale = LinkKey {
+            parent: child,
+            name: "f".into(),
+        };
+        watcher.index.remove(&stale, None).unwrap();
+        watcher
+            .index
+            .upsert(
+                stale,
+                ObservedEntry {
+                    id: arrived.id,
+                    kind: EntryKind::File,
+                    logical: 7,
+                    physical: 7,
+                },
+            )
+            .unwrap();
+        fs::remove_dir_all(temp.path().join("removed")).unwrap();
+        send(
+            &events,
+            vec![change(root, "removed"), change(root, "arrived")],
+        );
+        let result = watcher.drain(&AtomicBool::new(false)).unwrap();
+        assert!(result.caught_up);
+        assert_eq!(result.stats.directories_read, 2);
+        let released = events.lock().unwrap().removed.clone();
+        assert!(released.contains(&removed) && released.contains(&child));
+        assert!(!released.contains(&root));
+        assert_eq!(watcher.index.total(root).unwrap().1, Freshness::Observed);
+        assert_baseline(&watcher);
+    }
+}
+#[test]
+fn reused_file_identity_keeps_all_links_when_any_link_is_still_live() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("z-live"), [0; 17]).unwrap();
+    let (mut watcher, _) = start(temp.path());
+    let root = watcher.index.root();
+    let file = observe(&temp.path().join("z-live")).unwrap();
+    let absent = LinkKey {
+        parent: root,
+        name: "a-absent".into(),
+    };
+    watcher.index.upsert(absent.clone(), file).unwrap();
+    let before = watcher.index.total(root).unwrap();
+    let error = watcher
+        .index
+        .apply_observed(
+            LinkKey {
+                parent: root,
+                name: "arrived".into(),
+            },
+            Some(ObservedEntry {
+                kind: EntryKind::Directory,
+                ..file
+            }),
+            temp.path(),
+            false,
+            watcher.source.as_mut(),
+            &AtomicBool::new(false),
+            &mut UpdateStats::default(),
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert_eq!(watcher.index.links(file.id).len(), 2);
+    assert_eq!(watcher.index.lookup(root, &absent.name), Some(file.id));
+    assert_eq!(watcher.index.total(root).unwrap(), before);
+    assert_eq!(watcher.index.lookup(root, OsStr::new("arrived")), None);
+}
+
+#[test]
+fn reused_file_identity_with_a_replaced_old_name_requires_reconciliation() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("replacement"), [0; 29]).unwrap();
+    let (mut watcher, _) = start(temp.path());
+    let root = watcher.index.root();
+    fs::create_dir(temp.path().join("arrived")).unwrap();
+    let directory = observe(&temp.path().join("arrived")).unwrap();
+    let old = LinkKey {
+        parent: root,
+        name: "replacement".into(),
+    };
+    watcher.index.remove(&old, None).unwrap();
+    watcher
+        .index
+        .upsert(
+            old.clone(),
+            ObservedEntry {
+                id: directory.id,
+                kind: EntryKind::File,
+                logical: 7,
+                physical: 7,
+            },
+        )
+        .unwrap();
+    let before = watcher.index.total(root).unwrap();
+    let error = watcher
+        .index
+        .apply_observed(
+            LinkKey {
+                parent: root,
+                name: "arrived".into(),
+            },
+            Some(directory),
+            temp.path(),
+            false,
+            watcher.source.as_mut(),
+            &AtomicBool::new(false),
+            &mut UpdateStats::default(),
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert_eq!(watcher.index.lookup(root, &old.name), Some(directory.id));
+    assert_eq!(watcher.index.total(root).unwrap(), before);
+    assert_eq!(watcher.index.lookup(root, OsStr::new("arrived")), None);
+}

@@ -71,9 +71,45 @@ impl PersistentIndex {
         check_volume(self.root, observed)?;
         let new_directory =
             observed.kind == EntryKind::Directory && !self.is_directory(observed.id);
+        self.retire_reused_file(root, observed, cancel, stats)?;
         self.upsert_watched(key, observed, Some(journal))?;
         if observed.kind == EntryKind::Directory && (new_directory || subtree) {
-            self.sync_subtree(&path, observed.id, Some(journal), cancel, stats)?;
+            self.sync_subtree(root, &path, observed.id, Some(journal), cancel, stats)?;
+        }
+        Ok(())
+    }
+
+    fn retire_reused_file(
+        &mut self,
+        root: &Path,
+        observed: ObservedEntry,
+        cancel: &AtomicBool,
+        stats: &mut UpdateStats,
+    ) -> io::Result<()> {
+        if observed.kind != EntryKind::Directory || !self.files.contains_key(&observed.id) {
+            return Ok(());
+        }
+        // Directory-first replay preserves renames, but a deleted Unix file's
+        // inode may already belong to an arriving directory. Validate every old
+        // link before removing any; a live file or another replacement requires
+        // the normal fail-closed rebuild instead of discarding its accounting.
+        let links = self.links(observed.id);
+        for link in &links {
+            check_cancel(cancel)?;
+            let parent = self
+                .relative_path(link.parent)
+                .ok_or_else(|| invalid("missing reused file parent"))?;
+            stats.observed_entries += 1;
+            match observe(&root.join(parent).join(&link.name)) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Ok(current)
+                    if current.id == observed.id && current.kind == EntryKind::Directory => {}
+                Ok(_) => return Err(invalid("file identity reuse requires reconciliation")),
+                Err(error) => return Err(error),
+            }
+        }
+        for link in links {
+            self.remove(&link, Some(observed.id))?;
         }
         Ok(())
     }
@@ -122,6 +158,7 @@ impl PersistentIndex {
     }
     pub(crate) fn sync_subtree(
         &mut self,
+        root: &Path,
         path: &Path,
         id: EntryId,
         mut journal: Option<&mut dyn NativeJournal>,
@@ -151,6 +188,7 @@ impl PersistentIndex {
                     let observed = observe(&child_path)?;
                     stats.observed_entries += 1;
                     check_volume(self.root, observed)?;
+                    self.retire_reused_file(root, observed, cancel, stats)?;
                     seen.insert(name.clone());
                     self.upsert_watched(
                         LinkKey { parent: id, name },
@@ -204,7 +242,7 @@ pub(crate) fn scan(
     }
     let mut index = PersistentIndex::new(before.id);
     let mut stats = UpdateStats::default();
-    index.sync_subtree(root, before.id, journal, cancel, &mut stats)?;
+    index.sync_subtree(root, root, before.id, journal, cancel, &mut stats)?;
     if observe(root)?.id != before.id {
         return Err(invalid("index root replaced during scan"));
     }

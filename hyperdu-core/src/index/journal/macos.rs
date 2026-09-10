@@ -186,9 +186,9 @@ impl NativeJournal for MacJournal {
         if device_uuid(self.device)? != self.uuid {
             return Err(invalid("FSEvents device UUID changed"));
         }
-        if self.uuid.is_some() && device_latest(self.device)? < from.position {
-            return Err(invalid("FSEvents history moved backwards"));
-        }
+        // The time-based device lookup is a conservative replay lower bound,
+        // not an upper bound on IDs already delivered by this live stream.
+        // Detect invalidation through the UUID and callback reset flags instead.
         // SAFETY: source owns a started stream on its separate dispatch queue.
         // Apple's contract guarantees delivery of all events preceding this call.
         unsafe { FSEventStreamFlushSync(self.stream) };
@@ -564,6 +564,18 @@ mod tests {
             witnessed,
             "native FSEvents did not deliver the created file"
         );
+        // Poll again immediately after delivery: a conservative time lookup may
+        // still trail the callback cursor and must not invalidate this stream.
+        let delivered = source.cursor();
+        for _ in 0..3 {
+            let batch = source.poll().unwrap();
+            assert!(batch.caught_up);
+            assert!(batch.next.position >= delivered.position);
+            assert!(!batch
+                .changes
+                .iter()
+                .any(|change| matches!(change, Change::Reset(_))));
+        }
         let cursor = source.cursor();
         drop(source);
         std::fs::write(root.join("after-restart"), b"def").unwrap();
