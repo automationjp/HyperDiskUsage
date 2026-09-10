@@ -13,6 +13,7 @@
 | CLI・GUI・MCPとコア、インタラクティブ走査 | [アーキテクチャ](architecture.md) |
 | Linuxの保存済みディレクトリ情報 | [スナップショット](index-snapshots.md) |
 | AIエージェントとの連携 | [Plugin / Skill / MCP](../plugin/README.md) |
+| 2026-09-10時点のセキュリティ監査 | [セキュリティ監査報告書](security-audit-2026-09-10.md) |
 
 ## 環境の準備
 
