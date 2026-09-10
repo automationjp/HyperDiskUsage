@@ -3,7 +3,7 @@
 # to changing detected MCP client configuration. Requires Rust 1.88+ to build.
 set -eu
 # Audited source revision; update together with the PowerShell installer.
-source_rev="c535dd8b34e877ac93170ab941dccf020f6b3c2d"
+source_rev="5f36fca6f955c727e4ffa2dbd7d4784568f2690c"
 mode=install
 for arg in "$@"; do
     case "$arg" in

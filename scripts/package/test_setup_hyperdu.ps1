@@ -27,7 +27,7 @@ try {
         if ($local) { $expected += @('--path', (Join-Path $fixture 'hyperdu')) }
         else {
             $expected += @('--git', 'https://github.com/automationjp/HyperDiskUsage', '--rev',
-                'c535dd8b34e877ac93170ab941dccf020f6b3c2d', 'hyperdu')
+                '5f36fca6f955c727e4ffa2dbd7d4784568f2690c', 'hyperdu')
         }
         if (($global:installArgs -join "`n") -cne ($expected -join "`n")) {
             throw 'Installer arguments differed from expected locked local/pinned remote install.'

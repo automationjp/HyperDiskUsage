@@ -9,7 +9,7 @@ registration is opt-in with -Register. -Check changes nothing.
 param([switch]$Check, [switch]$Register)
 $ErrorActionPreference = 'Stop'
 # Audited source revision; update together with the POSIX installer.
-$SourceRev = 'c535dd8b34e877ac93170ab941dccf020f6b3c2d'
+$SourceRev = '5f36fca6f955c727e4ffa2dbd7d4784568f2690c'
 $RepoUrl = 'https://github.com/automationjp/HyperDiskUsage'
 
 function Test-UnifiedHyperdu {

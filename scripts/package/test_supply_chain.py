@@ -11,7 +11,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-REV = "c535dd8b34e877ac93170ab941dccf020f6b3c2d"
+REV = "5f36fca6f955c727e4ffa2dbd7d4784568f2690c"
 
 
 class SupplyChainTests(unittest.TestCase):
@@ -34,6 +34,10 @@ class SupplyChainTests(unittest.TestCase):
                     )
         release = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
         self.assertEqual(release["jobs"]["publish"]["needs"], ["linux", "windows"])
+        self.assertEqual(
+            release["jobs"]["publish"]["if"],
+            "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')",
+        )
         self.assertEqual(
             release["jobs"]["publish"]["permissions"], {"contents": "write"}
         )
