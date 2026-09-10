@@ -17,6 +17,8 @@ mod entry;
 /// the parser is landed and unit-tested first.
 #[cfg(target_env = "msvc")]
 mod mft;
+#[cfg(target_env = "msvc")]
+mod mft_aggregate;
 /// Reading MFT records off a volume, on top of `mft`. The volume is behind a
 /// trait so the whole path is testable against a synthetic volume without the
 /// administrator rights a real one needs.
@@ -39,6 +41,34 @@ pub fn volume_id(path: &std::path::Path) -> u64 {
     entry::file_id_by_path(&path::to_wide_for_open(path))
         .map(|(vol, _)| vol)
         .unwrap_or(0)
+}
+
+/// Only a resolved fixed-drive root can seed the no-follow volume shortcut.
+/// Remote/unknown roots retain per-directory identity queries (notably SMB DFS).
+pub(crate) fn local_root_volume_for_reuse(root: &std::path::Path) -> Option<u64> {
+    use windows::{core::PCWSTR, Win32::Storage::FileSystem::GetDriveTypeW};
+    let resolved = root.canonicalize().ok()?;
+    let drive = disk_root(&resolved)?;
+    let drive_type = unsafe { GetDriveTypeW(PCWSTR(drive.as_ptr())) };
+    reusable_volume(drive_type, volume_id(&resolved))
+}
+
+fn disk_root(path: &std::path::Path) -> Option<[u16; 4]> {
+    use std::path::{Component, Prefix};
+    match path.components().next()? {
+        Component::Prefix(prefix) => match prefix.kind() {
+            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => {
+                Some([u16::from(drive), b':' as u16, b'\\' as u16, 0])
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn reusable_volume(drive_type: u32, volume: u64) -> Option<u64> {
+    // DRIVE_FIXED = 3. Unknown, removable and remote media stay conservative.
+    (drive_type == 3 && volume != 0).then_some(volume)
 }
 
 pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
@@ -65,6 +95,9 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
 /// volume root, not NTFS, or the parse did not hold together.
 #[cfg(target_env = "msvc")]
 pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Option<crate::StatMap> {
+    if opt.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
     let drive = mft_drive(root, opt)?;
     let mut volume = mft_reader::WindowsVolume::open(drive)?;
     let mut reader = mft_reader::MftReader::open(&mut volume)?;
@@ -80,7 +113,9 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
     // record_count twice, which hid the very number that mattered.
     let diag_runs = reader.run_count();
     let diag_clusters = reader.mft_clusters();
-    let entries = reader.entries();
+    let mut last_progress = 0;
+    let entries = reader
+        .entries_with_control(|progress| report_mft_progress(opt, &mut last_progress, progress))?;
     if !reader.is_complete() {
         log::warn!("MFT DATA extents incomplete or inconsistent; declining MFT result");
         if std::env::var_os("HYPERDU_MFT_DIAG").is_some() {
@@ -90,16 +125,17 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
     }
     let record_count = reader.record_count();
     drop(reader);
+    if opt.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
 
-    let paths = mft_reader::paths_for(&entries);
     let prefix = format!("{}:\\", drive.to_ascii_uppercase());
-    let map = mft_reader::to_stat_map(
-        &entries,
-        &paths,
-        &prefix,
-        opt.count_hardlinks,
-        opt.compute_physical,
-    );
+    let map =
+        mft_aggregate::to_stat_map(&entries, &prefix, opt.count_hardlinks, opt.compute_physical);
+
+    if opt.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
 
     // Where records are lost between the MFT and the final map is not something
     // to guess at: the first fix for an under-count was aimed at the wrong
@@ -109,9 +145,8 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
         let dirs = entries.iter().filter(|e| e.is_directory).count();
         eprintln!(
             "mft-diag: runs={diag_runs} mft_clusters={diag_clusters} record_count={record_count} \
-             entries={} (dirs={dirs}) paths={} map_dirs={} files={files}",
+             entries={} (dirs={dirs}) map_dirs={} files={files}",
             entries.len(),
-            paths.len(),
             map.len(),
         );
 
@@ -187,6 +222,104 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
     Some(map)
 }
 
+#[cfg(target_env = "msvc")]
+fn report_mft_progress(
+    opt: &crate::Options,
+    last: &mut u64,
+    progress: mft_reader::ReadProgress,
+) -> bool {
+    use std::sync::atomic::Ordering;
+    if opt.cancel.load(Ordering::Relaxed) {
+        return false;
+    }
+    if let (Some(bucket), Some(previous)) = (
+        progress.files.checked_div(opt.progress_every),
+        last.checked_div(opt.progress_every),
+    ) {
+        if let Some(callback) = &opt.progress_callback {
+            if progress.records == 0 || progress.finished || bucket > previous {
+                callback(progress.files);
+                *last = progress.files;
+            }
+        }
+    }
+    // A callback may itself request cancellation. No fabricated path is sent
+    // to progress_sample_callback: MFT names have not been resolved here.
+    !opt.cancel.load(Ordering::Relaxed)
+}
+
+#[cfg(all(test, target_env = "msvc"))]
+mod mft_progress_tests {
+    use std::sync::{atomic::Ordering, Arc, Mutex};
+
+    use super::*;
+
+    #[test]
+    fn progress_threshold_initial_final_and_disabled_callbacks() {
+        let values = Arc::new(Mutex::new(Vec::new()));
+        let seen = values.clone();
+        let opt = crate::Options {
+            progress_every: 512,
+            progress_callback: Some(Arc::new(move |n| seen.lock().unwrap().push(n))),
+            progress_sample_callback: Some(Arc::new(|_| panic!("no synthetic path samples"))),
+            ..crate::Options::default()
+        };
+        let mut last = 0;
+        for (records, files, finished) in [
+            (0, 0, false),
+            (256, 200, false),
+            (512, 400, false),
+            (768, 600, false),
+            (800, 620, true),
+        ] {
+            assert!(report_mft_progress(
+                &opt,
+                &mut last,
+                mft_reader::ReadProgress {
+                    records,
+                    files,
+                    finished
+                }
+            ));
+        }
+        assert_eq!(*values.lock().unwrap(), [0, 600, 620]);
+        let disabled = crate::Options {
+            progress_every: 0,
+            ..opt
+        };
+        assert!(report_mft_progress(
+            &disabled,
+            &mut last,
+            mft_reader::ReadProgress {
+                records: 0,
+                files: 0,
+                finished: false
+            }
+        ));
+        assert_eq!(*values.lock().unwrap(), [0, 600, 620]);
+    }
+
+    #[test]
+    fn callback_cancellation_is_observed_before_the_next_read() {
+        let opt = crate::Options::default();
+        let cancel = opt.cancel.clone();
+        let opt = crate::Options {
+            progress_every: 1,
+            progress_callback: Some(Arc::new(move |_| cancel.store(true, Ordering::Relaxed))),
+            ..opt
+        };
+        assert!(!report_mft_progress(
+            &opt,
+            &mut 0,
+            mft_reader::ReadProgress {
+                records: 0,
+                files: 0,
+                finished: false
+            }
+        ));
+    }
+}
+
 #[cfg(not(target_env = "msvc"))]
 pub fn scan_volume_via_mft(
     _root: &std::path::Path,
@@ -210,11 +343,27 @@ pub fn mft_backend_applies(_root: &std::path::Path, _opt: &crate::Options) -> bo
 /// Drive letter to read the MFT of, or `None` when the backend does not apply.
 ///
 /// The single place the preconditions live: asked for, a volume root, and
-/// elevated. Opening the volume can still fail afterwards (not NTFS, or the
+/// elevated, with supported enumeration options. Opening the volume can still fail afterwards (not NTFS, or the
 /// parse does not hold), which the caller also treats as "use enumeration".
 #[cfg(target_env = "msvc")]
 fn mft_drive(root: &std::path::Path, opt: &crate::Options) -> Option<char> {
-    if !opt.use_mft {
+    // The direct reader cannot preserve these enumeration semantics. Decline
+    // before opening the volume so callers retain the requested filters.
+    if !opt.use_mft
+        || !opt.exclude_contains.is_empty()
+        || !opt.exclude_regex.is_empty()
+        || !opt.exclude_glob.is_empty()
+        || opt.exclude_ac.is_some()
+        || opt.exclude_regex_set.is_some()
+        || opt.exclude_glob_set.is_some()
+        || !opt.exclude_contains_w.is_empty()
+        || opt.max_depth != 0
+        || opt.min_file_size != 0
+        || opt.follow_links
+        || opt.count_hardlinks
+        || opt.approximate_sizes
+        || opt.inode_cache.is_some()
+    {
         return None;
     }
     // The MFT covers a whole volume. Scanning a subdirectory this way would
@@ -325,4 +474,29 @@ fn nt_enabled() -> bool {
             .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
             .unwrap_or(true)
     })
+}
+
+#[cfg(test)]
+mod volume_reuse_tests {
+    use std::path::Path;
+
+    use super::*;
+
+    #[test]
+    fn only_known_fixed_volumes_are_reusable() {
+        assert_eq!(reusable_volume(3, 7), Some(7));
+        assert_eq!(reusable_volume(3, 0), None);
+        for kind in [0, 1, 2, 4, 5, 6] {
+            assert_eq!(reusable_volume(kind, 7), None);
+        }
+    }
+
+    #[test]
+    fn unc_and_unknown_roots_cannot_seed_a_local_volume() {
+        assert!(disk_root(Path::new(r"C:\data")).is_some());
+        assert!(disk_root(Path::new(r"\\?\C:\data")).is_some());
+        assert!(disk_root(Path::new(r"\\server\share\data")).is_none());
+        assert!(disk_root(Path::new(r"\\?\UNC\server\share")).is_none());
+        assert!(disk_root(Path::new("relative")).is_none());
+    }
 }

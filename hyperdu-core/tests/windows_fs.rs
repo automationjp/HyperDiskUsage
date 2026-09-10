@@ -129,22 +129,39 @@ fn min_size_and_max_depth() {
 fn hardlinks_deduped_only_when_requested() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("r");
-    fs::create_dir_all(&root).unwrap();
-    write_bytes(&root.join("a.bin"), 1000);
-    fs::hard_link(root.join("a.bin"), root.join("b.bin")).unwrap();
+    let first = root.join("first");
+    let second = root.join("second");
+    fs::create_dir_all(&first).unwrap();
+    fs::create_dir_all(&second).unwrap();
+    let file = first.join("a.bin");
+    write_bytes(&file, 1000);
+    fs::hard_link(&file, second.join("b.bin")).unwrap();
+    let allocated = hyperdu_core::file_stat(&file, &quiet_opts())
+        .unwrap()
+        .physical;
 
-    let mut opt = quiet_opts();
-    opt.count_hardlinks = true;
-    let map = scan_directory(&root, &opt).unwrap();
-    assert_eq!(stat_of(&map, &root).files, 2);
-
-    let mut opt = quiet_opts();
-    opt.count_hardlinks = false;
-    opt.inode_cache = Some(std::sync::Arc::new(dashmap::DashMap::with_capacity(16)));
-    let map = scan_directory(&root, &opt).unwrap();
-    let s = stat_of(&map, &root);
-    assert_eq!(s.files, 1, "second link deduped");
-    assert_eq!(s.logical, 1000);
+    for count_links in [false, true] {
+        for supplied_cache in [false, true] {
+            let mut opt = quiet_opts();
+            opt.count_hardlinks = count_links;
+            opt.root_fs_id = u64::MAX;
+            if supplied_cache {
+                opt.inode_cache = Some(std::sync::Arc::new(dashmap::DashMap::new()));
+            }
+            // A caller-owned cache deliberately persists; clear between scans.
+            for _ in 0..2 {
+                if let Some(cache) = &opt.inode_cache {
+                    cache.clear();
+                }
+                let map = scan_directory(&root, &opt).unwrap();
+                let s = stat_of(&map, &root);
+                let multiplier = if count_links { 2 } else { 1 };
+                assert_eq!(s.files, multiplier);
+                assert_eq!(s.logical, 1000 * multiplier);
+                assert_eq!(s.physical, allocated * multiplier);
+            }
+        }
+    }
 }
 
 #[test]

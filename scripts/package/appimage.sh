@@ -9,19 +9,42 @@ usage() {
 Usage: $(basename "$0")
 
 Environment:
-  LINUXDEPLOY   Path to linuxdeploy tool (optional)
-  APPIMAGETOOL  Path to appimagetool (optional)
+  LINUXDEPLOY / APPIMAGETOOL: absolute paths to reviewed local AppImage tools
+  LINUXDEPLOY_SHA256 / APPIMAGETOOL_SHA256: independently reviewed SHA256 values
+  All four are required, including for preinstalled tools. No downloads or PATH fallback.
+  Verification stages private copies and removes them on exit.
 USAGE
 }
 
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  "") ;;
+  *) usage >&2; exit 2 ;;
+esac
+
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/../.. && pwd)"
+verified_tools=$(bash "$root_dir/scripts/package/verified-appimage-tools.sh" \
+  "${LINUXDEPLOY:-}" "${LINUXDEPLOY_SHA256:-}" \
+  "${APPIMAGETOOL:-}" "${APPIMAGETOOL_SHA256:-}")
+appdir_root=""
+cleanup() {
+  rm -rf -- "$verified_tools"
+  if [[ -n "$appdir_root" ]]; then rm -rf -- "$appdir_root"; fi
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+export LINUXDEPLOY="$verified_tools/linuxdeploy"
+export APPIMAGETOOL="$verified_tools/appimagetool"
+export PATH="$verified_tools:$PATH"
+
 dist_dir="$root_dir/dist"
 mkdir -p "$dist_dir"
 
 cargo build -p hyperdu-gui --release
 
 bin="$root_dir/target/release/hyperdu-gui"
-appdir="$(mktemp -d)"/AppDir
+appdir_root="$(mktemp -d)"
+appdir="$appdir_root/AppDir"
 mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications"
 cp "$bin" "$appdir/usr/bin/hyperdu-gui"
 
@@ -45,19 +68,7 @@ else
   sed -i '/^Icon=/d' "$appdir/usr/share/applications/hyperdu-gui.desktop" || true
 fi
 
-linuxdeploy="${LINUXDEPLOY:-linuxdeploy}"
-appimagetool="${APPIMAGETOOL:-appimagetool}"
-
-if ! command -v "$linuxdeploy" >/dev/null 2>&1; then
-  echo "error: linuxdeploy not found (set LINUXDEPLOY to path)" >&2
-  exit 1
-fi
-if ! command -v "$appimagetool" >/dev/null 2>&1; then
-  echo "error: appimagetool not found (set APPIMAGETOOL to path)" >&2
-  exit 1
-fi
-
-ld_cmd=("$linuxdeploy" --appdir "$appdir" --executable "$appdir/usr/bin/hyperdu-gui" --output appimage)
+ld_cmd=("$LINUXDEPLOY" --appdir "$appdir" --executable "$appdir/usr/bin/hyperdu-gui" --output appimage)
 if [[ -f "$appdir/usr/share/applications/hyperdu-gui.desktop" ]]; then
   ld_cmd+=(--desktop-file "$appdir/usr/share/applications/hyperdu-gui.desktop")
 fi

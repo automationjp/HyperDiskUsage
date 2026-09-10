@@ -77,7 +77,7 @@ bench_one "turbo-getdents" "$BIN" "$ROOT" --perf turbo
 
 if [[ "$WITH_RAYON" == "1" ]]; then
   echo "==> building rayon-par variant"
-  if cargo build -p hyperdu-cli --release --features rayon-par \
+  if cargo build -p hyperdu --release --features rayon-par \
       --target-dir target/bench-rayon >/dev/null; then
     bench_one "turbo+rayon-par" target/bench-rayon/release/hyperdu "$ROOT" --perf turbo
   else

@@ -1,93 +1,54 @@
-# HyperDU for agents
+# AI エージェント向け HyperDU
 
-Disk usage an agent can act on: which volume is short, what is large on it, and
-which of that can be deleted without losing anything.
+**日本語** · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
-## What is in here
+一度のインストールでCLIとMCPサーバを利用できます。公開クレートと実行コマンドは `hyperdu`、
+MCPサーバは `hyperdu mcp` です。0.5.0-beta.3で単独の `hyperdu-mcp` 実行ファイルを置き換えます。
 
-| Path | Format | What it is |
-|---|---|---|
-| `plugin.json` | [Agent Plugins](https://agent-plugins.org/) | The bundle manifest |
-| `mcp.json` | [Agent Plugins](https://agent-plugins.org/) | Declares the `hyperdu-mcp` stdio server |
-| `skills/disk-space-triage/` | [Agent Skills](https://agentskills.io/) | The triage procedure, driving the CLI |
-| `skills/disk-space-triage/scripts/` | — | Setup for both binaries and the MCP server |
+## このチェックアウトからインストール
 
-The three surfaces are independent on purpose. The MCP server runs without the
-plugin, and the skill drives `hyperdu` rather than the server, so **you can
-adopt any one of them without the other two**.
+```sh
+cargo install --locked --path hyperdu
+hyperdu --help
+hyperdu mcp --help
+```
 
-## Setup
+Rust 1.88+ が必要です。公開後は `cargo install hyperdu --version 0.5.0-beta.3` を利用できます。
+セットアップスクリプトは、チェックアウトがあればそのソースから、なければGitHubからインストールします。
 
-Everything here needs at least one HyperDU binary, and there is no prebuilt
-release yet — installation builds from source, so a
-[Rust toolchain](https://rustup.rs) is required.
-
-The bundled script installs both binaries and shows you how to register the MCP
-server:
-
-```bash
-skills/disk-space-triage/scripts/setup-hyperdu.sh
+```sh
+plugin/skills/disk-space-triage/scripts/setup-hyperdu.sh
 ```
 
 ```powershell
-.\skills\disk-space-triage\scripts\setup-hyperdu.ps1
+.\plugin\skills\disk-space-triage\scripts\setup-hyperdu.ps1
 ```
 
-| Flag | Effect |
+`--check` / `-Check` は導入状態を確認するだけです。`--register` / `-Register` は検出した
+クライアントへ登録します。指定しない場合は登録コマンドの表示のみです。
+
+## MCPクライアントへ登録
+
+```sh
+codex mcp add hyperdu -- hyperdu mcp
+claude mcp add --transport stdio hyperdu -- hyperdu mcp
+```
+
+その他のstdioクライアントには、`mcp.json` と同様に `command: "hyperdu"`、`args: ["mcp"]` を指定します。
+サーバは要求時だけ起動し、通常のCLI走査は従来どおり利用できます。
+
+| ツール | 確認できること |
 |---|---|
-| *(none)* | Install what is missing, print the registration command |
-| `--check` | Report what is installed, change nothing |
-| `--register` | Install, then register with any detected client |
+| `list_volumes` | 容量が不足しているボリューム |
+| `scan_path` | ディレクトリ内の大きな項目 |
+| `find_reclaimable` | 再生成できる可能性がある生成物 |
 
-Registration is opt-in because it rewrites an agent's configuration. Installing
-a binary is undone with `cargo uninstall`; quietly editing someone's client
-config is not something a setup script should do uninvited.
+`unused_for_days` はサンプルした更新時刻によるフィルタです。ビルドの停止や削除の安全性は
+保証しません。候補を確認し、削除前にユーザーの判断を受けてください。**削除ツールはありません。**
 
-### Doing it by hand
+## 独立した利用方法
 
-```bash
-cargo install --git https://github.com/automationjp/HyperDiskUsage hyperdu-cli
-cargo install --git https://github.com/automationjp/HyperDiskUsage hyperdu-mcp
-```
-
-The crate is `hyperdu-cli`; the command it installs is `hyperdu`. Same shape as
-ripgrep installing `rg`, and it matches the deb and rpm packages.
-
-Then register the MCP server with your client:
-
-```bash
-claude mcp add --transport stdio hyperdu -- hyperdu-mcp
-```
-
-```bash
-codex mcp add hyperdu -- hyperdu-mcp
-```
-
-For any other MCP client, add a stdio server whose command is `hyperdu-mcp` —
-which is exactly what `mcp.json` already declares.
-
-## The MCP tools
-
-| Tool | Answers |
-|---|---|
-| `list_volumes` | Which volume is short on space |
-| `scan_path` | What is large inside a directory tree |
-| `find_reclaimable` | Which of it can be rebuilt rather than lost |
-
-`find_reclaimable` takes `unused_for_days`. Pass 1 or more before proposing any
-deletion: a directory an in-progress build is writing to is never idle, so that
-filter is what keeps a suggestion from destroying a running job.
-
-**There is no delete tool, deliberately.** These report; a human decides. A
-wrong report can be corrected, a wrong `rm -rf` cannot.
-
-## Using only the skill
-
-Copy `skills/disk-space-triage/` anywhere your agent looks for skills. It needs
-`hyperdu` and nothing else from this directory — not the MCP server, not the
-plugin manifest.
-
-## Using only the MCP server
-
-Install `hyperdu-mcp`, register it, and ignore the rest of this directory. Any
-MCP client works: the server speaks stdio and holds no state between calls.
+- MCPはPluginやSkillなしでも動作します。
+- `skills/disk-space-triage/` はCLIを使うためMCP登録は不要です。
+- `plugin.json` と `mcp.json` はエージェント用の配布設定です。
+- `hyperdu-core` は再利用可能な走査・ドメイン処理のライブラリとして分離しています。

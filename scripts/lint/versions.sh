@@ -18,10 +18,10 @@ root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/../.. && pwd)"
 cd "$root_dir"
 
 # The crate inherits its version from [workspace.package], so the literal is
-# not in hyperdu-cli/Cargo.toml. pkgid prints `<url>#<version>`.
-ver=$(cargo pkgid -p hyperdu-cli | sed 's/.*[#@]//')
+# not in hyperdu/Cargo.toml. pkgid prints `<url>#<version>`.
+ver=$(cargo pkgid -p hyperdu | sed 's/.*[#@]//')
 if [[ -z "$ver" ]]; then
-  echo "error: could not determine hyperdu-cli version from cargo pkgid" >&2
+  echo "error: could not determine hyperdu version from cargo pkgid" >&2
   exit 1
 fi
 

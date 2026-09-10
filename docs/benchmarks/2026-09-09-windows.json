@@ -1,0 +1,309 @@
+{
+  "baseline_environment": "10.0.26100.1 (WinBuild.160101.0800)",
+  "commit": "0a089c90c0e2995ef702ff053820d129265c3659",
+  "date": "2026-09-09",
+  "cache": "warm",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "runs": 8,
+  "complete": true,
+  "binary_sha256": "b4c4c4ca78119d61319c9b0a342ab7b7e7dfed3992a44fe56d88ddb5b6a9c3d8",
+  "binary_version": "hyperdu 0.5.0-beta.3",
+  "datasets": [
+    {
+      "name": "wide",
+      "root": "\\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\wide",
+      "commands": {
+        "hyperdu": [
+          "F:\\github\\HyperDiskUsage\\.build\\site-bench-refresh\\.build\\hyperdu-bench-0a089c9.exe",
+          "\\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\wide",
+          "--top",
+          "1",
+          "--exclude",
+          "",
+          "--one-file-system"
+        ],
+        "baseline": [
+          "C:\\WINDOWS\\system32\\robocopy.EXE",
+          "F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\wide",
+          "F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-gate-9n8b0a0c\\unused-destination",
+          "/L",
+          "/S",
+          "/XJ",
+          "/BYTES",
+          "/NFL",
+          "/NDL",
+          "/NJH",
+          "/NP",
+          "/R:0",
+          "/W:0"
+        ]
+      },
+      "oracle": {
+        "files": 20000,
+        "logical": 81920000,
+        "physical": null,
+        "entries": 20000,
+        "directories": 501,
+        "directory_and_link_physical": null
+      },
+      "physical_unverified": true,
+      "hyperdu": {
+        "path": "\\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\wide",
+        "logical": 81920000,
+        "physical": 1310720000,
+        "files": 20000
+      },
+      "baseline_gate_output": "\r\n\r\n------------------------------------------------------------------------------\r\n\r\n               Total    Copied   Skipped  Mismatch    FAILED    Extras\r\n    Dirs :       501       501         0         0         0         0\r\n   Files :     20000     20000         0         0         0         0\r\n   Bytes :  81920000  81920000         0         0         0         0\r\n   Times :   0:00:00   0:00:00                       0:00:00   0:00:00\r\n   Ended : 2026年9月9日 17:30:43\r\n\r\n",
+      "hyperdu_gate_output": "Top 1 under \\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\wide (physical desc):\n  1. \\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\wide | phys=1.22 GiB | log=78.12 MiB | files=20000\n\nSummary:\n  Root: \\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\wide\n  Elapsed: 0.014s\n  Threads: 32\n  Excludes: (none)\n  Follow links: false\n  Total: files=20000 | phys=1.22 GiB | log=78.12 MiB | dirs=501\n  Disk: total=3.63 TiB | used=2.83 TiB | free=814.83 GiB | usage=78.1%\nwrote JSON: F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-gate-9n8b0a0c\\gate.json\n",
+      "samples_ms": {
+        "hyperdu": [
+          34.665,
+          30.334,
+          33.34,
+          29.218,
+          31.107,
+          30.203,
+          29.661,
+          32.721
+        ],
+        "baseline": [
+          60.855,
+          55.954,
+          58.894,
+          62.127,
+          53.976,
+          65.117,
+          55.036,
+          55.126
+        ]
+      },
+      "median_ms": {
+        "hyperdu": 30.721,
+        "baseline": 57.424
+      },
+      "ratio": 1.869
+    },
+    {
+      "name": "deep",
+      "root": "\\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\deep",
+      "commands": {
+        "hyperdu": [
+          "F:\\github\\HyperDiskUsage\\.build\\site-bench-refresh\\.build\\hyperdu-bench-0a089c9.exe",
+          "\\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\deep",
+          "--top",
+          "1",
+          "--exclude",
+          "",
+          "--one-file-system"
+        ],
+        "baseline": [
+          "C:\\WINDOWS\\system32\\robocopy.EXE",
+          "F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\deep",
+          "F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-gate-9n8b0a0c\\unused-destination",
+          "/L",
+          "/S",
+          "/XJ",
+          "/BYTES",
+          "/NFL",
+          "/NDL",
+          "/NJH",
+          "/NP",
+          "/R:0",
+          "/W:0"
+        ]
+      },
+      "oracle": {
+        "files": 2000,
+        "logical": 8192000,
+        "physical": null,
+        "entries": 2000,
+        "directories": 401,
+        "directory_and_link_physical": null
+      },
+      "physical_unverified": true,
+      "hyperdu": {
+        "path": "\\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\deep",
+        "logical": 8192000,
+        "physical": 131072000,
+        "files": 2000
+      },
+      "baseline_gate_output": "\r\n\r\n------------------------------------------------------------------------------\r\n\r\n               Total    Copied   Skipped  Mismatch    FAILED    Extras\r\n    Dirs :       401       401         0         0         0         0\r\n   Files :      2000      2000         0         0         0         0\r\n   Bytes :   8192000   8192000         0         0         0         0\r\n   Times :   0:00:00   0:00:00                       0:00:00   0:00:00\r\n   Ended : 2026年9月9日 17:30:47\r\n\r\n",
+      "hyperdu_gate_output": "Top 1 under \\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\deep (physical desc):\n  1. \\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\deep | phys=125 MiB | log=7.81 MiB | files=2000\n\nSummary:\n  Root: \\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\deep\n  Elapsed: 0.068s\n  Threads: 32\n  Excludes: (none)\n  Follow links: false\n  Total: files=2000 | phys=125 MiB | log=7.81 MiB | dirs=401\n  Disk: total=3.63 TiB | used=2.83 TiB | free=814.83 GiB | usage=78.1%\nwrote JSON: F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-gate-9n8b0a0c\\gate.json\n",
+      "samples_ms": {
+        "hyperdu": [
+          80.579,
+          82.515,
+          92.383,
+          76.418,
+          75.246,
+          72.922,
+          77.827,
+          75.048
+        ],
+        "baseline": [
+          72.06,
+          81.065,
+          76.229,
+          72.021,
+          79.658,
+          71.715,
+          69.163,
+          71.954
+        ]
+      },
+      "median_ms": {
+        "hyperdu": 77.123,
+        "baseline": 72.041
+      },
+      "ratio": 0.934
+    },
+    {
+      "name": "flat",
+      "root": "\\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\flat",
+      "commands": {
+        "hyperdu": [
+          "F:\\github\\HyperDiskUsage\\.build\\site-bench-refresh\\.build\\hyperdu-bench-0a089c9.exe",
+          "\\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\flat",
+          "--top",
+          "1",
+          "--exclude",
+          "",
+          "--one-file-system"
+        ],
+        "baseline": [
+          "C:\\WINDOWS\\system32\\robocopy.EXE",
+          "F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\flat",
+          "F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-gate-9n8b0a0c\\unused-destination",
+          "/L",
+          "/S",
+          "/XJ",
+          "/BYTES",
+          "/NFL",
+          "/NDL",
+          "/NJH",
+          "/NP",
+          "/R:0",
+          "/W:0"
+        ]
+      },
+      "oracle": {
+        "files": 20000,
+        "logical": 81920000,
+        "physical": null,
+        "entries": 20000,
+        "directories": 1,
+        "directory_and_link_physical": null
+      },
+      "physical_unverified": true,
+      "hyperdu": {
+        "path": "\\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\flat",
+        "logical": 81920000,
+        "physical": 1310720000,
+        "files": 20000
+      },
+      "baseline_gate_output": "\r\n\r\n------------------------------------------------------------------------------\r\n\r\n               Total    Copied   Skipped  Mismatch    FAILED    Extras\r\n    Dirs :         1         1         0         0         0         0\r\n   Files :     20000     20000         0         0         0         0\r\n   Bytes :  81920000  81920000         0         0         0         0\r\n   Times :   0:00:00   0:00:00                       0:00:00   0:00:00\r\n   Ended : 2026年9月9日 17:30:50\r\n\r\n",
+      "hyperdu_gate_output": "Top 1 under \\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\flat (physical desc):\n  1. \\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\flat | phys=1.22 GiB | log=78.12 MiB | files=20000\n\nSummary:\n  Root: \\\\?\\F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-warm-f3v4m7i0\\flat\n  Elapsed: 0.013s\n  Threads: 32\n  Excludes: (none)\n  Follow links: false\n  Total: files=20000 | phys=1.22 GiB | log=78.12 MiB | dirs=1\n  Disk: total=3.63 TiB | used=2.83 TiB | free=814.68 GiB | usage=78.1%\nwrote JSON: F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-gate-9n8b0a0c\\gate.json\n",
+      "samples_ms": {
+        "hyperdu": [
+          35.492,
+          29.856,
+          33.223,
+          30.974,
+          35.251,
+          34.938,
+          44.015,
+          31.479
+        ],
+        "baseline": [
+          42.96,
+          42.689,
+          43.561,
+          50.821,
+          37.715,
+          39.821,
+          73.456,
+          41.414
+        ]
+      },
+      "median_ms": {
+        "hyperdu": 34.081,
+        "baseline": 42.825
+      },
+      "ratio": 1.257
+    },
+    {
+      "name": "registry",
+      "root": "%USERPROFILE%\\.cargo\\registry",
+      "commands": {
+        "hyperdu": [
+          "F:\\github\\HyperDiskUsage\\.build\\site-bench-refresh\\.build\\hyperdu-bench-0a089c9.exe",
+          "%USERPROFILE%\\.cargo\\registry",
+          "--top",
+          "1",
+          "--exclude",
+          "",
+          "--one-file-system"
+        ],
+        "baseline": [
+          "C:\\WINDOWS\\system32\\robocopy.EXE",
+          "%USERPROFILE%\\.cargo\\registry",
+          "F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-gate-9n8b0a0c\\unused-destination",
+          "/L",
+          "/S",
+          "/XJ",
+          "/BYTES",
+          "/NFL",
+          "/NDL",
+          "/NJH",
+          "/NP",
+          "/R:0",
+          "/W:0"
+        ]
+      },
+      "oracle": {
+        "files": 111813,
+        "logical": 3132801576,
+        "physical": null,
+        "entries": 111813,
+        "directories": 20647,
+        "directory_and_link_physical": null
+      },
+      "physical_unverified": true,
+      "hyperdu": {
+        "path": "%USERPROFILE%\\.cargo\\registry",
+        "logical": 3132801576,
+        "physical": 3329672680,
+        "files": 111813
+      },
+      "baseline_gate_output": "\r\n\r\n------------------------------------------------------------------------------\r\n\r\n                Total     Copied   Skipped  Mismatch    FAILED    Extras\r\n    Dirs :      20647      20647         0         0         0         0\r\n   Files :     111813     111813         0         0         0         0\r\n   Bytes : 3132801576 3132801576         0         0         0         0\r\n   Times :    0:00:01    0:00:00                       0:00:00   0:00:01\r\n   Ended : 2026年9月9日 17:31:17\r\n\r\n",
+      "hyperdu_gate_output": "Top 1 under %USERPROFILE%\\.cargo\\registry (physical desc):\n  1. %USERPROFILE%\\.cargo\\registry | phys=3.10 GiB | log=2.92 GiB | files=111813\n\nSummary:\n  Root: %USERPROFILE%\\.cargo\\registry\n  Elapsed: 0.384s\n  Threads: 32\n  Excludes: (none)\n  Follow links: false\n  Total: files=111813 | phys=3.10 GiB | log=2.92 GiB | dirs=20647\n  Disk: total=929.23 GiB | used=743.24 GiB | free=185.99 GiB | usage=80.0%\nwrote JSON: F:\\github\\HyperDiskUsage\\.build\\benchmark-data-20260909\\hyperdu-gate-9n8b0a0c\\gate.json\n",
+      "samples_ms": {
+        "hyperdu": [
+          329.521,
+          321.446,
+          325.137,
+          330.354,
+          334.119,
+          356.102,
+          343.325,
+          514.561
+        ],
+        "baseline": [
+          1691.376,
+          1823.197,
+          1937.345,
+          1853.723,
+          1592.403,
+          1687.168,
+          2615.618,
+          2950.394
+        ]
+      },
+      "median_ms": {
+        "hyperdu": 332.236,
+        "baseline": 1838.46
+      },
+      "ratio": 5.534
+    }
+  ]
+}

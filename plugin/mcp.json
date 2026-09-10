@@ -3,7 +3,10 @@
   "mcpServers": {
     "hyperdu": {
       "type": "stdio",
-      "command": "hyperdu-mcp"
+      "command": "hyperdu",
+      "args": [
+        "mcp"
+      ]
     }
   }
 }

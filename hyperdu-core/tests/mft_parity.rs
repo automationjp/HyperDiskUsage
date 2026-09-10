@@ -249,3 +249,90 @@ fn assert_fixture(map: &hyperdu_core::StatMap, root: &std::path::Path) {
         (65536, 65536, 1)
     );
 }
+
+/// Unsupported MFT options must select enumeration, never silently lose a filter.
+/// CI sets the owned fixture root; an ordinary unelevated local run is not evidence.
+#[test]
+fn the_mft_backend_declines_unsupported_options() {
+    let root = parity_root();
+    let plain = Options {
+        use_mft: true,
+        threads: 1,
+        ..Options::default()
+    };
+    if std::env::var_os("HYPERDU_MFT_PARITY_FIXTURE").is_none() {
+        eprintln!("skipped: unsupported-option parity needs the owned NTFS fixture");
+        return;
+    }
+    assert!(
+        hyperdu_core::mft_backend_applies(&root, &plain),
+        "fixture must permit MFT without filters"
+    );
+    let options = [
+        Options {
+            exclude_contains: vec!["plain".into()],
+            ..plain.clone()
+        },
+        Options {
+            exclude_glob: vec!["**/plain/**".into()],
+            ..plain.clone()
+        },
+        Options {
+            exclude_regex: vec!["plain".into()],
+            ..plain.clone()
+        },
+        Options {
+            min_file_size: 1 << 30,
+            ..plain.clone()
+        },
+        Options {
+            max_depth: 1,
+            ..plain.clone()
+        },
+        Options {
+            follow_links: true,
+            ..plain.clone()
+        },
+        Options {
+            count_hardlinks: true,
+            ..plain.clone()
+        },
+        Options {
+            approximate_sizes: true,
+            compute_physical: false,
+            ..plain.clone()
+        },
+    ];
+    fn rows(map: hyperdu_core::StatMap) -> Vec<(PathBuf, u64, u64, u64)> {
+        let mut rows: Vec<_> = map
+            .into_iter()
+            .map(|(p, s)| (p, s.logical, s.physical, s.files))
+            .collect();
+        rows.sort();
+        rows
+    }
+    for (case, opt) in options.into_iter().enumerate() {
+        assert!(
+            !hyperdu_core::mft_backend_applies(&root, &opt),
+            "unsupported case {case} was eligible"
+        );
+        assert!(
+            try_scan_directory_via_mft(&root, &opt).is_none(),
+            "unsupported case {case} used MFT"
+        );
+        let expected = scan_directory(
+            &root,
+            &Options {
+                use_mft: false,
+                ..opt.clone()
+            },
+        )
+        .unwrap();
+        let actual = scan_directory(&root, &opt).unwrap();
+        assert_eq!(
+            rows(actual),
+            rows(expected),
+            "fallback differs for case {case}"
+        );
+    }
+}

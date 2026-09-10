@@ -10,7 +10,7 @@ Param(
 #   powershell -ExecutionPolicy Bypass -File scripts/dev/build_print.ps1 [CARGO_BUILD_ARGS...]
 #
 # Examples:
-#   powershell -ExecutionPolicy Bypass -File scripts/dev/build_print.ps1 -p hyperdu-cli --release
+#   powershell -ExecutionPolicy Bypass -File scripts/dev/build_print.ps1 -p hyperdu --release
 #   powershell -ExecutionPolicy Bypass -File scripts/dev/build_print.ps1 -p hyperdu-gui
 #
 # Environment:

@@ -16,7 +16,7 @@
   "autoupdate": {
     "architecture": {
       "64bit": {
-        "url": "https://github.com/automationjp/HyperDiskUsage/releases/download/v$version/hyperdu-cli-windows-x86_64-generic.zip"
+        "url": "https://github.com/automationjp/HyperDiskUsage/releases/download/v$version/hyperdu-windows-x86_64-generic.zip"
       }
     }
   }

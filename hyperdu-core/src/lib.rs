@@ -1,3 +1,57 @@
+//! Reusable disk-usage scanning for Rust applications.
+//!
+//! `hyperdu-core` can be embedded directly in a Rust application. It is
+//! independent of the `hyperdu` CLI and MCP surface and the `hyperdu-gui`
+//! front end; those are consumers of this crate, not requirements for it.
+//!
+//! Start with [`Options`] (or [`OptionsBuilder`]) and [`scan_directory`]. The
+//! batch API returns a [`StatMap`] keyed by directory path. For UI-like
+//! consumers, [`scan_directory_mode`] with [`ScanMode::Interactive`] delivers
+//! [`ScanEvent::RootListed`] followed by [`ScanEvent::ChildCompleted`] events
+//! for normal directory enumeration and ends with [`ScanEvent::Finished`] on success.
+//! An eligible successful MFT result emits [`ScanEvent::BatchFallback`] and
+//! [`ScanEvent::BatchCompleted`] instead; cooperative cancellation emits
+//! [`ScanEvent::Cancelled`], and fatal setup failures return an error.
+//!
+//! Clone [`Options::cancel`] before a scan to share its `Arc<AtomicBool>` with
+//! another thread. The scan observes that cooperative cancellation flag. Set
+//! [`Options::progress_every`] and attach [`ProgressCallback`] or
+//! [`ProgressSampleCallback`] for count or sample updates.
+//!
+//! The [`report`] module writes rows with [`report::write_json`] and
+//! [`report::write_csv`]. Persistent directory aggregates use
+//! [`index::Index`], while [`volume::list`] and [`volume::total_free`] expose
+//! filesystem capacity.
+//!
+//! # Example
+//!
+//! This example uses a temporary directory, so it scans only the fixture it
+//! creates and can run as a doctest on every supported platform.
+//!
+//! ```
+//! use std::{
+//!     fs,
+//!     sync::{atomic::{AtomicBool, Ordering}, Arc},
+//! };
+//! use hyperdu_core::{scan_directory, Options};
+//! # use tempfile::tempdir;
+//! # fn main() -> anyhow::Result<()> {
+//! let root = tempdir()?;
+//! fs::write(root.path().join("sample.bin"), b"hyperdu")?;
+//!
+//! let cancel = Arc::new(AtomicBool::new(false));
+//! let mut options = Options::default();
+//! options.cancel = cancel.clone();
+//! let result = scan_directory(root.path(), &options)?;
+//!
+//! let total = result.get(root.path()).expect("root total");
+//! assert_eq!(total.logical, 7);
+//! assert_eq!(total.files, 1);
+//! assert!(!cancel.load(Ordering::Relaxed));
+//! # Ok(())
+//! # }
+//! ```
+
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -33,6 +87,7 @@ pub mod memory_pool;
 mod options; // for OptionsBuilder
 mod platform;
 pub mod reclaimable;
+pub mod report;
 mod rollup;
 mod scanner; // FileSystemScanner + platform default
 mod scheduler;
@@ -65,6 +120,49 @@ pub enum HeuristicsMode {
     Auto,
     OuterOnly,
     InnerOnly,
+}
+
+/// How directory results are delivered to an interactive caller.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ScanMode {
+    Batch,
+    #[default]
+    Interactive,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BatchFallbackReason {
+    Mft,
+}
+
+/// Owned results from one scan. Recoverable errors use `Options::error_report`.
+#[derive(Debug)]
+pub enum ScanEvent {
+    RootListed {
+        root: PathBuf,
+        directories: Vec<PathBuf>,
+        direct_files: Stat,
+    },
+    ChildCompleted {
+        root: PathBuf,
+        map: StatMap,
+    },
+    BatchFallback {
+        reason: BatchFallbackReason,
+    },
+    BatchCompleted {
+        map: StatMap,
+    },
+    Finished,
+    Cancelled,
+}
+
+struct DeferredDirs(std::sync::Mutex<Vec<PathBuf>>);
+
+#[derive(Clone, Copy, Default)]
+struct WorkerControl<'a> {
+    deferred: Option<&'a DeferredDirs>,
+    abort: Option<&'a AtomicBool>,
 }
 
 /// Called with the running file count as a scan progresses.
@@ -157,6 +255,10 @@ pub struct Options {
     /// against each parent, which is what GNU du means by "the starting point".
     #[doc(hidden)]
     pub root_fs_id: u64,
+    /// Scan-local volume shortcut; zero disables reuse after a reparse directory.
+    #[cfg(windows)]
+    #[doc(hidden)]
+    pub windows_root_volume: Option<Arc<AtomicU64>>,
     /// How much I/O the scan may cause. See [`IoProfile`].
     pub io_profile: IoProfile,
     /// Ask the kernel to read ahead of the scan. `None` lets the profile decide.
@@ -249,6 +351,8 @@ impl Default for Options {
             exclude_contains_w: Vec::new(),
             needs_path_filter: false,
             root_fs_id: 0,
+            #[cfg(windows)]
+            windows_root_volume: None,
             compat_mode: CompatMode::HyperDU,
             count_hardlinks: false,
             inode_cache: None,
@@ -463,6 +567,7 @@ pub struct ScanContext<'a> {
     pub(crate) sched: &'a Scheduler,
     pub(crate) local: &'a Worker<Job>,
     pub(crate) total_files: &'a AtomicU64,
+    deferred: Option<&'a DeferredDirs>,
 }
 
 #[derive(Clone, Copy)]
@@ -477,6 +582,16 @@ impl<'a> ScanContext<'a> {
     /// deque; idle workers steal from it.
     #[inline]
     pub fn enqueue_dir(&self, path: PathBuf, depth: u32) {
+        if depth == 1 {
+            if let Some(deferred) = self.deferred {
+                deferred
+                    .0
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(path);
+                return;
+            }
+        }
         self.sched.push_local(
             self.local,
             Job {
@@ -515,6 +630,15 @@ impl<'a> ScanContext<'a> {
     ) {
         crate::common_ops::report_files_batch(opt, self.total_files, n, sample);
     }
+}
+
+/// Validate user-provided patterns before starting a scan.
+pub fn validate_options(opt: &Options) -> Result<()> {
+    RegexSet::new(&opt.exclude_regex)?;
+    for pattern in &opt.exclude_glob {
+        Glob::new(pattern)?;
+    }
+    Ok(())
 }
 
 /// Turn the exclude patterns on `opt` into the matchers the scan uses.
@@ -652,7 +776,8 @@ pub fn mft_backend_applies(root: impl AsRef<Path>, opt: &Options) -> bool {
 ///
 /// `Some` contains the MFT result, with the same child-to-parent rollup as
 /// [`scan_directory`]. `None` means the backend is disabled, unavailable for
-/// this platform/root/privilege level, or could not complete its volume parse.
+/// this platform/root/privilege level, uses unsupported enumeration options,
+/// or could not complete its volume parse.
 /// In particular, a successful eligibility check does not guarantee `Some`.
 ///
 /// Set [`Options::use_mft`] to request this backend. This exposes the existing
@@ -669,8 +794,187 @@ pub fn scan_directory(root: impl AsRef<Path>, opt: &Options) -> Result<StatMap> 
     if let Some(map) = try_scan_directory_via_mft(root, opt) {
         return Ok(map);
     }
+    if opt.cancel.load(Ordering::Relaxed) {
+        return Ok(StatMap::default());
+    }
+
     let scanner = Arc::new(crate::scanner::platform_scanner());
     scan_directory_with(root, opt, scanner)
+}
+
+/// Deliver a whole scan or completed child subtrees using the same native scanner.
+///
+/// Interactive scans prepare identity caches, depth, filesystem boundaries and counters
+/// once for the original root. Hardlink attribution between children can differ from
+/// a parallel batch scan, but the whole-root total follows the same policy. Direct root
+/// files are an aggregate, not synthetic paths. Cancellation never emits `Finished`.
+/// Fatal setup failures return `Err`; entry errors remain in `Options::error_count`.
+pub fn scan_directory_mode(
+    root: impl AsRef<Path>,
+    opt: &Options,
+    mode: ScanMode,
+    mut emit: impl FnMut(ScanEvent),
+) -> Result<()> {
+    let root = root.as_ref();
+    if opt.cancel.load(Ordering::Relaxed) {
+        emit(ScanEvent::Cancelled);
+        return Ok(());
+    }
+    if mode == ScanMode::Batch {
+        let map = scan_directory(root, opt)?;
+        if opt.cancel.load(Ordering::Relaxed) {
+            emit(ScanEvent::Cancelled);
+        } else {
+            emit(ScanEvent::BatchCompleted { map });
+            emit(if opt.cancel.load(Ordering::Relaxed) {
+                ScanEvent::Cancelled
+            } else {
+                ScanEvent::Finished
+            });
+        }
+        return Ok(());
+    }
+    if let Some(map) = try_scan_directory_via_mft(root, opt) {
+        if opt.cancel.load(Ordering::Relaxed) {
+            emit(ScanEvent::Cancelled);
+        } else {
+            emit(ScanEvent::BatchFallback {
+                reason: BatchFallbackReason::Mft,
+            });
+            emit(ScanEvent::BatchCompleted { map });
+            emit(if opt.cancel.load(Ordering::Relaxed) {
+                ScanEvent::Cancelled
+            } else {
+                ScanEvent::Finished
+            });
+        }
+        return Ok(());
+    }
+    if opt.cancel.load(Ordering::Relaxed) {
+        emit(ScanEvent::Cancelled);
+        return Ok(());
+    }
+    if !root.exists() {
+        return Err(anyhow!("root does not exist: {}", root.display()));
+    }
+    let options = prepare_options(root, opt, effective_threads(opt));
+    let counter = Arc::new(AtomicU64::new(0));
+    let scanner: Arc<dyn FileSystemScanner> = Arc::new(platform_scanner());
+    let deferred = Arc::new(DeferredDirs(std::sync::Mutex::new(Vec::new())));
+    let direct = run_interactive_phase(
+        Job {
+            dir: root.to_path_buf(),
+            depth: 0,
+            resume: None,
+        },
+        options.clone(),
+        counter.clone(),
+        scanner.clone(),
+        Some(deferred.clone()),
+    )?;
+    if options.cancel.load(Ordering::Relaxed) {
+        emit(ScanEvent::Cancelled);
+        return Ok(());
+    }
+    let mut directories =
+        std::mem::take(&mut *deferred.0.lock().unwrap_or_else(|e| e.into_inner()));
+    directories.sort_unstable();
+    directories.dedup();
+    emit(ScanEvent::RootListed {
+        root: root.to_path_buf(),
+        directories: directories.clone(),
+        direct_files: direct.get(root).copied().unwrap_or_default(),
+    });
+    for child in directories {
+        if options.cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let map = run_interactive_phase(
+            Job {
+                dir: child.clone(),
+                depth: 1,
+                resume: None,
+            },
+            options.clone(),
+            counter.clone(),
+            scanner.clone(),
+            None,
+        )?;
+        if options.cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        emit(ScanEvent::ChildCompleted {
+            root: child,
+            map: rollup::rollup_child_to_parent(map),
+        });
+    }
+    emit(if options.cancel.load(Ordering::Relaxed) {
+        ScanEvent::Cancelled
+    } else {
+        ScanEvent::Finished
+    });
+    Ok(())
+}
+
+fn run_interactive_phase(
+    start: Job,
+    options: Arc<Options>,
+    counter: Arc<AtomicU64>,
+    scanner: Arc<dyn FileSystemScanner>,
+    deferred: Option<Arc<DeferredDirs>>,
+) -> Result<StatMap> {
+    let workers = Scheduler::make_workers(options.threads);
+    let scheduler = Arc::new(Scheduler::new(&workers));
+    scheduler.push_high(start);
+    let mut handles = Vec::with_capacity(options.threads);
+    let mut failure = None;
+    let abort = Arc::new(AtomicBool::new(false));
+    for (i, local) in workers.into_iter().enumerate() {
+        let sched = scheduler.clone();
+        let opt = options.clone();
+        let count = counter.clone();
+        let scan = scanner.clone();
+        let capture = deferred.clone();
+        let worker_abort = abort.clone();
+        match std::thread::Builder::new()
+            .name(format!("hyperdu-i{i}"))
+            .spawn(move || {
+                #[cfg(target_os = "linux")]
+                pin_thread_if_requested(i);
+                run_worker(
+                    i,
+                    local,
+                    &sched,
+                    &opt,
+                    &count,
+                    scan.as_ref(),
+                    WorkerControl {
+                        deferred: capture.as_deref(),
+                        abort: Some(&worker_abort),
+                    },
+                )
+            }) {
+            Ok(handle) => handles.push(handle),
+            Err(error) => {
+                abort.store(true, Ordering::Relaxed);
+                failure = Some(anyhow!("failed to spawn scan worker: {error}"));
+                break;
+            }
+        }
+    }
+    let mut merged = StatMap::default();
+    for handle in handles {
+        match handle.join() {
+            Ok(part) => merge_into(&mut merged, part),
+            Err(_) => {
+                failure = Some(anyhow!("scan worker panicked"));
+            }
+        }
+    }
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    Ok(merged)
 }
 
 /// Prepare shared state for a scan: compiled options and a scheduler seeded with the root.
@@ -679,6 +983,18 @@ fn prepare_scan(
     opt: &Options,
     threads: usize,
 ) -> (Arc<Options>, Vec<Worker<Job>>, Arc<Scheduler>) {
+    let options = prepare_options(root, opt, threads);
+    let workers = Scheduler::make_workers(threads);
+    let sched = Arc::new(Scheduler::new(&workers));
+    sched.push_high(Job {
+        dir: root.to_path_buf(),
+        depth: 0,
+        resume: None,
+    });
+    (options, workers, sched)
+}
+
+fn prepare_options(root: &Path, opt: &Options, threads: usize) -> Arc<Options> {
     let mut compiled = opt.clone();
     compile_filters_in_place(&mut compiled);
     // Following links can revisit a directory forever (symlink or junction
@@ -692,6 +1008,21 @@ fn prepare_scan(
     if !compiled.count_hardlinks && compiled.inode_cache.is_none() {
         compiled.inode_cache = Some(Arc::new(DashMap::with_capacity(1024)));
     }
+    #[cfg(windows)]
+    if !compiled.count_hardlinks || compiled.one_file_system {
+        compiled.root_fs_id = platform::filesystem_id(root);
+    }
+    #[cfg(windows)]
+    {
+        // Never inherit another scan's serial or invalidation state.
+        compiled.windows_root_volume = if !compiled.count_hardlinks && !follows_links(&compiled) {
+            platform::local_root_volume_for_reuse(root)
+                .map(|volume| Arc::new(AtomicU64::new(volume)))
+        } else {
+            None
+        };
+    }
+    #[cfg(not(windows))]
     if compiled.one_file_system {
         compiled.root_fs_id = platform::filesystem_id(root);
     }
@@ -709,14 +1040,7 @@ fn prepare_scan(
     // Report the worker count that actually runs, not the one that was asked
     // for: the profile may have capped it.
     compiled.threads = threads;
-    let workers = Scheduler::make_workers(threads);
-    let sched = Arc::new(Scheduler::new(&workers));
-    sched.push_high(Job {
-        dir: root.to_path_buf(),
-        depth: 0,
-        resume: None,
-    });
-    (Arc::new(compiled), workers, sched)
+    Arc::new(compiled)
 }
 
 /// Releases one job from the scheduler's in-flight count, including on unwind.
@@ -736,6 +1060,7 @@ fn run_worker(
     options: &Options,
     total_files: &AtomicU64,
     scanner: &dyn FileSystemScanner,
+    control: WorkerControl<'_>,
 ) -> StatMap {
     #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
     profiling::register_thread!();
@@ -743,7 +1068,12 @@ fn run_worker(
     let mut next = index;
     let backoff = Backoff::new();
     loop {
-        if options.cancel.load(Ordering::Relaxed) || sched.is_finished() {
+        if options.cancel.load(Ordering::Relaxed)
+            || control
+                .abort
+                .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            || sched.is_finished()
+        {
             break;
         }
         let Some(Job { dir, depth, resume }) = sched.find_job(&local, &mut next) else {
@@ -760,6 +1090,7 @@ fn run_worker(
             sched,
             local: &local,
             total_files,
+            deferred: control.deferred,
         };
         let dctx = DirContext {
             dir: &dir,
@@ -867,7 +1198,15 @@ pub fn scan_directory_with(
             .spawn(move || {
                 #[cfg(target_os = "linux")]
                 pin_thread_if_requested(i);
-                run_worker(i, local, &sched, &options, &total_files, scanner.as_ref())
+                run_worker(
+                    i,
+                    local,
+                    &sched,
+                    &options,
+                    &total_files,
+                    scanner.as_ref(),
+                    WorkerControl::default(),
+                )
             })
             .map_err(|e| anyhow!("failed to spawn worker thread: {e}"))?;
         handles.push(handle);
@@ -909,8 +1248,15 @@ pub fn scan_directory_rayon(root: impl AsRef<Path>, opt: &Options) -> Result<Sta
                 let merged = merged.clone();
                 let scanner = scanner.clone();
                 s.spawn(move |_| {
-                    let part =
-                        run_worker(i, local, &sched, &options, &total_files, scanner.as_ref());
+                    let part = run_worker(
+                        i,
+                        local,
+                        &sched,
+                        &options,
+                        &total_files,
+                        scanner.as_ref(),
+                        WorkerControl::default(),
+                    );
                     let mut g = merged.lock().unwrap_or_else(|e| e.into_inner());
                     merge_into(&mut g, part);
                 });
@@ -980,6 +1326,41 @@ pub(crate) fn wname_matches(name: &[u16], opt: &Options) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn preparation_refreshes_volume_and_cache_for_each_scan() {
+        let root = tempfile::tempdir().unwrap();
+        let actual = platform::filesystem_id(root.path());
+        assert_ne!(actual, 0);
+        let stale = Arc::new(AtomicU64::new(u64::MAX));
+        let opt = Options {
+            root_fs_id: u64::MAX,
+            windows_root_volume: Some(stale.clone()),
+            ..Options::default()
+        };
+        for _ in 0..2 {
+            let prepared = prepare_options(root.path(), &opt, 2);
+            assert_eq!(prepared.root_fs_id, actual);
+            assert!(prepared.inode_cache.is_some());
+            if let Some(volume) = &prepared.windows_root_volume {
+                assert!(!Arc::ptr_eq(volume, &stale));
+                assert_eq!(volume.load(Ordering::Acquire), actual);
+                volume.store(0, Ordering::Release);
+            }
+        }
+        assert_eq!(stale.load(Ordering::Acquire), u64::MAX);
+        let follow = prepare_options(
+            root.path(),
+            &Options {
+                follow_links: true,
+                ..opt
+            },
+            2,
+        );
+        assert!(follow.windows_root_volume.is_none());
+        assert!(follow.visited_dirs.is_some());
+    }
 
     #[test]
     fn compile_filters_sets_needs_path_filter() {

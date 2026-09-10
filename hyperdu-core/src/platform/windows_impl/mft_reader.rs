@@ -14,15 +14,23 @@
 // volume backend; some diagnostic helpers are unused in that test harness.
 #![allow(dead_code)]
 
+#[path = "mft_reader/progress.rs"]
+mod progress;
 #[path = "mft_reader/streams.rs"]
 mod streams;
-
+#[path = "mft_reader/window.rs"]
+mod window;
+#[cfg(test)]
 use std::collections::HashMap;
 
+pub(crate) use progress::ReadProgress;
+
+#[cfg(test)]
+use super::mft::build_path;
 use super::mft::{
-    allocated_clusters, apply_fixups, attr_type, build_path, distinct_links, namespace,
-    parse_boot_sector, parse_file_name, parse_record_header, parse_run_list, vcn_to_offset,
-    Attributes, DataSizes, FileName, Geometry, Run,
+    allocated_clusters, apply_fixups, attr_type, distinct_links, namespace, parse_boot_sector,
+    parse_file_name, parse_record_header, parse_run_list, Attributes, DataSizes, FileName,
+    Geometry, Run,
 };
 
 /// Somewhere MFT bytes can be read from: a volume handle in production, a
@@ -97,7 +105,8 @@ pub(crate) struct MftReader<S: VolumeSource> {
     /// without these runs only its first extent is reachable, and the scan
     /// would stop early while still reporting a plausible total.
     runs: Vec<Run>,
-    /// False after a required ordinary-file DATA extent could not be resolved.
+    window: window::ReadWindow,
+    /// False after any required record or DATA extent could not be resolved.
     complete: bool,
 }
 
@@ -137,13 +146,14 @@ impl<S: VolumeSource> MftReader<S> {
         // record was measured missing 88.9% of a real volume's files -- while
         // still reporting a plausible total, which is the worst way to be
         // wrong. See #15.
-        let extensions = extension_records_for(&rec, &header, attr_type::DATA);
+        let extensions = extension_records_for(&rec, &header, attr_type::DATA)?;
         if !extensions.is_empty() {
             let mut reader = Self {
                 source,
                 geometry,
                 runs,
                 complete: true,
+                window: window::ReadWindow::default(),
             };
             reader.extend_runs_from(&extensions);
             return Some(reader);
@@ -156,6 +166,7 @@ impl<S: VolumeSource> MftReader<S> {
             geometry,
             runs,
             complete: true,
+            window: window::ReadWindow::default(),
         })
     }
 
@@ -175,25 +186,33 @@ impl<S: VolumeSource> MftReader<S> {
         for _ in 0..MAX_PASSES {
             let before = self.runs.len();
             for &number in extensions {
-                if !seen.insert(number) {
+                if seen.contains(&number) {
                     continue;
                 }
                 let Some(rec) = self.read_record(number) else {
                     // Not reachable yet with the runs we have; a later pass may
                     // reach it once the run list grows.
-                    seen.remove(&number);
                     continue;
                 };
                 let Some(header) = parse_record_header(&rec) else {
                     continue;
                 };
-                if let Some(more) = data_runs_in(&rec, &header) {
+                if !header.in_use
+                    || u64::from_le_bytes(rec[32..40].try_into().unwrap()) & ((1 << 48) - 1) != 0
+                {
+                    continue;
+                }
+                if let Some(more) = data_runs_in(&rec, &header).filter(|runs| !runs.is_empty()) {
                     self.runs.extend(more);
+                    seen.insert(number);
                 }
             }
             if self.runs.len() == before {
-                return;
+                break;
             }
+        }
+        if seen.len() != extensions.len() {
+            self.complete = false;
         }
     }
 
@@ -209,6 +228,7 @@ impl<S: VolumeSource> MftReader<S> {
     /// geometry is known. Doing that after the records are read achieves
     /// nothing, which is what used to happen.
     pub(crate) fn source_mut(&mut self) -> &mut S {
+        self.window.clear();
         &mut self.source
     }
 
@@ -233,24 +253,10 @@ impl<S: VolumeSource> MftReader<S> {
 
     /// Read one record by number, with fixups already applied.
     ///
-    /// Returns `None` for a record that is out of range, unreadable, or fails
-    /// its torn-write check. A caller iterating records treats all three the
-    /// same way: skip it.
+    /// Returns `None` for an out-of-range, unreadable or torn record. Required
+    /// extension callers must invalidate completeness on failure.
     pub(crate) fn read_record(&mut self, number: u64) -> Option<Vec<u8>> {
-        let record_size = self.geometry.record_size as u64;
-        let cluster_size = self.geometry.cluster_size() as u64;
-
-        // Records are packed into the MFT's clusters, so a record number maps
-        // to a virtual cluster plus an offset inside it.
-        let byte_offset = number.checked_mul(record_size)?;
-        let vcn = byte_offset / cluster_size;
-        let within = byte_offset % cluster_size;
-        let base = vcn_to_offset(&self.runs, vcn, cluster_size)?;
-
-        let mut buf = vec![0u8; record_size as usize];
-        if !self.source.read_at(base + within, &mut buf) {
-            return None;
-        }
+        let mut buf = self.raw_record(number, false)?;
         if !apply_fixups(&mut buf, self.geometry.bytes_per_sector) {
             return None;
         }
@@ -258,10 +264,25 @@ impl<S: VolumeSource> MftReader<S> {
     }
 
     /// Extract the entry for a record, or `None` when it holds nothing the scan
-    /// cares about (deleted, unnamed, or unreadable).
+    /// cares about (deleted or unnamed). Unreadable records invalidate completeness.
     pub(crate) fn entry(&mut self, number: u64) -> Option<Entry> {
-        let rec = self.read_record(number)?;
-        let header = parse_record_header(&rec)?;
+        let Some(mut rec) = self.raw_record(number, true) else {
+            self.complete = false;
+            return None;
+        };
+        // Allocated MFT capacity can contain uninitialized slots. Only an
+        // entirely zero slot is accepted without a valid FILE header/fixups.
+        if rec.iter().all(|byte| *byte == 0) {
+            return None;
+        }
+        if !apply_fixups(&mut rec, self.geometry.bytes_per_sector) {
+            self.complete = false;
+            return None;
+        }
+        let Some(header) = parse_record_header(&rec) else {
+            self.complete = false;
+            return None;
+        };
         // An extension belongs to its base record, never a separate file.
         if !header.in_use || u64::from_le_bytes(rec.get(32..40)?.try_into().ok()?) != 0 {
             return None;
@@ -326,15 +347,7 @@ impl<S: VolumeSource> MftReader<S> {
     /// cannot see them either -- so they are skipped to keep the two backends
     /// comparable.
     pub(crate) fn entries(&mut self) -> Vec<Entry> {
-        const FIRST_USER_RECORD: u64 = 16;
-        let count = self.record_count();
-        let mut out = Vec::new();
-        for n in FIRST_USER_RECORD..count {
-            if let Some(e) = self.entry(n) {
-                out.push(e);
-            }
-        }
-        out
+        self.entries_with_control(|_| true).unwrap_or_default()
     }
 }
 
@@ -350,6 +363,7 @@ impl<S: VolumeSource> MftReader<S> {
 /// Hardlink handling matches GNU `du`: a file with several links is charged
 /// once, to whichever link is met first. `count_hardlinks` turns that off, as
 /// it does elsewhere.
+#[cfg(test)]
 pub(crate) fn to_stat_map(
     entries: &[Entry],
     paths: &HashMap<u64, String>,
@@ -405,6 +419,7 @@ pub(crate) fn to_stat_map(
     map
 }
 
+#[cfg(test)]
 fn join_path(prefix: &str, rest: &str) -> std::path::PathBuf {
     if rest.is_empty() {
         return std::path::PathBuf::from(prefix);
@@ -606,15 +621,26 @@ fn extension_records_for(
     rec: &[u8],
     header: &super::mft::RecordHeader,
     type_code: u32,
-) -> Vec<u64> {
+) -> Option<Vec<u64>> {
     let mut out = Vec::new();
     for attr in Attributes::new(rec, header) {
-        if attr.type_code != attr_type::ATTRIBUTE_LIST || attr.non_resident {
+        if attr.type_code != attr_type::ATTRIBUTE_LIST {
             continue;
         }
-        let Some(value) = rec.get(attr.value_offset..attr.value_offset + attr.value_length) else {
-            continue;
-        };
+        // Bootstrap cannot locate a non-resident list safely yet. Fall back,
+        // rather than treating an unsupported list as an empty one.
+        if attr.non_resident {
+            return None;
+        }
+        let value = rec.get(attr.value_offset..attr.value_offset + attr.value_length)?;
+        let mut pos = 0usize;
+        while pos < value.len() {
+            let length = u16::from_le_bytes(value.get(pos + 4..pos + 6)?.try_into().ok()?) as usize;
+            if length < 26 || pos.checked_add(length)? > value.len() {
+                return None;
+            }
+            pos += length;
+        }
         for entry in super::mft::parse_attribute_list(value) {
             // Record 0 is the base for $MFT; anything else is an extension.
             if entry.type_code == type_code && entry.record != 0 {
@@ -624,7 +650,7 @@ fn extension_records_for(
     }
     out.sort_unstable();
     out.dedup();
-    out
+    Some(out)
 }
 
 /// Byte offset of a non-resident attribute's run list within the record.
@@ -645,6 +671,7 @@ fn run_list_offset(rec: &[u8], attr_pos: usize) -> Option<usize> {
 /// Entries whose parent chain does not reach the root are dropped rather than
 /// attached somewhere plausible: putting an orphan under a guessed parent moves
 /// its bytes into a directory that does not contain it.
+#[cfg(test)]
 pub(crate) fn paths_for(entries: &[Entry]) -> HashMap<u64, String> {
     let by_record: HashMap<u64, (String, u64)> = entries
         .iter()
@@ -662,6 +689,8 @@ pub(crate) fn paths_for(entries: &[Entry]) -> HashMap<u64, String> {
 
 #[cfg(test)]
 mod tests {
+    include!("mft_reader/batching_tests.rs");
+    include!("mft_reader/progress_tests.rs");
     use super::{super::mft::ROOT_RECORD, *};
 
     // --- a synthetic NTFS volume ---------------------------------------------

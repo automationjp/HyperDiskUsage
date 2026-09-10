@@ -1,5 +1,7 @@
 # bench-env — 計測用 AWS 環境（プロジェクト非依存）
 
+**日本語** · [English](README.en.md) · [简体中文](README.zh-CN.md)
+
 HyperDiskUsage の性能計測に使っていた EC2 環境を、他のプロジェクトからも使える形に
 切り出したもの。**このディレクトリは HyperDiskUsage に一切依存しない。** 別リポジトリへ
 そのまま `git subtree split` できるよう、外部参照を持たない構成にしてある。

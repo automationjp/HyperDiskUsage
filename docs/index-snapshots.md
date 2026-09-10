@@ -1,5 +1,7 @@
 # Linux directory snapshots (experimental)
 
+**日本語** · [English](en/index-snapshots.md) · [简体中文](zh-CN/index-snapshots.md)
+
 HyperDU の `index` サブコマンドは、**一度走査した directory 集計を保存し、次回はファイルツリーを再走査せずに読み出す**ための Linux 向け実験機能です。
 
 > これは watcher ではありません。自動更新や常駐監視は行いません。保存値は常に `stale` として扱います。
