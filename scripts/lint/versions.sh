@@ -27,7 +27,7 @@ esac
 # Match the complete version token, including repeated '-' components and '+'
 # build metadata. '.' and '~' are also accepted because Debian/RPM package
 # filenames use those spellings for the same prerelease.
-pattern='[0-9]+\.[0-9]+\.[0-9]+([-~.][0-9A-Za-z][0-9A-Za-z.~+-]*)?'
+pattern='[0-9]+\.[0-9]+\.[0-9]+([-~.+][0-9A-Za-z][0-9A-Za-z.~+-]*)?'
 
 normalize_package_tokens() {
     local text="$1" expected="$2"
@@ -58,6 +58,12 @@ self_test() {
         return 1
     fi
 
+    expected='0.6.0+build.1'
+    got="$(printf '%s\n' "$expected" | grep -oE "$pattern")"
+    if [ "$got" != "$expected" ]; then
+        echo "self-test: release build metadata truncated: '$got'" >&2
+        return 1
+    fi
     expected='0.6.0-alpha-beta'
     local deb='0.6.0.alpha.beta'
     local line="https://example.invalid/releases/download/v$deb/hyperdu_${deb}_amd64.deb"

@@ -113,7 +113,8 @@ jobs:
           bash scripts/package/report_artifacts.sh \
             --required 'hyperdu-cli-linux-x86_64-generic.zip' \
             --required 'hyperdu-gui-linux-x86_64-generic.zip' \
-            --required '*.deb' \
+            --required 'hyperdu-cli_*.deb' \
+            --required 'hyperdu-gui_*.deb' \
             --optional '*.rpm' \
             --optional '*.snap' \
             --optional '*.AppImage'

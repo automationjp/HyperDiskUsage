@@ -60,6 +60,7 @@ for a in "$@"; do case "$a" in -h|--help) usage; exit 0;; esac; done
 # release error this check is intended to detect.
 echo "==> version references"
 bash scripts/lint/versions.sh --self-test
+bash scripts/package/test_artifact_policy.sh
 bash scripts/lint/versions.sh
 
 echo "==> rustfmt (check)"
