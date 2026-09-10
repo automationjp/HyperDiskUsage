@@ -8,7 +8,7 @@ MCPサーバは `hyperdu mcp` です。0.5.0-beta.3で単独の `hyperdu-mcp` �
 ## このチェックアウトからインストール
 
 ```sh
-cargo install --locked --path hyperdu-cli
+cargo install --locked --path hyperdu
 hyperdu --help
 hyperdu mcp --help
 ```

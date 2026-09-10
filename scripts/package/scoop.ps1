@@ -16,7 +16,7 @@
     what the release asset is called.
 
 .PARAMETER Version
-    Package version. Defaults to the version in hyperdu-cli/Cargo.toml.
+    Package version. Defaults to the version in hyperdu/Cargo.toml.
 
 .PARAMETER Url
     Download URL for the x64 zip. Omitted in a local dry run.
@@ -38,7 +38,7 @@ $ErrorActionPreference = 'Stop'
 
 if (-not $Version) {
   # Ask cargo rather than regex the manifest: the crate inherits
-  # `version.workspace = true`, so the literal is not in hyperdu-cli/Cargo.toml.
+  # `version.workspace = true`, so the literal is not in hyperdu/Cargo.toml.
   # pkgid prints `<url>#<version>` (or `#<name>@<version>`).
   $Version = (cargo pkgid -p hyperdu) -replace '^.*[#@]', ''
 }

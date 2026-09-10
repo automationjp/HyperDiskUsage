@@ -50,7 +50,7 @@ hyperdu index show ROOT --database FILE
 |---|---|---|
 | `--top N` | `30` | 物理サイズ順の上位N行。`0` は一覧0行。互換出力には適用しません。 |
 | `--json FILE` | なし | 標準モードの走査結果をJSON配列で保存。各行は `path`, `logical`, `physical`, `files` です。 |
-| `--csv FILE` | なし | 同じ4列でCSVを保存。 |
+| `--csv FILE` | なし | 同じ4列でCSVを保存。数式・制御文字で始まるパス列には表計算ソフト向けに単一引用符を付けます（JSONは元のパスを保持）。 |
 | `--classify MODE` | 無効 | 標準モードで追加分類します。`basic` は基本分類、`deep` は先頭バイトによるMIME推定も行います。 |
 | `--class-report FILE` | なし | `--classify` を指定したとき、分類JSONを保存。 |
 | `--class-report-csv FILE` | なし | `--classify` を指定したとき、`kind,key,files,bytes` 列の分類CSVを保存。 |
@@ -139,10 +139,10 @@ MCPクライアントが子プロセスを起動し、stdin/stdoutでプロト�
 
 ## 実装との対応
 
-- [CLI引数と出力処理](../hyperdu-cli/src/main.rs)
-- [index / MCPサブコマンドの入口](../hyperdu-cli/src/index_cli.rs)
+- [CLI引数と出力処理](../hyperdu/src/main.rs)
+- [index / MCPサブコマンドの入口](../hyperdu/src/index_cli.rs)
 - [コアの既定値・走査設定](../hyperdu-core/src/lib.rs)
 - [MFTの利用条件](../hyperdu-core/src/platform/windows_impl/mod.rs)
-- [プラットフォーム／featureによる引数の回帰テスト](../hyperdu-cli/tests/removed_options.rs)
+- [プラットフォーム／featureによる引数の回帰テスト](../hyperdu/tests/removed_options.rs)
 
 性能値と測定日は [ベンチマーク](benchmarks.md) を参照してください。このリファレンスは速度を保証するものではありません。

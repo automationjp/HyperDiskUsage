@@ -18,7 +18,7 @@ cargo install hyperdu --version 0.5.0-beta.3
 crate 和可执行命令均名为 `hyperdu`。一次安装包含 CLI 和 MCP；只有运行 `hyperdu mcp` 时
 才会启动 MCP 服务器。需要 Rust 1.88+。
 
-此版本正在准备发布。现在请从仓库根目录运行 `cargo install --locked --path hyperdu-cli`。
+此版本正在准备发布。现在请从仓库根目录运行 `cargo install --locked --path hyperdu`。
 上面的 registry 安装命令在发布后可用。运行预编译包无需 Rust。
 MSVC/SDK 及 Linux 依赖见[环境配置](../docs/zh-CN/setup.md)。
 

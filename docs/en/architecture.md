@@ -6,6 +6,8 @@ HyperDU has **one fast scanner core with CLI / GUI / MCP layers on top**.
 
 By concentrating performance-sensitive processing in `hyperdu-core` instead of reimplementing it for each interface, the CLI, GUI, and AI agent share the same scan semantics and platform fast paths.
 
+The Cargo workspace has three crates: `hyperdu/`, `hyperdu-core/`, and `hyperdu-gui/`. The reusable Rust library `hyperdu-core` owns scanning, aggregation, progress, cancellation, indexing, and reports without depending on CLI, MCP, or GUI frameworks. `hyperdu` handles CLI arguments/output and serves MCP over stdio through its `mcp` subcommand; `hyperdu-gui` calls the same core directly.
+
 ## Overview
 
 ```text
@@ -148,7 +150,7 @@ The synchronous core scan runs through `spawn_blocking`. Its callback only updat
 
 Request cancellation, request destruction, or a notification transport failure propagates to the core cancellation flag. This is cooperative cancellation, not an immediate interruption of synchronous OS I/O. This progress adapter serves `scan_path`; it does not promise progress for every MCP tool.
 
-Implementation: [CLI](../../hyperdu-cli/src/main.rs), [MCP tools](../../hyperdu-cli/src/mcp.rs), and [MCP progress adapter](../../hyperdu-cli/src/mcp/progress.rs). See the [CLI reference (Japanese)](../cli-reference.md) for argument and output conditions.
+Implementation: [CLI](../../hyperdu/src/main.rs), [MCP tools](../../hyperdu/src/mcp.rs), and [MCP progress adapter](../../hyperdu/src/mcp/progress.rs). See the [CLI reference (Japanese)](../cli-reference.md) for argument and output conditions.
 
 ## Concurrency model
 

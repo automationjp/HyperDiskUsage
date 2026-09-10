@@ -9,7 +9,7 @@ The standalone `hyperdu-mcp` binary is replaced in 0.5.0-beta.3.
 ## Install from this checkout
 
 ```sh
-cargo install --locked --path hyperdu-cli
+cargo install --locked --path hyperdu
 hyperdu --help
 hyperdu mcp --help
 ```

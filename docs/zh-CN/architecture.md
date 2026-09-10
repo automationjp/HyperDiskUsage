@@ -6,6 +6,8 @@ HyperDU 采用**一个高速 scanner core，并在其上提供 CLI / GUI / MCP**
 
 性能相关处理集中在 `hyperdu-core` 中，而不是为每个 interface 重复实现，因此 CLI、GUI 和 AI agent 共享相同的扫描语义与 platform fast path。
 
+Cargo workspace包含三个crate：`hyperdu/`、`hyperdu-core/` 和 `hyperdu-gui/`。`hyperdu-core` 是可复用的Rust库，提供扫描、聚合、进度、取消、索引与报告，不依赖CLI、MCP或GUI框架。`hyperdu` 负责命令行参数与输出，并通过 `mcp` 子命令在stdio上等待MCP请求；`hyperdu-gui` 直接使用同一个core。
+
 ## 概览
 
 ```text
@@ -148,7 +150,7 @@ reader在开始前、最多每256条记录、正常结束时检查进度和取�
 
 请求取消、请求销毁或通知传输失败会传递到核心的取消标志。这是协作式取消，并不保证立即中断操作系统的同步I/O。这个进度adapter用于 `scan_path`，并不代表所有MCP工具都提供进度通知。
 
-实现位置：[CLI](../../hyperdu-cli/src/main.rs)、[MCP工具](../../hyperdu-cli/src/mcp.rs)、[MCP进度adapter](../../hyperdu-cli/src/mcp/progress.rs)。参数和输出条件见 [CLI参考（日语）](../cli-reference.md)。
+实现位置：[CLI](../../hyperdu/src/main.rs)、[MCP工具](../../hyperdu/src/mcp.rs)、[MCP进度adapter](../../hyperdu/src/mcp/progress.rs)。参数和输出条件见 [CLI参考（日语）](../cli-reference.md)。
 
 ## 并发模型
 

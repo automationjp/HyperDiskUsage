@@ -19,7 +19,7 @@
 
 参数默认值、输出模式及平台限制见 [CLI 参数参考（日语）](docs/cli-reference.md)。`--time` 系列参数需要默认启用的 `time-format` feature。
 
-> **0.5.0-beta.3 正在准备发布。** 在当前分支可以使用 `cargo install --locked --path hyperdu-cli` 安装。下方的 crates.io 命令和新名称发行文件将在版本正式发布后可用。
+> **0.5.0-beta.3 正在准备发布。** 在当前分支可以使用 `cargo install --locked --path hyperdu` 安装。下方的 crates.io 命令和新名称发行文件将在版本正式发布后可用。
 
 ```bash
 cargo install hyperdu --version 0.5.0-beta.3
@@ -200,7 +200,7 @@ manifest 已通过 `winget validate`，但在完成向 winget-pkgs 注册之前�
 ```bash
 git clone https://github.com/automationjp/HyperDiskUsage.git
 cd HyperDiskUsage
-cargo install --path hyperdu-cli
+cargo install --path hyperdu
 ```
 
 详细的构建环境见 [docs/zh-CN/setup.md](docs/zh-CN/setup.md)。

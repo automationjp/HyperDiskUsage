@@ -19,7 +19,7 @@
 
 See the [CLI parameter reference (Japanese)](docs/cli-reference.md) for defaults, output modes, and platform restrictions. The `--time` options require the `time-format` feature, enabled by default.
 
-> **0.5.0-beta.3 is being prepared for publication.** On this branch, install it with `cargo install --locked --path hyperdu-cli`. The crates.io commands and newly named distribution artifacts below become available after the release is published.
+> **0.5.0-beta.3 is being prepared for publication.** On this branch, install it with `cargo install --locked --path hyperdu`. The crates.io commands and newly named distribution artifacts below become available after the release is published.
 
 ```bash
 cargo install hyperdu --version 0.5.0-beta.3
@@ -200,7 +200,7 @@ The manifest has passed `winget validate`, but it cannot be used until registrat
 ```bash
 git clone https://github.com/automationjp/HyperDiskUsage.git
 cd HyperDiskUsage
-cargo install --path hyperdu-cli
+cargo install --path hyperdu
 ```
 
 See [docs/en/setup.md](docs/en/setup.md) for the detailed build environment.

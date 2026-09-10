@@ -7,6 +7,19 @@
 通常の利用には [`hyperdu`](https://crates.io/crates/hyperdu) コマンドを使ってください。
 このクレートはアプリケーションへ走査機能を組み込むためのライブラリです。
 
+未公開のチェックアウトから組み込む場合は、コアクレートを直接依存に指定します。
+
+```toml
+[dependencies]
+hyperdu-core = { path = "../hyperdu-core" }
+```
+
+この checkout で生成する Rust APIドキュメントでは、一括・インタラクティブ走査、
+共有キャンセルと進捗フック、レポート出力、永続インデックス、ボリューム情報のAPIを説明します。
+`cargo doc --locked -p hyperdu-core --no-deps --open` で開けます。
+公開済みバージョンには[別のRust APIドキュメント](https://docs.rs/hyperdu-core/latest/hyperdu_core/)があります。
+コアクレートは `hyperdu` CLI・MCPサーバー・GUIなしで直接利用できます。
+
 ## 一括走査
 
 ```rust

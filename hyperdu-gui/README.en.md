@@ -112,7 +112,7 @@ The JSON and CSV save buttons are enabled only when the scan has emitted `Finish
 
 ## Normal CLI / MCP
 
-The GUI is a visual and interactive front-end. For scripts, CI, structured output, or AI agents, use the normal `hyperdu` CLI and `hyperdu mcp`. See the [hyperdu CLI / MCP README](../hyperdu-cli/README.en.md) for installation and MCP registration.
+The GUI is a visual and interactive front-end. For scripts, CI, structured output, or AI agents, use the normal `hyperdu` CLI and `hyperdu mcp`. See the [hyperdu CLI / MCP README](../hyperdu/README.en.md) for installation and MCP registration.
 
 ## License
 

@@ -170,7 +170,7 @@ CLI core 提供 `getattrlistbulk` fast path，但目前尚未验证 macOS CLI �
 ```bash
 rustup toolchain install stable
 cargo build --release -p hyperdu
-cargo install --path hyperdu-cli
+cargo install --path hyperdu
 hyperdu mcp
 ```
 

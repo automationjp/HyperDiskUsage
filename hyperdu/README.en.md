@@ -21,7 +21,7 @@ Both the crate and command are `hyperdu`. One installation includes the CLI and
 the MCP server, which starts only when you run `hyperdu mcp`. Rust 1.88+ is required.
 
 This release is being prepared. Install this checkout now with
-`cargo install --locked --path hyperdu-cli` from the repository root; the registry
+`cargo install --locked --path hyperdu` from the repository root; the registry
 command above becomes available after publication.
 
 Prebuilt packages do not require a Rust toolchain. For source builds, Rust versions,

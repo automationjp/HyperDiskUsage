@@ -17,7 +17,7 @@ VER=""
 if [[ ${1:-} == "--version" ]]; then VER=${2:-}; fi
 if [[ -z "$VER" ]]; then
   # The crate inherits its version from [workspace.package], so the literal is
-  # not in hyperdu-cli/Cargo.toml. pkgid prints `<url>#<version>`.
+  # not in hyperdu/Cargo.toml. pkgid prints `<url>#<version>`.
   VER=$(cargo pkgid -p hyperdu | sed 's/.*[#@]//')
 fi
 if [[ -z "$VER" ]]; then echo "error: could not determine hyperdu version" >&2; exit 1; fi

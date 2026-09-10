@@ -112,7 +112,7 @@ JSON と CSV の保存ボタンは、走査が `Finished` で終了し、error c
 
 ## 通常の CLI / MCP
 
-GUI は表示と対話操作の front-end です。script、CI、structured output、AI agent から使う場合は、通常の `hyperdu` CLI と `hyperdu mcp` を使用してください。インストールと MCP の登録は [hyperdu CLI / MCP の README](../hyperdu-cli/README.md) を参照してください。
+GUI は表示と対話操作の front-end です。script、CI、structured output、AI agent から使う場合は、通常の `hyperdu` CLI と `hyperdu mcp` を使用してください。インストールと MCP の登録は [hyperdu CLI / MCP の README](../hyperdu/README.md) を参照してください。
 
 ## ライセンス
 

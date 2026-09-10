@@ -52,6 +52,11 @@ Flags:
   --rpm            Build .rpm packages for host (cargo-generate-rpm)
   --url-base URL   Base URL for release assets (for local manifest URL/SHA insertion)
 
+AppImage configuration (required for linux-appimage):
+  LINUXDEPLOY and APPIMAGETOOL: absolute paths to reviewed local tools.
+  LINUXDEPLOY_SHA256 and APPIMAGETOOL_SHA256: independently reviewed SHA256 values.
+  No automatic download or unchecked PATH fallback is used.
+
 Examples:
   bash scripts/package/release.sh --cpu-flavors "generic,native"
   bash scripts/package/release.sh --targets "linux-musl,windows-gnu" --skip-gui --verbose
@@ -126,22 +131,7 @@ ensure_tool zip
 command -v jq >/dev/null || echo "warning: jq still missing; falling back to sed parser"
 command -v zip >/dev/null || { echo "error: zip not found; please install zip"; exit 1; }
 
-# Ensure AppImage tools (download to ~/.local/bin if missing)
-ensure_appimage_tools() {
-  local bindir="$HOME/.local/bin"
-  mkdir -p "$bindir"
-  if ! command -v linuxdeploy >/dev/null 2>&1; then
-    echo "==> Installing linuxdeploy AppImage"
-    curl -L -o "$bindir/linuxdeploy" https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage || true
-    chmod +x "$bindir/linuxdeploy" || true
-  fi
-  if ! command -v appimagetool >/dev/null 2>&1; then
-    echo "==> Installing appimagetool AppImage"
-    curl -L -o "$bindir/appimagetool" https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage || true
-    chmod +x "$bindir/appimagetool" || true
-  fi
-  export PATH="$bindir:$PATH"
-}
+# AppImage verification is enforced by appimage.sh for every entry point.
 
 # Ensure Snapcraft
 ensure_snapcraft() {
@@ -492,8 +482,7 @@ if [[ -n "$targets_csv" ]]; then
       linux-rpm) build_rpm=1 ;;
       linux-appimage)
         if [[ "$os_tag" == linux ]]; then
-          ensure_appimage_tools
-          bash "$root_dir/scripts/package/appimage.sh" >> "$dist_dir/appimage-pack.log" 2>&1 || echo "warn: AppImage step failed (see dist/appimage-pack.log)"
+          bash "$root_dir/scripts/package/appimage.sh" >> "$dist_dir/appimage-pack.log" 2>&1
         else
           echo "warn: linux-appimage requested on non-linux host; skipping"
         fi ;;

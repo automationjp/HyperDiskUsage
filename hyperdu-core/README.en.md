@@ -7,6 +7,19 @@ Walks a directory tree in parallel and reports logical size, physical size on di
 and file counts per directory. Most users want the [`hyperdu`](https://crates.io/crates/hyperdu)
 command; this crate embeds the scanner in your application.
 
+For an unpublished checkout, depend on the core crate directly:
+
+```toml
+[dependencies]
+hyperdu-core = { path = "../hyperdu-core" }
+```
+
+The current checkout's generated Rust API documentation covers the batch and
+interactive scan APIs, shared cancellation and progress hooks, report writers,
+the persistent index, and volume helpers. Open it with `cargo doc --locked -p hyperdu-core --no-deps --open`.
+Published releases have separate [Rust API documentation](https://docs.rs/hyperdu-core/latest/hyperdu_core/).
+The core crate can be used without the `hyperdu` CLI, its MCP server, or the GUI.
+
 ## Batch scan
 
 ```rust

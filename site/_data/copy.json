@@ -78,7 +78,7 @@
     "copy_failed": "選択してコピーしてください",
     "release": "リリースを見る",
     "setup": "環境別セットアップ",
-    "install_note": "現在の導入: cargo install --locked --path hyperdu-cli。公開後は上のコマンドが利用できます。Rust 1.88+ が必要です。",
+    "install_note": "現在の導入: cargo install --locked --path hyperdu。公開後は上のコマンドが利用できます。Rust 1.88+ が必要です。",
     "docs_title": "さらに深く知る。",
     "doc_links": [
       {
@@ -186,7 +186,7 @@
     "copy_failed": "Select the command to copy it",
     "release": "View releases",
     "setup": "Platform setup guide",
-    "install_note": "Install this checkout now: cargo install --locked --path hyperdu-cli. The command above becomes available after publication. Requires Rust 1.88+.",
+    "install_note": "Install this checkout now: cargo install --locked --path hyperdu. The command above becomes available after publication. Requires Rust 1.88+.",
     "docs_title": "Go a little deeper.",
     "doc_links": [
       {
@@ -294,7 +294,7 @@
     "copy_failed": "请选择命令并复制",
     "release": "查看发布版本",
     "setup": "按平台配置环境",
-    "install_note": "现在安装本地源码：cargo install --locked --path hyperdu-cli。发布后才能使用上面的命令。需要 Rust 1.88+。",
+    "install_note": "现在安装本地源码：cargo install --locked --path hyperdu。发布后才能使用上面的命令。需要 Rust 1.88+。",
     "docs_title": "进一步了解 HyperDU。",
     "doc_links": [
       {

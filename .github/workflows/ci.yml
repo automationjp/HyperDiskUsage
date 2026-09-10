@@ -12,12 +12,17 @@ on:
     branches:
       - "**"
 
+permissions:
+  contents: read
+
 jobs:
   test-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
       - name: Lint (fmt + clippy)
@@ -25,8 +30,10 @@ jobs:
       - name: Shellcheck scripts
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck
+          sudo apt-get install -y shellcheck python3-yaml
           shellcheck -S error -x scripts/**/*.sh
+      - name: Supply-chain regression tests (offline mocks)
+        run: python3 scripts/package/test_supply_chain.py
       - name: Import sort (nightly strict)
         run: |
           rustup toolchain install nightly -c rustfmt
@@ -41,10 +48,14 @@ jobs:
   test-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: clippy
+      - name: Installer argument regression (offline mocks)
+        run: pwsh -File scripts/package/test_setup_hyperdu.ps1
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test core, CLI and GUI on a fixed NTFS volume

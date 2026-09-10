@@ -8,7 +8,7 @@ MCP 服务器通过 `hyperdu mcp` 启动。0.5.0-beta.3 将取代独立的 `hype
 ## 从当前源码安装
 
 ```sh
-cargo install --locked --path hyperdu-cli
+cargo install --locked --path hyperdu
 hyperdu --help
 hyperdu mcp --help
 ```

@@ -2,6 +2,8 @@
 # Install unified HyperDU (CLI + MCP). --check is read-only; --register opts in
 # to changing detected MCP client configuration. Requires Rust 1.88+ to build.
 set -eu
+# Audited source revision; update together with the PowerShell installer.
+source_rev="c535dd8b34e877ac93170ab941dccf020f6b3c2d"
 mode=install
 for arg in "$@"; do
     case "$arg" in
@@ -25,10 +27,10 @@ if ! have_unified; then
     command -v cargo >/dev/null 2>&1 || { echo 'Install Rust 1.88+ from https://rustup.rs' >&2; exit 1; }
     script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
     source_root=$(CDPATH= cd -- "$script_dir/../../../.." && pwd)
-    if [ -f "$source_root/hyperdu-cli/Cargo.toml" ]; then
-        cargo install --locked --force --path "$source_root/hyperdu-cli"
+    if [ -f "$source_root/hyperdu/Cargo.toml" ]; then
+        cargo install --locked --force --path "$source_root/hyperdu"
     else
-        cargo install --locked --force --git https://github.com/automationjp/HyperDiskUsage hyperdu
+        cargo install --locked --force --git https://github.com/automationjp/HyperDiskUsage --rev "$source_rev" hyperdu
     fi
     PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
     export PATH

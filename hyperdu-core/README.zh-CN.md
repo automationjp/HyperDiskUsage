@@ -7,6 +7,18 @@
 一般用户可使用 [`hyperdu`](https://crates.io/crates/hyperdu) 命令；
 此 crate 用于将扫描功能嵌入自己的应用。
 
+从尚未发布的 checkout 集成时，可直接依赖本地 core crate：
+
+```toml
+[dependencies]
+hyperdu-core = { path = "../hyperdu-core" }
+```
+
+本 checkout 生成的 Rust API 文档说明批量与交互式扫描、共享取消与进度回调、
+报告写入器、持久化索引和卷容量 API。运行 `cargo doc --locked -p hyperdu-core --no-deps --open` 可打开。
+已发布版本另有 [Rust API 文档](https://docs.rs/hyperdu-core/latest/hyperdu_core/)。
+core crate 可以脱离 `hyperdu` CLI、MCP 服务和 GUI 直接使用。
+
 ## 批量扫描
 
 ```rust

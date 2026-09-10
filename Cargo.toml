@@ -1,7 +1,7 @@
 [workspace]
 members = [
   "hyperdu-core",
-  "hyperdu-cli",
+  "hyperdu",
   "hyperdu-gui",
 ]
 resolver = "2"

@@ -1,6 +1,75 @@
 # セキュリティ監査報告書（2026-09-10）
 
-## 判定
+## 修正状況（2026-09-10）
+
+下記の初回監査で確認したP2 5件に対する修正を実装しました。対象は
+`codex/site-bench-refresh` の `c535dd8b34e877ac93170ab941dccf020f6b3c2d` に対する
+未コミット差分です。ローカル検証の結果と、初回監査時点の記録を区別して記載します。
+リモートCI・実リリース・本番受け入れは未実行です。
+
+| 指摘 | 修正と検証 |
+|---|---|
+| P2-1 MCPキャンセル | ブロッキング処理をプロセス共通で最大2件に制限。permitを実ワーカーが終了まで保持し、リクエストの破棄でも枠を先に返しません。キャンセル時は協調フラグを立て、最大250ms終了待ち。入場待ちもキャンセル可能です。MCP単体17件、protocol 4件、SDK 3件PASS。 |
+| P2-2 CSV数式 | CSVパス列の危険な数式・制御文字・空白付きprefixへ単一引用符を付与。JSONの元パスは保持。旧writerで回帰テストが失敗し、修正後3件PASS。 |
+| P2-3 Actions権限 | 全Actionをupstreamで確認した完全SHAへ固定し、既定権限をreadへ変更。ビルド、release書き込み、Scoop／wingetのPAT利用を別jobへ分離。書き込みjobは同じrunの成果物をデータとして処理し、実行しません。actionlint 1.7.7と権限境界テストPASS。既存のdraft作成後の公開動作を維持。 |
+| P2-4 AppImage工具 | mutable自動ダウンロードとPATH fallbackを撤去。明示したローカル工具2個と独立確認済みSHA256が必須。privateコピーのハッシュ照合後に実行権限を付与。未設定・不一致なら工具を実行せず失敗。直接appimage.shを呼ぶ経路も保護。 |
+| P2-5 Plugin導入 | POSIX／PowerShellのremote cargo installを、実在確認済みの監査対象revision c535dd8へ固定。ローカルcheckout導入は従来どおり。導入引数のモック検証PASS。 |
+
+MCPでは停止できないOS呼び出しを強制終了しません。250msを過ぎても最大2件の枠は
+実処理の終了まで保持されます。これはキャンセルを繰り返して重い処理が際限なく重なる問題の
+対策であり、大量リクエストの負荷試験や全処理の即時停止を保証するものではありません。
+permitを早期返却する変異ではライフサイクルテスト4件が失敗し、復元後はPASSしました。
+
+AppImageを生成する場合は、レビューした工具を事前に配置し、以下4変数を指定します。
+ハッシュを指定ファイルからその場で自動採用して検証の代わりにしないでください。
+
+```sh
+export LINUXDEPLOY=/absolute/path/to/reviewed-linuxdeploy.AppImage
+export LINUXDEPLOY_SHA256='<independently verified 64-digit SHA256>'
+export APPIMAGETOOL=/absolute/path/to/reviewed-appimagetool.AppImage
+export APPIMAGETOOL_SHA256='<independently verified 64-digit SHA256>'
+bash scripts/package/appimage.sh
+```
+
+release workflowの任意AppImage工程は、工具を供給していないため生成をスキップします。
+実工具での生成と配布資産は未検証です。Pluginの固定revisionは監査時点のソースであり、
+今回の未コミット修正をremote導入できることを意味しません。次のPlugin更新でレビュー済みの
+修正コミットへ固定先を更新する必要があります。
+
+### 依存更新と残る通知
+
+`wayland-scanner 0.31.7 → 0.31.11` により `quick-xml 0.37.5 → 0.41.0` へ更新し、
+RUSTSEC-2026-0194／0195と適用対象のなくなった例外を削除しました。
+`cargo deny check` はPASS、Linux GUIで更新した依存のコンパイルもPASSしました。
+依存manifestの変更はなく、lockfileの2パッケージだけを更新しています。
+
+`ttf-parser 0.25.1` のRUSTSEC-2026-0192は、修正版のない保守終了通知として残っています。
+`deny.toml` にegui → ab_glyph側の経路と理由を明記しました。GUI依存スタックの移行は未実施です。
+
+### 修正後のローカル検証
+
+| コマンド／検証 | 結果 |
+|---|---|
+| `cargo +stable check --locked --workspace` | PASS |
+| `cargo +stable test --locked --workspace` | PASS |
+| 同test + `--features hyperdu-core/rayon-par,hyperdu-core/rayon-inner,hyperdu-core/simd-prefetch` | PASS |
+| `cargo +stable clippy --locked --workspace --all-targets -- -D warnings` | PASS |
+| `cargo +stable fmt --all -- --check` | PASS |
+| `cargo +nightly fmt --all -- --check --config group_imports=StdExternalCrate --config imports_granularity=Crate` | PASS（既存strict.rsのimport順も修正） |
+| `cargo +stable build --locked --release --workspace` | PASS |
+| prof-tracy／prof-puffinを個別指定したworkspace check | 両方PASS（all-featuresは使用せず） |
+| Linux Ubuntu 26.04 `cargo check --locked -p hyperdu-gui` | PASS |
+| `cargo deny check` | PASS（ttf-parserの保守終了例外は残る） |
+| `python3 scripts/package/test_supply_chain.py` | 6 PASS（旧実装では4件失敗） |
+| `pwsh -File scripts/package/test_setup_hyperdu.ps1` | PASS（ローカル／remote引数モック） |
+| actionlint 1.7.7、ShellCheck、shell／PowerShell構文、Python Ruff | PASS |
+
+Rustと供給網の独立レビューでは、現行実装に追加のP0／P1／P2脆弱性は確認されませんでした。
+供給網の回帰テストに対する指摘を反映し、両起動経路と検証ヘルパーでのダウンロード再導入を検査しています。
+
+以降は初回監査の記録です。行番号、依存例外、未対策の挙動は初回監査SHAを指します。
+
+## 初回監査の判定
 
 要修正です。P0 / P1 は検出しませんでしたが、P2 を5件確認しました。今回のPRで新たに
 入った問題は、MCPリクエストをキャンセルした後もブロッキング走査を待たずに応答を返す

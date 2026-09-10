@@ -8,6 +8,8 @@ registration is opt-in with -Register. -Check changes nothing.
 [CmdletBinding()]
 param([switch]$Check, [switch]$Register)
 $ErrorActionPreference = 'Stop'
+# Audited source revision; update together with the POSIX installer.
+$SourceRev = 'c535dd8b34e877ac93170ab941dccf020f6b3c2d'
 $RepoUrl = 'https://github.com/automationjp/HyperDiskUsage'
 
 function Test-UnifiedHyperdu {
@@ -27,11 +29,11 @@ if (-not (Test-UnifiedHyperdu)) {
         throw 'Rust 1.88+ is needed to build from source. See https://rustup.rs'
     }
     $sourceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../..'))
-    $crateDir = Join-Path $sourceRoot 'hyperdu-cli'
+    $crateDir = Join-Path $sourceRoot 'hyperdu'
     if (Test-Path -LiteralPath (Join-Path $crateDir 'Cargo.toml')) {
         & cargo install --locked --force --path $crateDir
     } else {
-        & cargo install --locked --force --git $RepoUrl hyperdu
+        & cargo install --locked --force --git $RepoUrl --rev $SourceRev hyperdu
     }
     if ($LASTEXITCODE -ne 0) { throw 'HyperDU installation failed.' }
     $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }

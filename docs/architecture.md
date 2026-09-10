@@ -6,6 +6,8 @@ HyperDU は、**高速な scanner core を 1 つ持ち、その上に CLI / GUI 
 
 性能に関わる処理を interface ごとに重複実装せず、`hyperdu-core` に集約することで、CLI・GUI・AI Agent が同じ走査 semantics と platform fast path を共有します。
 
+Cargo workspaceは `hyperdu/`、`hyperdu-core/`、`hyperdu-gui/` の3クレートです。`hyperdu-core` はCLIやGUIに依存しないRustライブラリで、走査・集計・進捗・キャンセル・索引・レポートを提供します。`hyperdu` は引数処理と表示、`mcp` サブコマンドのstdio待機を担当し、`hyperdu-gui` は同じcoreを直接呼ぶGUIです。
+
 ## Overview
 
 ```text
@@ -149,7 +151,7 @@ readerは走査前・最大256レコードごと・正常な末尾で進捗と�
 
 リクエストのキャンセル、破棄、通知送信の失敗はコアのキャンセルフラグへ伝わります。これは協調的な中断であり、OSの同期I/Oを即時に止める保証ではありません。この進捗adapterは `scan_path` 用であり、全MCPツールの進捗を保証するものではありません。
 
-実装: [CLI](../hyperdu-cli/src/main.rs)、[MCP tools](../hyperdu-cli/src/mcp.rs)、[MCP progress adapter](../hyperdu-cli/src/mcp/progress.rs)。引数と出力条件は [CLIリファレンス](cli-reference.md) を参照してください。
+実装: [CLI](../hyperdu/src/main.rs)、[MCP tools](../hyperdu/src/mcp.rs)、[MCP progress adapter](../hyperdu/src/mcp/progress.rs)。引数と出力条件は [CLIリファレンス](cli-reference.md) を参照してください。
 
 ## Concurrency model
 

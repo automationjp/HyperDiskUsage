@@ -19,7 +19,7 @@ cargo install hyperdu --version 0.5.0-beta.3
 場合だけ起動します。Rust 1.88+ が必要です。
 
 この版は公開準備中です。現在はリポジトリのルートから
-`cargo install --locked --path hyperdu-cli` で導入してください。上のレジストリ用コマンドは公開後に利用できます。
+`cargo install --locked --path hyperdu` で導入してください。上のレジストリ用コマンドは公開後に利用できます。
 配布済みバイナリの実行にRustは不要です。MSVC/SDK・Linuxの依存環境は[セットアップ](../docs/setup.md)を参照してください。
 
 ## 使い方

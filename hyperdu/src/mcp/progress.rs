@@ -1,24 +1,14 @@
 //! Bounded progress delivery. The scanner never waits on the protocol transport.
 use std::{
     path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use hyperdu_core::{Options, StatMap};
 use rmcp::{model::ProgressNotificationParam, service::RequestContext, ErrorData, RoleServer};
 
-struct CancelOnDrop(Arc<AtomicBool>);
-impl Drop for CancelOnDrop {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::Relaxed);
-    }
-}
-
-async fn cancelled(context: &Option<RequestContext<RoleServer>>) {
+pub(super) async fn cancelled(context: &Option<RequestContext<RoleServer>>) {
     if let Some(context) = context {
         context.ct.cancelled().await;
     } else {
@@ -43,11 +33,9 @@ pub(super) async fn scan(
     context: Option<RequestContext<RoleServer>>,
 ) -> Result<(StatMap, u64), ErrorData> {
     let token = context.as_ref().and_then(|c| c.meta.get_progress_token());
-    let cancel = CancelOnDrop(Arc::new(AtomicBool::new(false)));
     let (updates, mut latest) = tokio::sync::watch::channel(0u64);
     let mut options = Options {
         max_depth,
-        cancel: cancel.0.clone(),
         progress_every: 0,
         ..Options::default()
     };
@@ -72,8 +60,15 @@ pub(super) async fn scan(
     }
     let scan_root = root.clone();
     let started = Instant::now();
-    let mut worker =
-        tokio::task::spawn_blocking(move || hyperdu_core::scan_directory(scan_root, &options));
+    let mut worker = super::blocking::start(
+        super::blocking::capacity(),
+        cancelled(&context),
+        move |cancel| {
+            options.cancel = cancel;
+            hyperdu_core::scan_directory(scan_root, &options)
+        },
+    )
+    .await?;
     let mut pending = false;
     let mut open = token.is_some();
     let mut sent = 0u64;
@@ -81,16 +76,22 @@ pub(super) async fn scan(
     let stats = loop {
         tokio::select! {
             biased;
-            _ = cancelled(&context) => return Err(ErrorData::internal_error("scan cancelled", None)),
-            result = &mut worker => break result
+            _ = cancelled(&context) => {
+                worker.cancel_and_wait().await;
+                return Err(ErrorData::internal_error("scan cancelled", None));
+            },
+            result = &mut worker.handle => break result
                 .map_err(|e| ErrorData::internal_error(format!("scan task failed: {e}"), None))?
                 .map_err(|e| ErrorData::internal_error(format!("scan of {} failed: {e}", root.display()), None))?,
             _ = tokio::time::sleep_until(next), if pending => {
                 let files = *latest.borrow_and_update();
                 if files > sent {
                     if let (Some(context), Some(token)) = (&context, &token) {
-                        notify(context, ProgressNotificationParam::new(token.clone(), files as f64)
-                            .with_message(format!("Scanned {files} files in {:.1}s", started.elapsed().as_secs_f64()))).await?;
+                        if let Err(error) = notify(context, ProgressNotificationParam::new(token.clone(), files as f64)
+                            .with_message(format!("Scanned {files} files in {:.1}s", started.elapsed().as_secs_f64()))).await {
+                            worker.cancel_and_wait().await;
+                            return Err(error);
+                        }
                     }
                     sent = files;
                 }
@@ -118,18 +119,4 @@ pub(super) async fn scan(
         }
     }
     Ok((stats, elapsed))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dropping_the_request_signals_the_blocking_worker() {
-        let flag = Arc::new(AtomicBool::new(false));
-        let request = CancelOnDrop(flag.clone());
-        assert!(!flag.load(Ordering::Relaxed));
-        drop(request);
-        assert!(flag.load(Ordering::Relaxed));
-    }
 }

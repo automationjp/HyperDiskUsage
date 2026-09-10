@@ -13,6 +13,7 @@
 
 use std::path::PathBuf;
 
+mod blocking;
 mod progress;
 
 use anyhow::{Context, Result};
@@ -173,7 +174,7 @@ impl HyperDuServer {
     async fn list_volumes(&self) -> Result<Json<VolumesOutput>, ErrorData> {
         // Enumeration touches every drive, and an unresponsive network or
         // optical drive can block; keep it off the protocol thread.
-        let mut volumes: Vec<VolumeInfo> = run_blocking(volume::list)
+        let mut volumes: Vec<VolumeInfo> = run_blocking(volume::list, None)
             .await?
             .into_iter()
             .map(|v| VolumeInfo {
@@ -251,6 +252,15 @@ impl HyperDuServer {
     async fn find_reclaimable(
         &self,
         Parameters(params): Parameters<ReclaimableParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<ReclaimableOutput>, ErrorData> {
+        self.find_reclaimable_impl(Parameters(params), Some(context))
+            .await
+    }
+    async fn find_reclaimable_impl(
+        &self,
+        Parameters(params): Parameters<ReclaimableParams>,
+        context: Option<RequestContext<RoleServer>>,
     ) -> Result<Json<ReclaimableOutput>, ErrorData> {
         let root = PathBuf::from(&params.path);
         let search_root = root.clone();
@@ -258,9 +268,12 @@ impl HyperDuServer {
         let unused_for_days = params.unused_for_days;
         let max_depth = params.max_depth;
 
-        let found = run_blocking(move || {
-            hyperdu_core::reclaimable::find(&search_root, min_size, unused_for_days, max_depth)
-        })
+        let found = run_blocking(
+            move || {
+                hyperdu_core::reclaimable::find(&search_root, min_size, unused_for_days, max_depth)
+            },
+            context,
+        )
         .await?;
 
         let total_bytes = found.iter().map(|c| c.size_bytes).sum();
@@ -287,14 +300,29 @@ impl HyperDuServer {
 
 /// Run blocking work off the protocol thread, turning a panic in the scanner
 /// into a protocol error rather than taking the whole server down with it.
-async fn run_blocking<F, T>(f: F) -> Result<T, ErrorData>
+async fn run_blocking<F, T>(
+    f: F,
+    context: Option<RequestContext<RoleServer>>,
+) -> Result<T, ErrorData>
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| ErrorData::internal_error(format!("scan task failed: {e}"), None))
+    let mut worker = blocking::start(
+        blocking::capacity(),
+        progress::cancelled(&context),
+        move |_| f(),
+    )
+    .await?;
+    tokio::select! {
+        biased;
+        _ = progress::cancelled(&context) => {
+            worker.cancel_and_wait().await;
+            Err(ErrorData::internal_error("scan cancelled", None))
+        }
+        result = &mut worker.handle => result
+            .map_err(|e| ErrorData::internal_error(format!("scan task failed: {e}"), None)),
+    }
 }
 
 #[tool_handler]
@@ -502,12 +530,15 @@ mod tests {
         std::fs::write(target.join("app.o"), vec![0u8; 4096]).expect("write artifact");
 
         let out = HyperDuServer::new()
-            .find_reclaimable(Parameters(ReclaimableParams {
-                path: dir.path().display().to_string(),
-                min_size_bytes: 0,
-                unused_for_days: None,
-                max_depth: 0,
-            }))
+            .find_reclaimable_impl(
+                Parameters(ReclaimableParams {
+                    path: dir.path().display().to_string(),
+                    min_size_bytes: 0,
+                    unused_for_days: None,
+                    max_depth: 0,
+                }),
+                None,
+            )
             .await
             .expect("find_reclaimable");
 
@@ -531,12 +562,15 @@ mod tests {
         std::fs::write(target.join("fresh.o"), vec![0u8; 4096]).expect("write artifact");
 
         let out = HyperDuServer::new()
-            .find_reclaimable(Parameters(ReclaimableParams {
-                path: dir.path().display().to_string(),
-                min_size_bytes: 0,
-                unused_for_days: Some(1),
-                max_depth: 0,
-            }))
+            .find_reclaimable_impl(
+                Parameters(ReclaimableParams {
+                    path: dir.path().display().to_string(),
+                    min_size_bytes: 0,
+                    unused_for_days: Some(1),
+                    max_depth: 0,
+                }),
+                None,
+            )
             .await
             .expect("find_reclaimable");
 
@@ -552,12 +586,15 @@ mod tests {
         // Unlike scan_path, "nothing to reclaim here" is a useful answer rather
         // than an error: the caller asked what could be freed, not what exists.
         let out = HyperDuServer::new()
-            .find_reclaimable(Parameters(ReclaimableParams {
-                path: "/hyperdu-nonexistent-reclaim-probe-3ba9".to_owned(),
-                min_size_bytes: 0,
-                unused_for_days: None,
-                max_depth: 0,
-            }))
+            .find_reclaimable_impl(
+                Parameters(ReclaimableParams {
+                    path: "/hyperdu-nonexistent-reclaim-probe-3ba9".to_owned(),
+                    min_size_bytes: 0,
+                    unused_for_days: None,
+                    max_depth: 0,
+                }),
+                None,
+            )
             .await
             .expect("find_reclaimable");
         assert!(out.0.candidates.is_empty());

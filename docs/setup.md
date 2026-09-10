@@ -170,7 +170,7 @@ GUI は現在 release target に含めていません。
 ```bash
 rustup toolchain install stable
 cargo build --release -p hyperdu
-cargo install --path hyperdu-cli
+cargo install --path hyperdu
 hyperdu mcp
 ```
 

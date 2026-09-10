@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-HyperDiskUsage is a Rust workspace with three crates: `hyperdu-core/` hosts the scanning engine and domain logic; `hyperdu-cli/` publishes the `hyperdu` CLI with its built-in `mcp` subcommand and integration fixtures in `tests/`; `hyperdu-gui/` packages the eGUI front-end.
+HyperDiskUsage is a Rust workspace with three crates: `hyperdu-core/` hosts the scanning engine and domain logic; `hyperdu/` publishes the `hyperdu` CLI with its built-in `mcp` subcommand and integration fixtures in `tests/`; `hyperdu-gui/` packages the eGUI front-end.
 `plugin/` carries the agent-facing packaging: an Agent Plugin manifest, its `mcp.json`, and an Agent Skill under `skills/`. These are data files, not build targets. The three agent surfaces are deliberately independent — the MCP server runs without the plugin, and the skill drives the CLI rather than the server — so keep a change to one from requiring changes to the others.
 Distribution artifacts sit in `dist/`, while `packaging/`, `scripts/`, and `snap/` capture installer specs and automation. Keep generated output in `target/` out of version control.
 

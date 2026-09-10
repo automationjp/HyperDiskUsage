@@ -112,7 +112,7 @@ root 直下的文件显示为**直下文件总计**。GUI 不会创建可能与 
 
 ## 普通 CLI / MCP
 
-GUI 是可视化和交互式 front-end。脚本、CI、structured output 或 AI agent 请使用普通的 `hyperdu` CLI 和 `hyperdu mcp`。安装和 MCP 注册请参见 [hyperdu CLI / MCP README](../hyperdu-cli/README.zh-CN.md)。
+GUI 是可视化和交互式 front-end。脚本、CI、structured output 或 AI agent 请使用普通的 `hyperdu` CLI 和 `hyperdu mcp`。安装和 MCP 注册请参见 [hyperdu CLI / MCP README](../hyperdu/README.zh-CN.md)。
 
 ## 许可证
 

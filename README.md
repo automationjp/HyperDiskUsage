@@ -19,7 +19,7 @@
 
 CLI引数の既定値・出力条件・対応OSは [CLIパラメータリファレンス](docs/cli-reference.md) を参照してください。`--time` 系引数は既定で有効な `time-format` featureが必要です。
 
-> **0.5.0-beta.3 は公開準備中です。** このブランチでは `cargo install --locked --path hyperdu-cli` で導入できます。下記の crates.io コマンドと新しい名前の配布物は、リリース公開後に利用できます。
+> **0.5.0-beta.3 は公開準備中です。** このブランチでは `cargo install --locked --path hyperdu` で導入できます。下記の crates.io コマンドと新しい名前の配布物は、リリース公開後に利用できます。
 
 ```bash
 cargo install hyperdu --version 0.5.0-beta.3
@@ -197,7 +197,7 @@ manifest は `winget validate` 済みですが、winget-pkgs への登録完了�
 ```bash
 git clone https://github.com/automationjp/HyperDiskUsage.git
 cd HyperDiskUsage
-cargo install --path hyperdu-cli
+cargo install --path hyperdu
 ```
 
 詳しい build environment は [docs/setup.md](docs/setup.md) を参照してください。

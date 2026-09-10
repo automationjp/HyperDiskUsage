@@ -75,8 +75,8 @@ check_not_stale() {
   [[ $ALLOW_STALE -eq 1 ]] && return 0
   local root newest bin_mtime src_mtime
   root=$(repo_root)
-  newest=$(find "$root/hyperdu-core/src" "$root/hyperdu-cli/src" \
-                "$root/hyperdu-core/Cargo.toml" "$root/hyperdu-cli/Cargo.toml" \
+  newest=$(find "$root/hyperdu-core/src" "$root/hyperdu/src" \
+                "$root/hyperdu-core/Cargo.toml" "$root/hyperdu/Cargo.toml" \
                 "$root/Cargo.toml" -type f -newer "$BIN" -print -quit 2>/dev/null)
   [[ -z "$newest" ]] && return 0
   bin_mtime=$(date -r "$BIN" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo '?')

@@ -86,8 +86,9 @@ fn statx_or_fstatat(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::{ffi::CString, fs, os::unix::fs::symlink};
+
+    use super::*;
 
     #[test]
     fn complete_statx_preserves_zero_blocks_without_fallback() {

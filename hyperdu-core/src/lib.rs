@@ -1,3 +1,57 @@
+//! Reusable disk-usage scanning for Rust applications.
+//!
+//! `hyperdu-core` can be embedded directly in a Rust application. It is
+//! independent of the `hyperdu` CLI and MCP surface and the `hyperdu-gui`
+//! front end; those are consumers of this crate, not requirements for it.
+//!
+//! Start with [`Options`] (or [`OptionsBuilder`]) and [`scan_directory`]. The
+//! batch API returns a [`StatMap`] keyed by directory path. For UI-like
+//! consumers, [`scan_directory_mode`] with [`ScanMode::Interactive`] delivers
+//! [`ScanEvent::RootListed`] followed by [`ScanEvent::ChildCompleted`] events
+//! for normal directory enumeration and ends with [`ScanEvent::Finished`] on success.
+//! An eligible successful MFT result emits [`ScanEvent::BatchFallback`] and
+//! [`ScanEvent::BatchCompleted`] instead; cooperative cancellation emits
+//! [`ScanEvent::Cancelled`], and fatal setup failures return an error.
+//!
+//! Clone [`Options::cancel`] before a scan to share its `Arc<AtomicBool>` with
+//! another thread. The scan observes that cooperative cancellation flag. Set
+//! [`Options::progress_every`] and attach [`ProgressCallback`] or
+//! [`ProgressSampleCallback`] for count or sample updates.
+//!
+//! The [`report`] module writes rows with [`report::write_json`] and
+//! [`report::write_csv`]. Persistent directory aggregates use
+//! [`index::Index`], while [`volume::list`] and [`volume::total_free`] expose
+//! filesystem capacity.
+//!
+//! # Example
+//!
+//! This example uses a temporary directory, so it scans only the fixture it
+//! creates and can run as a doctest on every supported platform.
+//!
+//! ```
+//! use std::{
+//!     fs,
+//!     sync::{atomic::{AtomicBool, Ordering}, Arc},
+//! };
+//! use hyperdu_core::{scan_directory, Options};
+//! # use tempfile::tempdir;
+//! # fn main() -> anyhow::Result<()> {
+//! let root = tempdir()?;
+//! fs::write(root.path().join("sample.bin"), b"hyperdu")?;
+//!
+//! let cancel = Arc::new(AtomicBool::new(false));
+//! let mut options = Options::default();
+//! options.cancel = cancel.clone();
+//! let result = scan_directory(root.path(), &options)?;
+//!
+//! let total = result.get(root.path()).expect("root total");
+//! assert_eq!(total.logical, 7);
+//! assert_eq!(total.files, 1);
+//! assert!(!cancel.load(Ordering::Relaxed));
+//! # Ok(())
+//! # }
+//! ```
+
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;

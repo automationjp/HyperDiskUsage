@@ -46,7 +46,7 @@ $ErrorActionPreference = 'Stop'
 
 if (-not $Version) {
   # Ask cargo rather than regex the manifest: the crate inherits
-  # `version.workspace = true`, so the literal is not in hyperdu-cli/Cargo.toml.
+  # `version.workspace = true`, so the literal is not in hyperdu/Cargo.toml.
   # pkgid prints `<url>#<version>` (or `#<name>@<version>`).
   $Version = (cargo pkgid -p hyperdu) -replace '^.*[#@]', ''
 }
