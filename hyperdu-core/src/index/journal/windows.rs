@@ -28,8 +28,9 @@ use windows::{
             CreateFileW, ExtendedFileIdType, FileIdType, FindClose, FindFirstFileNameW,
             FindNextFileNameW, GetFinalPathNameByHandleW, GetVolumeInformationW,
             GetVolumeNameForVolumeMountPointW, GetVolumePathNameW, OpenFileById,
-            FILE_ATTRIBUTE_NORMAL, FILE_ID_128, FILE_ID_DESCRIPTOR, FILE_ID_DESCRIPTOR_0,
-            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, VOLUME_NAME_DOS,
+            FILE_ATTRIBUTE_NORMAL, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_ID_128, FILE_ID_DESCRIPTOR, FILE_ID_DESCRIPTOR_0, FILE_SHARE_DELETE,
+            FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, VOLUME_NAME_DOS,
         },
         System::{
             Ioctl::{
@@ -368,6 +369,7 @@ fn open_volume_guid(guid: &Path) -> io::Result<OwnedHandle> {
 fn open_file_by_descriptor(
     volume: &OwnedHandle,
     descriptor: &FILE_ID_DESCRIPTOR,
+    flags: FILE_FLAGS_AND_ATTRIBUTES,
 ) -> windows::core::Result<HANDLE> {
     // SAFETY: descriptor and volume remain live for this synchronous call.
     unsafe {
@@ -377,7 +379,7 @@ fn open_file_by_descriptor(
             GENERIC_READ.0,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             None,
-            FILE_ATTRIBUTE_NORMAL,
+            flags,
         )
     }
 }
@@ -404,9 +406,13 @@ fn file_id_descriptor(id: EntryId, extended: bool) -> FILE_ID_DESCRIPTOR {
     }
 }
 
-fn open_file_by_id(volume: &OwnedHandle, id: EntryId) -> io::Result<OwnedHandle> {
+fn open_file_by_id_with_flags(
+    volume: &OwnedHandle,
+    id: EntryId,
+    flags: FILE_FLAGS_AND_ATTRIBUTES,
+) -> io::Result<OwnedHandle> {
     let extended = file_id_descriptor(id, true);
-    let raw = match open_file_by_descriptor(volume, &extended) {
+    let raw = match open_file_by_descriptor(volume, &extended, flags) {
         Ok(raw) => raw,
         Err(error)
             if id.object >> 64 == 0
@@ -415,12 +421,43 @@ fn open_file_by_id(volume: &OwnedHandle, id: EntryId) -> io::Result<OwnedHandle>
                     || is_win32(&error, ERROR_NOT_SUPPORTED.0)) =>
         {
             let legacy = file_id_descriptor(id, false);
-            open_file_by_descriptor(volume, &legacy).map_err(win_error)?
+            open_file_by_descriptor(volume, &legacy, flags).map_err(win_error)?
         }
         Err(error) => return Err(win_error(error)),
     };
     // SAFETY: OpenFileById returned a valid unique handle.
     Ok(unsafe { OwnedHandle::from_raw_handle(raw.0) })
+}
+
+fn open_file_by_id(volume: &OwnedHandle, id: EntryId) -> io::Result<OwnedHandle> {
+    open_file_by_id_with_flags(volume, id, FILE_ATTRIBUTE_NORMAL)
+}
+
+fn is_stale_hardlink_lookup(id: EntryId, error: &io::Error) -> bool {
+    id.object != 0
+        && id.object >> 64 == 0
+        && error.raw_os_error() == Some(ERROR_INVALID_PARAMETER.0 as i32)
+}
+
+fn open_hardlink_target(
+    volume: &OwnedHandle,
+    id: EntryId,
+    root_id: EntryId,
+) -> io::Result<Option<OwnedHandle>> {
+    match open_file_by_id(volume, id) {
+        Ok(file) => Ok(Some(file)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) if is_stale_hardlink_lookup(id, &error) => {
+            // A live root ID confirms that this volume accepts the descriptor
+            // shape and OpenFileById operation before treating 87 as stale.
+            if open_file_by_id_with_flags(volume, root_id, FILE_FLAG_BACKUP_SEMANTICS).is_ok() {
+                Ok(None)
+            } else {
+                Err(error)
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn final_path_by_handle(file: &OwnedHandle) -> io::Result<PathBuf> {
@@ -732,10 +769,8 @@ pub(crate) fn hardlinks_for_id(root: &Path, id: EntryId) -> io::Result<Vec<PathB
     let root_mount = volume_root(root)?;
     let guid = volume_guid(&root_mount)?;
     let volume = open_volume_guid(&guid)?;
-    let file = match open_file_by_id(&volume, id) {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
+    let Some(file) = open_hardlink_target(&volume, id, root_entry.id)? else {
+        return Ok(Vec::new());
     };
     let live_path = final_path_by_handle(&file)?;
 
@@ -760,6 +795,7 @@ mod tests {
     use std::fs;
 
     use super::*;
+    use windows::Win32::Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, FILE_READ_ATTRIBUTES};
 
     #[test]
     fn journal_cursor_accepts_only_current_incarnation_and_bounds() {
@@ -993,6 +1029,107 @@ mod tests {
         Ok(())
     }
 
+    fn open_directory_hint(path: &Path) -> io::Result<OwnedHandle> {
+        let input = terminated_wide(path)?;
+        // SAFETY: input remains live for this synchronous call.
+        let raw = unsafe {
+            CreateFileW(
+                PCWSTR(input.as_ptr()),
+                FILE_READ_ATTRIBUTES.0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                None,
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS,
+                None,
+            )
+        }
+        .map_err(win_error)?;
+        // SAFETY: CreateFileW returned a valid unique handle.
+        Ok(unsafe { OwnedHandle::from_raw_handle(raw.0) })
+    }
+
+    #[test]
+    fn stale_hardlink_lookup_requires_64_bit_nonzero_id_and_error_87() {
+        let invalid_parameter = io::Error::from_raw_os_error(ERROR_INVALID_PARAMETER.0 as i32);
+        let other_error = io::Error::from_raw_os_error(ERROR_HANDLE_EOF.0 as i32);
+        assert!(is_stale_hardlink_lookup(
+            EntryId {
+                volume: 7,
+                object: 1,
+            },
+            &invalid_parameter,
+        ));
+        assert!(!is_stale_hardlink_lookup(
+            EntryId {
+                volume: 7,
+                object: 0,
+            },
+            &invalid_parameter,
+        ));
+        assert!(!is_stale_hardlink_lookup(
+            EntryId {
+                volume: 7,
+                object: (1u128 << 64) | 1,
+            },
+            &invalid_parameter,
+        ));
+        assert!(!is_stale_hardlink_lookup(
+            EntryId {
+                volume: 7,
+                object: 1,
+            },
+            &other_error,
+        ));
+    }
+
+    #[test]
+    fn native_open_file_by_id_deleted_identity_is_empty() -> io::Result<()> {
+        let fixture = tempfile::tempdir()?;
+        let root = fixture.path();
+        let target = root.join("target");
+        let alias = root.join("alias");
+        fs::write(&target, b"open by id")?;
+        fs::hard_link(&target, &alias)?;
+
+        let hint = open_directory_hint(root)?;
+        let root_id = crate::index::v2::observe(root)?.id;
+        let target_id = crate::index::v2::observe(&target)?.id;
+        drop(open_file_by_id_with_flags(
+            &hint,
+            root_id,
+            FILE_FLAG_BACKUP_SEMANTICS,
+        )?);
+
+        let live = open_hardlink_target(&hint, target_id, root_id)?;
+        assert!(live.is_some(), "live hardlink target did not open");
+        drop(live);
+
+        fs::remove_file(&alias)?;
+        let remaining = open_hardlink_target(&hint, target_id, root_id)?;
+        assert!(remaining.is_some(), "single hardlink target did not open");
+        drop(remaining);
+
+        fs::remove_file(&target)?;
+        // A failed same-volume support probe must keep the original error.
+        let unsupported = open_hardlink_target(&hint, target_id, target_id).unwrap_err();
+        assert_eq!(
+            unsupported.raw_os_error(),
+            Some(ERROR_INVALID_PARAMETER.0 as i32)
+        );
+        let deleted = match open_hardlink_target(&hint, target_id, root_id) {
+            Ok(value) => value,
+            Err(error) => panic!(
+                "deleted hardlink identity lookup failed with code {:?}: {error}",
+                error.raw_os_error()
+            ),
+        };
+        assert!(
+            deleted.is_none(),
+            "deleted hardlink identity unexpectedly opened"
+        );
+        Ok(())
+    }
+
     #[test]
     fn native_usn_fixture_is_opt_in() -> io::Result<()> {
         let Some(root) = std::env::var_os("HYPERDU_TEST_USN_ROOT") else {
@@ -1001,7 +1138,8 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let root_id = crate::index::v2::observe(&root)?.id;
-        let (mut source, resumed) = WindowsJournal::open(&root, root_id, None)?;
+        let (mut source, resumed) =
+            WindowsJournal::open(&root, root_id, None).expect("USN fixture: open initial journal");
         assert!(!resumed);
 
         let suffix = std::time::SystemTime::now()
@@ -1026,7 +1164,7 @@ mod tests {
         let mut saw_link = false;
         let mut saw_hardlink_identity = false;
         for _ in 0..128 {
-            let batch = source.poll()?;
+            let batch = source.poll().expect("USN fixture: poll native journal");
             for change in batch.changes {
                 match change {
                     Change::Entry { key, .. } if key.parent == fixture_id => {
@@ -1049,7 +1187,8 @@ mod tests {
             saw_hardlink_identity,
             "USN fixture did not report the hard-linked file identity"
         );
-        let names = hardlinks_for_id(&root, renamed_id)?;
+        let names =
+            hardlinks_for_id(&root, renamed_id).expect("USN fixture: resolve live hardlinks");
         let fixture_name = fixture
             .file_name()
             .ok_or_else(|| invalid("fixture has no name"))?
@@ -1062,7 +1201,8 @@ mod tests {
             .any(|path| path == &PathBuf::from(&fixture_name).join("link")));
 
         let saved = source.cursor();
-        let (_, resumed) = WindowsJournal::open(&root, root_id, Some(saved))?;
+        let (_, resumed) = WindowsJournal::open(&root, root_id, Some(saved))
+            .expect("USN fixture: resume saved journal");
         assert!(resumed);
 
         fs::remove_file(&link)?;
@@ -1070,7 +1210,7 @@ mod tests {
         let mut saw_deleted_renamed = false;
         let mut saw_deleted_link = false;
         for _ in 0..128 {
-            let batch = source.poll()?;
+            let batch = source.poll().expect("USN fixture: poll native journal");
             for change in batch.changes {
                 if let Change::Entry { key, .. } = change {
                     if key.parent == fixture_id {
@@ -1091,7 +1231,9 @@ mod tests {
             saw_deleted_link,
             "USN fixture did not report hard-link deletion"
         );
-        assert!(hardlinks_for_id(&root, renamed_id)?.is_empty());
+        assert!(hardlinks_for_id(&root, renamed_id)
+            .expect("USN fixture: resolve deleted hardlinks")
+            .is_empty());
         fs::remove_dir(&fixture)?;
         Ok(())
     }
