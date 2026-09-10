@@ -127,7 +127,9 @@ try {
     $env:HYPERDU_TEST_USN_ROOT = $usn
     & cargo test --locked -p hyperdu-core index:: --lib -- --nocapture
     if ($LASTEXITCODE -ne 0) { throw 'Native USN/index tests failed.' }
-    [Environment]::SetEnvironmentVariable('HYPERDU_TEST_USN_ROOT', $null, 'Process')
+    # PowerShell 7.5+ coerces SetEnvironmentVariable($null) to an empty value.
+    # Remove the opt-in entirely before starting tests on the read-only image.
+    Remove-Item -LiteralPath Env:HYPERDU_TEST_USN_ROOT
     if (@(Get-ChildItem -LiteralPath $usn -Force).Count -ne 0) { throw 'USN tests left fixture children.' }
     Remove-Item -LiteralPath $usn
     # Flush NTFS metadata by detaching, then forbid mutations during comparison.
@@ -176,7 +178,7 @@ try {
     }
 } finally {
     foreach ($key in $previous.Keys) {
-        [Environment]::SetEnvironmentVariable($key, $previous[$key], 'Process')
+        Set-Item -LiteralPath "Env:$key" -Value $previous[$key]
     }
     if (Test-Path -LiteralPath $vhd) {
         Invoke-OwnedDiskPart @("select vdisk file=`"$vhd`"", 'detach vdisk')
