@@ -1,4 +1,4 @@
-#![cfg(target_os = "linux")]
+#![cfg(any(windows, target_os = "linux", target_os = "macos"))]
 
 use std::{
     fs,
@@ -97,4 +97,102 @@ fn a_directory_named_index_can_still_be_scanned() {
             String::from_utf8_lossy(&result.stderr)
         );
     }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn watch_once_reports_advisory_observation_and_saved_show_remains_stale() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let db = temp.path().join("index.bin");
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join("a"), [0; 71]).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_hyperdu"))
+        .args(["index", "watch"])
+        .arg(&root)
+        .arg("--database")
+        .arg(&db)
+        .arg("--once")
+        .output()
+        .unwrap();
+    let watched = json(output);
+    assert_eq!(watched["freshness"], "observed");
+    assert_eq!(watched["files"], 1);
+    assert_eq!(watched["logical_bytes"], 71);
+    assert_eq!(watched["checkpoint_written"], true);
+    let cached = json(run("show", &root, &db));
+    assert_eq!(cached["freshness"], "stale");
+    assert_eq!(cached["monitoring"], false);
+    assert_eq!(cached["files"], 1);
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn foreground_watch_rejects_a_second_writer_and_updates_without_rescanning() {
+    use std::{
+        io::{BufRead, BufReader},
+        process::Stdio,
+        sync::mpsc,
+        thread,
+        time::{Duration, Instant},
+    };
+    struct ChildGuard(std::process::Child);
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let db = temp.path().join("index.bin");
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join("a"), [0; 71]).unwrap();
+    let mut child = ChildGuard(
+        Command::new(env!("CARGO_BIN_EXE_hyperdu"))
+            .args(["index", "watch"])
+            .arg(&root)
+            .arg("--database")
+            .arg(&db)
+            .args(["--poll-ms", "20", "--checkpoint-seconds", "1"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    let output = child.0.stdout.take().unwrap();
+    let (send, recv) = mpsc::channel();
+    thread::spawn(move || {
+        for line in BufReader::new(output).lines() {
+            if send.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let first: serde_json::Value = serde_json::from_str(
+        &recv
+            .recv_timeout(Duration::from_secs(30))
+            .expect("watch initial output")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(first["freshness"], "observed");
+    assert!(!run("refresh", &root, &db).status.success());
+    fs::write(root.join("a"), [0; 8193]).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let line = recv
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("watch mutation output")
+            .unwrap();
+        let update: serde_json::Value = serde_json::from_str(&line).unwrap();
+        if update["logical_bytes"] == 8193 {
+            assert_eq!(update["freshness"], "observed");
+            assert_eq!(update["rebuilt"], false);
+            assert_eq!(update["directories_read"], 0);
+            break;
+        }
+    }
+    drop(child);
+    json(run("refresh", &root, &db)); // OS lock released even on process termination.
 }

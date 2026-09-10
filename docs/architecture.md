@@ -181,11 +181,11 @@ HyperDU の fast path は、結果 semantics を変えないことを前提に�
 
 速度値を公開する場合も、先に scan parity を確認します。手順は [Benchmark plan](benchmarks.md) を参照してください。
 
-## Persisted Linux snapshots
+## Directory index v2
 
-`index refresh` / `index show` は通常 scan の置き換えではなく、明示的に保存した directory aggregate を再利用する別機能です。
+`index refresh` / `index show` / `index watch` は file identity と parent/name を保存し、変更ファイルから祖先へ集計差分を反映します。Windows USN、macOS FSEvents、Linux fanotify/inotify を利用し、既知ディレクトリの移動では子孫を保持します。
 
-自動 watcher ではなく、`show` の結果は `stale` と明示されます。詳細は [Linux directory snapshots](index-snapshots.md) を参照してください。
+保存した snapshot と cursor は同時に置き換えます。配送イベント処理済みは `observed`、保存値は `stale` とし、通知欠落時と定期的な全体照合を行います。詳細は [Directory index v2](index-snapshots.md) を参照してください。
 
 ## Historical design records
 

@@ -216,7 +216,7 @@ Minimum Rust versions:
 - `hyperdu` (CLI + MCP): **Rust 1.88+**
 - workspace 全体の build/test: **Rust 1.88+**
 
-## Experimental: persisted Linux snapshots
+## Experimental: directory index v2
 
 ```bash
 mkdir -p "$HOME/.cache/hyperdu"
@@ -224,9 +224,9 @@ hyperdu index refresh /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 hyperdu index show /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 ```
 
-これは watcher ではありません。`show` は保存値を返し、freshness は常に `stale` と明示します。
+`refresh` / `show` は Windows、Linux、macOS に対応します。`index watch` で native journal を前景監視し、変更されたファイルと subtree を更新できます。`show` は保存値のため `stale`、配送イベント処理済みは `observed` と明示します。
 
-詳細は [Linux directory snapshots](docs/index-snapshots.md) を参照してください。
+詳細は [Directory index v2](docs/index-snapshots.md) を参照してください。
 
 ## Documentation
 
@@ -235,7 +235,7 @@ hyperdu index show /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 - [Performance design](docs/performance.md)
 - [Benchmark plan / remeasurement checklist](docs/benchmarks.md)
 - [Architecture](docs/architecture.md)
-- [Linux persisted snapshots](docs/index-snapshots.md)
+- [Directory index v2](docs/index-snapshots.md)
 - [Historical / old documents](docs/old/README.md)
 - [Agent Plugin / Skill](plugin/README.md)
 

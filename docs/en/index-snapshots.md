@@ -1,114 +1,45 @@
-# Linux directory snapshots (experimental)
+# Directory index v2 (experimental)
 
-[日本語](../index-snapshots.md) | [English](../en/index-snapshots.md) | [简体中文](../zh-CN/index-snapshots.md)
+[日本語](../index-snapshots.md) · **English** · [简体中文](../zh-CN/index-snapshots.md)
 
-HyperDU's `index` subcommand is an experimental Linux feature that **stores a directory aggregate after one scan and reads it next time without rescanning the file tree**.
-
-> This is not a watcher. It does not update automatically or run as a resident monitor. Stored values are always treated as `stale`.
-
-## Quick start
+Save native identities and sizes, query directory totals, and monitor supported local filesystems in the foreground on Windows, Linux and macOS.
 
 ```sh
 mkdir -p "$HOME/.cache/hyperdu"
 hyperdu index refresh /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 hyperdu index show /srv/data --database "$HOME/.cache/hyperdu/data.idx"
+hyperdu index watch /srv/data --database "$HOME/.cache/hyperdu/data.idx"
+hyperdu index watch /srv/data --database "$HOME/.cache/hyperdu/data.idx" --once
 ```
 
-- `refresh`: scan the tree with the ordinary scanner and save a snapshot for each directory
-- `show`: read the saved snapshot and return the result without rescanning the target tree
+`refresh` scans and replaces a v2 snapshot. `show` reads it without walking the tree (it still checks ROOT identity). `watch` applies notifications until Ctrl-C. `--once` catches up, saves and exits, with a 30-second limit. Rebuild v1 files with refresh; the v1 Rust API remains available.
 
-## When to use it
+## Native sources
 
-Good fits:
+| Platform | Source | Restart |
+| --- | --- | --- |
+| Windows | Existing NTFS/ReFS USN journal; requires volume read permission. Never creates or changes a journal | Validates volume, journal ID and retained USN range |
+| macOS | Per-device FSEvents on local APFS/HFS | Validates device UUID and event ID before history replay |
+| Linux | Filesystem fanotify; falls back to recursive inotify when capability or file handles are unavailable | Always rebuilds because queues do not survive restart |
 
-- You want to repeatedly check an approximate total for a tree with a very large number of files
-- The value from the last explicit refresh is sufficient
-- You do not want to install an automatic monitoring daemon
+Linux accepts `HYPERDU_INDEX_LINUX_BACKEND=auto|fanotify|inotify`; unavailable explicitly selected fanotify returns an error. Watch limits, overflow, journal gaps and incarnation changes require a rebuild. Root replacement requires explicit refresh. Unsupported native sources, including remote SMB/NFS monitoring, return a reason; explicit refresh/show remain available.
 
-Poor fits:
+## Accounting and freshness
 
-- You always need the latest value
-- You need an atomic filesystem snapshot
-- You want to track file changes in real time
+Totals include regular-file logical bytes, allocated bytes and unique file count. Directory storage, symlinks/reparse points, special files and named alternate streams are excluded. Hardlinks are deduplicated by volume and full file identity, owned by the smallest parent-ID/name link. Windows retains 128-bit IDs; native filename encoding is preserved.
 
-## What `stale` means
+`unknown` means unobserved; `stale` means persisted, updating or unvalidated. `observed` means all events delivered through a catch-up barrier were applied, not an atomic snapshot. Notifications may miss mmap, writes through outside hardlinks, or remote changes. Mandatory reconciliation runs every `--reconcile-seconds` (default 900, range 1–86400). Saved show output is always stale.
 
-`show` reads only saved data. Files created, changed, or deleted after `refresh` are not reflected.
+## Cost and persistence
 
-`refresh` itself is also not an atomic filesystem snapshot. The tree may change while it is being scanned.
+A file mutation observes that file and adjusts ancestors. Moving a known directory retains descendants without enumeration. New subtrees and reconciliation enumerate their scope. Initial scanning and snapshot loading/saving cost O(files + links + directories); loaded root lookup is O(1).
 
-For that reason, the output explicitly includes:
+Changes apply in memory immediately. Whole-file checkpoints are limited by `--checkpoint-seconds` (default 60, range 1–3600), plus initial catch-up and normal termination. After a crash, the last checkpoint is resumed or rebuilt. `--poll-ms` defaults to 100 (range 10–60000). JSON Lines include sizes, count, freshness, journal, checkpoint status, notifications, observed entries, directories read and rebuild status. Work counters describe one poll and exclude the startup baseline.
 
-```text
-freshness: "stale"
-monitoring: false
-```
+Create the parent first and store the database outside ROOT, so `/` cannot be a CLI root. Each index covers one filesystem; index mounted subtrees separately. Database and sibling `.lock` must be regular files, not symlinks. The stable OS lock excludes writers and releases on process exit; the lock file is retained.
 
-`stale` is not an error. It means **a stored value for which an exact match with the current filesystem is not guaranteed**.
+The format validates root identity, native names, graph, size limits and checksum. The checksum detects accidental corruption, not hostile modification. Snapshot and cursor share one atomic replacement; incomplete updates are not checkpointed.
 
-## Database rules
+Normal scan flags do not change fixed index semantics. To scan a directory named index, use `hyperdu ./index` or `hyperdu -- index`.
 
-The database has the following constraints for safe storage and reuse:
-
-- The parent directory must already exist
-- The database must be a regular file
-- Symlinks are rejected
-- Place the database outside the scan root
-- Use a separate database for each tree
-
-These constraints mean that `/` itself cannot be used as a snapshot root.
-
-## Root identity
-
-HyperDU confirms that the device/inode identity of the mount root matches between saving and loading.
-
-If the identity changes because of a remount, restore, root replacement, or similar operation, run `refresh` again.
-
-Because inodes may be reused, this is a consistency check rather than a freshness guarantee.
-
-## Failure behavior
-
-When `refresh` does not complete successfully, HyperDU prioritizes avoiding replacement of an existing snapshot with incomplete values.
-
-Examples:
-
-- Cancellation
-- A scan error
-- A bind-mount alias that cannot be represented safely
-- The root identity cannot be established
-
-## Cost model
-
-The read cost of `show` is **O(indexed directories)**. It does not rescan every file.
-
-The root lookup after loading is O(1).
-
-## CLI note
-
-`index` is a subcommand name. To scan an ordinary directory actually named `index`, be explicit.
-
-```sh
-hyperdu ./index
-# or
-hyperdu -- index
-```
-
-Options for a normal scan do not apply unchanged to the fixed semantics of `index refresh` / `index show`.
-
-## What is not implemented
-
-The current implementation does not include:
-
-- inotify watcher
-- background daemon
-- automatic refresh
-- overflow recovery
-- watch budget policy
-
-These are separate features for future consideration. The historical persistent-index / watcher design is kept in [old documentation](../old/README.md).
-
-## Related docs
-
-- [Architecture](architecture.md)
-- [Performance design](performance.md)
-- [Historical design records](../old/README.md)
+[Architecture](architecture.md) · [Performance](performance.md) · [Historical design](../old/README.md)

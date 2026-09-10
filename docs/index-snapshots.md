@@ -1,114 +1,61 @@
-# Linux directory snapshots (experimental)
+# Directory index v2（実験機能）
 
 **日本語** · [English](en/index-snapshots.md) · [简体中文](zh-CN/index-snapshots.md)
 
-HyperDU の `index` サブコマンドは、**一度走査した directory 集計を保存し、次回はファイルツリーを再走査せずに読み出す**ための Linux 向け実験機能です。
-
-> これは watcher ではありません。自動更新や常駐監視は行いません。保存値は常に `stale` として扱います。
-
-## Quick start
+Windows、Linux、macOS でファイルの identity とサイズを保存し、ディレクトリ集計を再利用できます。対応するローカル filesystem では foreground の変更監視も利用できます。
 
 ```sh
 mkdir -p "$HOME/.cache/hyperdu"
 hyperdu index refresh /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 hyperdu index show /srv/data --database "$HOME/.cache/hyperdu/data.idx"
+hyperdu index watch /srv/data --database "$HOME/.cache/hyperdu/data.idx"
+hyperdu index watch /srv/data --database "$HOME/.cache/hyperdu/data.idx" --once
 ```
 
-- `refresh`: 通常 scanner で tree を走査し、directory 単位の snapshot を保存する
-- `show`: 保存済み snapshot を読み、対象 tree を再走査せずに結果を返す
+- `refresh` は全体を走査して v2 snapshot を置き換えます。
+- `show` は保存値を読みます。ROOT の identity 確認以外はファイルツリーを走査しません。
+- `watch` は native journal を読み、変更されたファイルや新しく入った subtree を更新します。Ctrl-C で終了します。
+- `watch --once` は journal に追いついて保存した後に終了します。30 秒で追いつけない場合はエラーを返します。
 
-## いつ使うか
+v1 保存ファイルは `refresh` で作り直してください。v1 Rust API は互換性のため残しています。
 
-向いているケース:
+## 監視方式
 
-- 非常にファイル数が多い tree の概算を繰り返し確認したい
-- 「最後に明示的に更新した時点の値」でよい
-- 自動監視 daemon を入れたくない
+| OS | 方式と条件 | 再起動時 |
+| --- | --- | --- |
+| Windows | NTFS/ReFS の既存 USN journal。volume を読める権限が必要。journal は作成・変更しません | volume、journal ID、利用可能な USN 範囲を検証して再開 |
+| macOS | ローカル APFS/HFS の device 別 FSEvents | device UUID と event ID を検証して履歴を再生 |
+| Linux | fanotify の filesystem mark。権限や file handle が非対応なら recursive inotify | queue は永続化されないため全体を再走査 |
 
-向いていないケース:
+Linux は `HYPERDU_INDEX_LINUX_BACKEND=auto|fanotify|inotify` で方式を指定できます。明示的な fanotify 指定が使えない場合はエラーです。監視上限、queue overflow、journal 欠落・再作成を検出した場合は再走査します。root 自体が置き換えられた場合は明示的な refresh が必要です。SMB/NFS など native source が非対応の場合は watch が理由を返します。refresh / show は利用できます。
 
-- 常に最新値が必要
-- filesystem の atomic snapshot が必要
-- ファイル変更をリアルタイム追跡したい
+## 集計と freshness
 
-## `stale` の意味
+通常ファイルの logical bytes、実際の allocation bytes、ファイル数を保持します。ディレクトリ自身の storage、symlink/reparse point、special file、名前付き alternate stream は加算しません。hardlink は volume と完全な file ID で重複排除し、親 ID と名前の順で決めた一つのリンクへ計上します。Windows は 128-bit file ID、名前は native encoding を保持します。
 
-`show` は保存済みデータだけを読みます。`refresh` 後に作成・変更・削除されたファイルは反映されません。
+- `unknown`: 観測前。
+- `stale`: 保存値、更新中、または未検証。
+- `observed`: その時点までに配送されたイベントを処理済み。atomic snapshot や完全な最新性を意味しません。
 
-また、`refresh` 自体も filesystem の atomic snapshot ではありません。走査中に tree が変更される可能性があります。
+mmap、監視外の hardlink 経由の書き込み、リモート変更などは通知されないことがあります。このため watch は `--reconcile-seconds`（既定 900 秒、1〜86400 秒）ごとに全体を照合します。show は常に stale です。
 
-そのため出力では次を明示します。
+## 保存とコスト
 
-```text
-freshness: "stale"
-monitoring: false
-```
+通常のファイル変更は対象の metadata と祖先の集計を更新します。既知ディレクトリの移動では子孫を再走査しません。新規 subtree や再照合では該当ディレクトリを列挙します。
 
-`stale` はエラーではなく、**「現在の filesystem と完全一致することは保証しない保存値」**という意味です。
+初回走査・snapshot の読み書きは O(ファイルとリンクとディレクトリ数)、読み込み後の root 集計は O(1) です。メモリへの変更反映と、全 snapshot の保存を分けます。`--checkpoint-seconds`（既定 60 秒、1〜3600 秒）で保存間隔を制限し、初回 catch-up と正常終了時にも保存します。強制終了後は最後の checkpoint から再開または再構築します。
 
-## Database rules
+`--poll-ms` は既定 100 ms（10〜60000 ms）。stdout は JSON Lines で、`logical_bytes`, `physical_bytes`, `files`, `freshness`, `journal`, `checkpoint_written`, `notifications`, `observed_entries`, `directories_read`, `rebuilt` などを出力します。作業量はその poll の値で、watch 開始時の baseline は含みません。
 
-安全に保存・再利用するため、database には次の制約があります。
+## Database の制約
 
-- 親 directory は事前に存在している必要がある
-- database は通常ファイルである必要がある
-- symlink は拒否する
-- database は scan root の外側に置く
-- tree ごとに別 database を使う
+- 親ディレクトリを事前に作成し、database を ROOT の外に置きます。このため `/` 全体を CLI の ROOT にはできません。
+- database と writer lock は通常ファイルを使い、symlink を拒否します。
+- 一つの filesystem 内だけを対象にします。子 mount は別の index として作成します。
+- root identity、保存形式、名前、グラフ、サイズ上限、checksum を検証します。checksum は偶発的な破損検出で、認証ではありません。
+- 同時 writer は拒否します。隣の `.lock` ファイルは保持し、OS lock はプロセス終了時に解放されます。
+- 未完了の更新は保存しません。snapshot と cursor は同じ atomic replacement に含まれます。
 
-この制約により `/` 自体は snapshot root として使用できません。
+通常 scan のオプションは index の固定集計条件には適用しません。実ディレクトリ名が index の場合は `hyperdu ./index` または `hyperdu -- index` で通常走査できます。
 
-## Root identity
-
-保存時と読み込み時で、mount root の device / inode identity が一致することを確認します。
-
-remount、restore、root replacement などで identity が変わった場合は `refresh` し直してください。
-
-inode は再利用される可能性があるため、これは freshness 保証ではなく consistency check です。
-
-## Failure behavior
-
-`refresh` が完全に成功しない場合、既存 snapshot を不完全な値で置き換えないことを優先します。
-
-例:
-
-- cancellation
-- scan error
-- 安全に表現できない bind-mount alias
-- root identity を確定できない場合
-
-## Cost model
-
-`show` の読み込みコストは **O(indexed directories)** です。全ファイルを再走査しません。
-
-読み込み後の root lookup は O(1) です。
-
-## CLI note
-
-`index` はサブコマンド名です。`index` という実 directory を通常 scan したい場合は明示します。
-
-```sh
-hyperdu ./index
-# または
-hyperdu -- index
-```
-
-通常 scan の option は、固定 semantics を持つ `index refresh` / `index show` にそのまま適用されません。
-
-## What is not implemented
-
-現在は次を含みません。
-
-- inotify watcher
-- background daemon
-- automatic refresh
-- overflow recovery
-- watch budget policy
-
-これらは将来検討の別機能です。過去の persistent-index / watcher 設計は [old documentation](old/README.md) に保存しています。
-
-## Related docs
-
-- [Architecture](architecture.md)
-- [Performance design](performance.md)
-- [Historical design records](old/README.md)
+[Architecture](architecture.md) · [Performance](performance.md) · [Historical design](old/README.md)

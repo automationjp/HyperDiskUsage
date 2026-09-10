@@ -23,8 +23,10 @@
 //! commits to nothing.
 
 mod atomic_save;
+pub mod journal;
 #[cfg(target_os = "linux")]
 mod snapshot;
+pub mod v2;
 
 use ahash::AHashMap as HashMap;
 

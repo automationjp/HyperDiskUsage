@@ -1,114 +1,45 @@
-# Linux directory snapshots（实验性）
+# Directory index v2（实验功能）
 
-[日本語](../index-snapshots.md) | [English](../en/index-snapshots.md) | [简体中文](../zh-CN/index-snapshots.md)
+[日本語](../index-snapshots.md) · [English](../en/index-snapshots.md) · **简体中文**
 
-HyperDU 的 `index` 子命令是面向 Linux 的实验性功能，用于**保存一次扫描得到的 directory aggregate，并在下次读取时不重新扫描文件树**。
-
-> 这不是 watcher。它不会自动更新，也不会作为常驻监视器运行。保存的值始终按 `stale` 处理。
-
-## 快速开始
+Windows、Linux、macOS 可保存文件 identity 和大小、复用目录汇总，支持的本地 filesystem 还可在前台监控变更。
 
 ```sh
 mkdir -p "$HOME/.cache/hyperdu"
 hyperdu index refresh /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 hyperdu index show /srv/data --database "$HOME/.cache/hyperdu/data.idx"
+hyperdu index watch /srv/data --database "$HOME/.cache/hyperdu/data.idx"
+hyperdu index watch /srv/data --database "$HOME/.cache/hyperdu/data.idx" --once
 ```
 
-- `refresh`：使用普通 scanner 扫描 tree，并保存每个 directory 的 snapshot
-- `show`：读取已保存的 snapshot，不重新扫描目标 tree 即返回结果
+`refresh` 扫描并替换 v2 snapshot；`show` 读取保存值，仅检查 ROOT identity，不遍历文件树。`watch` 处理 native 通知，Ctrl-C 退出。`--once` 追上 journal、保存并退出，上限 30 秒。v1 文件需显式 refresh 重建，v1 Rust API 保留。
 
-## 适用场景
+## Native source
 
-适合：
+| 平台 | Source | 重启 |
+| --- | --- | --- |
+| Windows | NTFS/ReFS 已有 USN journal，需要 volume 读取权限；不会创建或修改 journal | 验证 volume、journal ID 和保留的 USN 范围 |
+| macOS | 本地 APFS/HFS 的 per-device FSEvents | 验证 device UUID 和 event ID 后重放历史 |
+| Linux | filesystem fanotify，权限或 file handle 不支持时回退 recursive inotify | queue 不持久化，必须重新扫描 |
 
-- 需要反复查看文件数量非常多的 tree 的概算
-- 接受“上次明确更新时的值”
-- 不想安装自动监视 daemon
+Linux 使用 `HYPERDU_INDEX_LINUX_BACKEND=auto|fanotify|inotify` 选择方式；显式指定 fanotify 而不可用时返回错误。watch 上限、overflow、journal 缺失或重建会触发重新扫描。ROOT 被替换时需要显式 refresh。SMB/NFS 等不支持的 native 监控返回原因，仍可使用 refresh/show。
 
-不适合：
+## 汇总和 freshness
 
-- 始终需要最新值
-- 需要 filesystem 的 atomic snapshot
-- 需要实时追踪文件变化
+统计普通文件 logical bytes、allocation bytes 和去重后的文件数。不包含目录自身 storage、symlink/reparse point、特殊文件或命名 alternate stream。hardlink 按 volume 和完整 file ID 去重，归属 parent ID/name 排序首个链接。保留 Windows 128-bit ID 和 native 文件名编码。
 
-## `stale` 的含义
+`unknown` 表示尚未观测；`stale` 表示保存值、更新中或未验证；`observed` 表示已处理 catch-up barrier 之前配送的事件，不代表 atomic snapshot 或完整最新状态。mmap、监控范围外 hardlink 写入、远程变化可能没有通知。因此定期全量核对是必需的：`--reconcile-seconds` 默认 900，范围 1–86400 秒。show 始终 stale。
 
-`show` 只读取保存的数据。`refresh` 之后创建、修改或删除的文件不会反映出来。
+## 成本和保存
 
-此外，`refresh` 本身也不是 filesystem 的 atomic snapshot。扫描过程中 tree 可能发生变化。
+普通文件变更只观测该文件并更新祖先汇总。已知目录改名保留子孙，不枚举整个 subtree。新增 subtree 和定期核对按对应范围枚举。首次扫描、snapshot 读取和保存为 O(文件、链接、目录数)，加载后的 root 汇总查询为 O(1)。
 
-因此，输出会明确包含：
+内存即时更新；完整 checkpoint 按 `--checkpoint-seconds` 保存，默认 60，范围 1–3600 秒。首次追上 journal 和正常退出时也保存。强制终止后从最后 checkpoint 恢复或重建。`--poll-ms` 默认 100，范围 10–60000 ms。stdout 为 JSON Lines，包含大小、文件数、freshness、journal cursor、checkpoint 状态、通知数、观测次数、目录枚举数和 rebuilt。工作量仅指该 poll，不包括启动 baseline。
 
-```text
-freshness: "stale"
-monitoring: false
-```
+提前创建父目录，database 放在 ROOT 外，因此 CLI 不支持以 `/` 为 ROOT。一个 index 只覆盖一个 filesystem，子 mount 单独建立。database 和旁边的 `.lock` 必须为普通文件，拒绝 symlink。OS lock 拒绝同时写入，在进程结束时释放，保留 lock 文件。
 
-`stale` 不是错误，而是指**不保证与当前 filesystem 完全一致的保存值**。
+校验 root identity、文件名、图结构、长度上限和 checksum。checksum 仅检测意外损坏，不是认证。snapshot 和 cursor 一起 atomic replacement，不保存未完成更新。
 
-## Database rules
+普通 scan flags 不改变 index 的固定汇总规则。扫描名为 index 的目录可用 `hyperdu ./index` 或 `hyperdu -- index`。
 
-为安全地保存和复用，database 有以下限制：
-
-- 父 directory 必须预先存在
-- database 必须是普通文件
-- 拒绝 symlink
-- 将 database 放在 scan root 外部
-- 每个 tree 使用单独的 database
-
-因此，`/` 本身不能用作 snapshot root。
-
-## Root identity
-
-保存和读取时，HyperDU 会确认 mount root 的 device / inode identity 一致。
-
-如果因为 remount、restore、root replacement 等原因 identity 发生变化，请重新执行 `refresh`。
-
-inode 可能被复用，因此这是 consistency check，而不是 freshness 保证。
-
-## 失败行为
-
-如果 `refresh` 未能完全成功，HyperDU 会优先避免用不完整的值替换已有 snapshot。
-
-例如：
-
-- cancellation
-- scan error
-- 无法安全表示的 bind-mount alias
-- 无法确定 root identity
-
-## Cost model
-
-`show` 的读取成本为 **O(indexed directories)**，不会重新扫描所有文件。
-
-读取后的 root lookup 为 O(1)。
-
-## CLI note
-
-`index` 是子命令名称。如果需要对名为 `index` 的普通 directory 执行扫描，请明确指定。
-
-```sh
-hyperdu ./index
-# 或
-hyperdu -- index
-```
-
-普通扫描的 option 不会原样应用于具有固定语义的 `index refresh` / `index show`。
-
-## 尚未实现的功能
-
-当前不包含：
-
-- inotify watcher
-- background daemon
-- automatic refresh
-- overflow recovery
-- watch budget policy
-
-这些是未来另行考虑的功能。过去的 persistent-index / watcher 设计保存在[旧文档](../old/README.md)中。
-
-## 相关文档
-
-- [Architecture](architecture.md)
-- [Performance design](performance.md)
-- [历史设计记录](../old/README.md)
+[Architecture](architecture.md) · [Performance](performance.md) · [Historical design](../old/README.md)

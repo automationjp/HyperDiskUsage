@@ -180,11 +180,11 @@ HyperDU 的 fast path 以不改变结果语义为前提。
 
 即使要发布速度值，也要先确认 scan parity。步骤请参见 [Benchmark plan](benchmarks.md)。
 
-## 持久化的 Linux snapshots
+## Directory index v2
 
-`index refresh` / `index show` 是复用明确保存的 directory aggregate 的独立功能，并不是普通 scan 的替代品。
+`index refresh` / `index show` / `index watch` 保存文件 identity 和 parent/name 链接，变更更新祖先汇总，已知目录改名保留子孙。Native source 包括 Windows USN、macOS FSEvents、Linux fanotify/inotify。
 
-它不是 automatic watcher，`show` 的结果会明确标记为 `stale`。详情请参见 [Linux directory snapshots](index-snapshots.md)。
+Snapshot 和 cursor 一起 atomic replacement。配送事件处理完成表示 `observed`，保存值仍为 `stale`。缺失事件和定期核对触发重新扫描。参见 [Directory index v2](index-snapshots.md)。
 
 ## 历史设计记录
 

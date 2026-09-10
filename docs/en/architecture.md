@@ -180,11 +180,11 @@ The following are not omitted for performance optimization:
 
 When publishing speed values, confirm scan parity first. See the [Benchmark plan](benchmarks.md) for the procedure.
 
-## Persisted Linux snapshots
+## Directory index v2
 
-`index refresh` / `index show` is a separate feature that reuses an explicitly saved directory aggregate; it does not replace a normal scan.
+`index refresh` / `index show` / `index watch` store file identities and parent/name links. Changes adjust directory ancestors; known directory moves retain descendants. Native sources are Windows USN, macOS FSEvents and Linux fanotify/inotify.
 
-It is not an automatic watcher, and the result of `show` is explicitly marked `stale`. See [Linux directory snapshots](index-snapshots.md) for details.
+Snapshot and cursor share one atomic replacement. Delivered events yield advisory `observed` status; loaded values remain `stale`. Gaps and periodic reconciliation trigger rescanning. See [Directory index v2](index-snapshots.md).
 
 ## Historical design records
 
