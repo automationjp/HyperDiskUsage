@@ -303,6 +303,7 @@ impl Inotify {
         Ok(())
     }
     fn decode(&mut self, mut bytes: &[u8], changes: &mut Vec<Change>) -> io::Result<()> {
+        let mut moved_directories = HashSet::new();
         while !bytes.is_empty() {
             if bytes.len() < 16 {
                 return Err(invalid("truncated inotify header"));
@@ -346,13 +347,25 @@ impl Inotify {
                 self.retiring.insert(wd);
             }
             if len != 0 {
+                let cookie = u32_at(record, 8)?;
+                let directory = mask & libc::IN_ISDIR != 0;
+                if directory
+                    && mask & (libc::IN_MOVED_FROM | libc::IN_MOVED_TO) == libc::IN_MOVED_FROM
+                    && cookie != 0
+                {
+                    moved_directories.insert(cookie);
+                }
+                // Only a paired move from a watched directory proves a local
+                // rename. An arrival (or a pair split across reads) can reuse a
+                // deleted inode and must register and observe its descendants.
+                let arrived = mask & libc::IN_MOVED_TO != 0
+                    && (cookie == 0 || !moved_directories.remove(&cookie));
                 changes.push(Change::Entry {
                     key: LinkKey {
                         parent: id,
                         name: name(&record[16..])?,
                     },
-                    subtree: mask & (libc::IN_CREATE | libc::IN_ISDIR)
-                        == (libc::IN_CREATE | libc::IN_ISDIR),
+                    subtree: directory && (mask & libc::IN_CREATE != 0 || arrived),
                 });
             }
         }
@@ -486,8 +499,9 @@ impl Fanotify {
                                 parent: *parent,
                                 name: entry_name,
                             },
-                            // Creation must re-observe children if an inode was reused.
-                            subtree: mask & 0x4000_0100 == 0x4000_0100,
+                            // DFID_NAME has no move cookie to prove a local rename.
+                            // An incoming directory may reuse a deleted inode.
+                            subtree: mask & 0x4000_0000 != 0 && mask & 0x180 != 0,
                         });
                     }
                     found = true;

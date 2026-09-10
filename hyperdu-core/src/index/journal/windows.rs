@@ -21,8 +21,8 @@ use windows::{
     core::{PCWSTR, PWSTR},
     Win32::{
         Foundation::{
-            ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, ERROR_NOT_SUPPORTED,
-            ERROR_NO_MORE_FILES, GENERIC_READ, HANDLE,
+            ERROR_HANDLE_EOF, ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA,
+            ERROR_NOT_SUPPORTED, GENERIC_READ, HANDLE,
         },
         Storage::FileSystem::{
             CreateFileW, ExtendedFileIdType, FileIdType, FindClose, FindFirstFileNameW,
@@ -607,7 +607,7 @@ pub(crate) fn hardlink_names(path: &Path) -> io::Result<Vec<OsString>> {
             Err(error) if is_win32(&error, ERROR_MORE_DATA.0) => {
                 grow_link_buffer(&mut buffer, length)?;
             }
-            Err(error) if is_win32(&error, ERROR_NO_MORE_FILES.0) => break,
+            Err(error) if is_win32(&error, ERROR_HANDLE_EOF.0) => break,
             Err(error) => return Err(win_error(error)),
         }
     }
@@ -959,6 +959,40 @@ mod tests {
         )
         .is_err());
     }
+    #[test]
+    fn native_hardlink_names_finish_at_eof_and_preserve_real_errors() -> io::Result<()> {
+        let fixture = tempfile::tempdir()?;
+        let original = fixture.path().join("original");
+        let alias = fixture.path().join("alias");
+        fs::write(&original, b"hardlink enumeration")?;
+        let leaves = |names: Vec<OsString>| {
+            names
+                .into_iter()
+                .map(|name| PathBuf::from(name).file_name().unwrap().to_os_string())
+                .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(
+            leaves(hardlink_names(&original)?),
+            BTreeSet::from([OsString::from("original")])
+        );
+        fs::hard_link(&original, &alias)?;
+        assert_eq!(
+            leaves(hardlink_names(&original)?),
+            BTreeSet::from([OsString::from("original"), OsString::from("alias")])
+        );
+        fs::remove_file(&alias)?;
+        assert_eq!(
+            leaves(hardlink_names(&original)?),
+            BTreeSet::from([OsString::from("original")])
+        );
+        fs::remove_file(&original)?;
+        assert_eq!(
+            hardlink_names(&original).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        Ok(())
+    }
+
     #[test]
     fn native_usn_fixture_is_opt_in() -> io::Result<()> {
         let Some(root) = std::env::var_os("HYPERDU_TEST_USN_ROOT") else {

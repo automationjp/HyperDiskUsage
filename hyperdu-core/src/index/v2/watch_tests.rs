@@ -138,9 +138,11 @@ fn arrived_subtree_and_deleted_subtree_register_and_release_only_affected_watche
     let root = watcher.index.root();
     let removed = observe(&temp.path().join("removed")).unwrap().id;
     let child = observe(&temp.path().join("removed/child")).unwrap().id;
-    fs::remove_dir_all(temp.path().join("removed")).unwrap();
+    // Keep both trees alive while allocating: this test checks selective watch
+    // removal, while the separate recycled-ID regression covers new incarnations.
     fs::create_dir_all(temp.path().join("arrived/inner")).unwrap();
     fs::write(temp.path().join("arrived/inner/g"), [0; 103]).unwrap();
+    fs::remove_dir_all(temp.path().join("removed")).unwrap();
     let inner = observe(&temp.path().join("arrived/inner")).unwrap().id;
     send(
         &events,
@@ -479,4 +481,73 @@ fn reused_file_identity_with_a_replaced_old_name_requires_reconciliation() {
     assert_eq!(watcher.index.lookup(root, &old.name), Some(directory.id));
     assert_eq!(watcher.index.total(root).unwrap(), before);
     assert_eq!(watcher.index.lookup(root, OsStr::new("arrived")), None);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn native_arrived_subtree_with_recycled_directory_ids_is_observed_and_watched() {
+    let temp = tempfile::tempdir().unwrap();
+    let root_path = temp.path().join("root");
+    fs::create_dir_all(root_path.join("removed/child")).unwrap();
+    fs::write(root_path.join("removed/child/stale"), [0; 17]).unwrap();
+    let outside = temp.path().join("outside");
+    fs::create_dir_all(outside.join("inner")).unwrap();
+    fs::write(outside.join("inner/file"), [0; 103]).unwrap();
+    let cancel = AtomicBool::new(false);
+    let mut watcher = IndexWatcher::start(&root_path, None, &cancel).unwrap();
+    watcher.drain(&cancel).unwrap();
+    let root = watcher.index.root();
+    let arrived = observe(&outside).unwrap();
+    let inner = observe(&outside.join("inner")).unwrap();
+    let stale = observe(&root_path.join("removed/child/stale")).unwrap();
+    // Model recycled directory IDs without depending on the filesystem's allocator.
+    // The native queue still supplies the real outside-to-inside move event.
+    let removed = LinkKey {
+        parent: root,
+        name: "removed".into(),
+    };
+    watcher.index.remove(&removed, None).unwrap();
+    watcher.index.upsert(removed, arrived).unwrap();
+    watcher
+        .index
+        .upsert(
+            LinkKey {
+                parent: arrived.id,
+                name: "child".into(),
+            },
+            inner,
+        )
+        .unwrap();
+    watcher
+        .index
+        .upsert(
+            LinkKey {
+                parent: inner.id,
+                name: "stale".into(),
+            },
+            stale,
+        )
+        .unwrap();
+    fs::remove_dir_all(root_path.join("removed")).unwrap();
+    fs::rename(outside, root_path.join("arrived")).unwrap();
+    let update = watcher.drain(&cancel).unwrap();
+    assert!(update.caught_up);
+    assert_eq!(update.stats.directories_read, 2);
+    assert_baseline(&watcher);
+    let backend = watcher.source.cursor().kind;
+    eprintln!("native recycled directory fixture backend={backend:?}");
+    fs::rename(root_path.join("arrived"), root_path.join("renamed")).unwrap();
+    let moved = watcher.drain(&cancel).unwrap();
+    if backend == JournalKind::Inotify {
+        assert_eq!(moved.stats.directories_read, 0);
+    }
+    assert_eq!(
+        watcher.index.lookup(root, OsStr::new("renamed")),
+        Some(arrived.id)
+    );
+    assert_baseline(&watcher);
+    // A later descendant write proves the new incarnation stays watched after rename.
+    fs::write(root_path.join("renamed/inner/file"), [1; 8193]).unwrap();
+    assert!(watcher.drain(&cancel).unwrap().caught_up);
+    assert_baseline(&watcher);
 }

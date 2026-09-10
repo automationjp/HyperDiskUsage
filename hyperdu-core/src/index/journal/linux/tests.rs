@@ -352,7 +352,7 @@ fn native_unsupported_fanotify_falls_back_only_in_auto_mode() {
 }
 
 #[test]
-fn directory_creation_forces_subtree_observation_but_rename_retains_children() {
+fn directory_arrivals_require_subtree_observation_without_a_proven_local_move() {
     let root = EntryId {
         volume: 1,
         object: 2,
@@ -360,7 +360,7 @@ fn directory_creation_forces_subtree_observation_but_rename_retains_children() {
     let mut source = Inotify::open(root).unwrap();
     source.watches.insert(1, root);
     source.reverse.insert(root, 1);
-    for (mask, recursive) in [(libc::IN_CREATE, true), (libc::IN_MOVED_TO, false)] {
+    for (mask, recursive) in [(libc::IN_CREATE, true), (libc::IN_MOVED_TO, true)] {
         let mut changes = Vec::new();
         source
             .decode(&record(1, mask | libc::IN_ISDIR, b"dir\0"), &mut changes)
@@ -391,11 +391,60 @@ fn directory_creation_forces_subtree_observation_but_rename_retains_children() {
     info.extend_from_slice(&1u32.to_ne_bytes());
     info.extend_from_slice(&1i32.to_ne_bytes());
     info.extend_from_slice(&[42, b'x', 0]);
-    for (mask, recursive) in [(0x100, true), (0x80, false)] {
+    for (mask, recursive) in [(0x100, true), (0x80, true)] {
         let mut changes = Vec::new();
         source
             .decode(&fan_record(mask | 0x4000_0000, &info), &mut changes)
             .unwrap();
         assert!(matches!(&changes[0], Change::Entry { subtree, .. } if *subtree == recursive));
     }
+}
+
+#[test]
+fn inotify_only_matches_nonzero_directory_move_cookies_in_the_same_batch() {
+    fn moved(wd: i32, mask: u32, cookie: u32) -> Vec<u8> {
+        let mut bytes = record(wd, mask, b"dir\0");
+        bytes[8..12].copy_from_slice(&cookie.to_ne_bytes());
+        bytes
+    }
+    let root = EntryId {
+        volume: 1,
+        object: 2,
+    };
+    let mut source = Inotify::open(root).unwrap();
+    source.watches.insert(1, root);
+    source.reverse.insert(root, 1);
+    for (from_mask, from_cookie, to_cookie, recursive) in [
+        (libc::IN_MOVED_FROM | libc::IN_ISDIR, 42, 42, false),
+        (libc::IN_MOVED_FROM | libc::IN_ISDIR, 0, 0, true),
+        (libc::IN_MOVED_FROM | libc::IN_ISDIR, 42, 43, true),
+        (libc::IN_MOVED_FROM, 42, 42, true),
+    ] {
+        let mut bytes = moved(1, from_mask, from_cookie);
+        bytes.extend(moved(1, libc::IN_MOVED_TO | libc::IN_ISDIR, to_cookie));
+        let mut changes = Vec::new();
+        source.decode(&bytes, &mut changes).unwrap();
+        assert!(matches!(&changes[1], Change::Entry { subtree, .. } if *subtree == recursive));
+    }
+    let mut changes = Vec::new();
+    source
+        .decode(
+            &moved(1, libc::IN_MOVED_FROM | libc::IN_ISDIR, 42),
+            &mut changes,
+        )
+        .unwrap();
+    changes.clear();
+    source
+        .decode(
+            &moved(1, libc::IN_MOVED_TO | libc::IN_ISDIR, 42),
+            &mut changes,
+        )
+        .unwrap();
+    assert!(matches!(&changes[0], Change::Entry { subtree: true, .. }));
+    assert!(source
+        .decode(
+            &moved(99, libc::IN_MOVED_FROM | libc::IN_ISDIR, 42),
+            &mut Vec::new()
+        )
+        .is_err());
 }

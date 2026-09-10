@@ -17,6 +17,9 @@ const MUST_SCAN: u32 = 0x01;
 const DROPPED_OR_WRAPPED: u32 = 0x02 | 0x04 | 0x08;
 const HISTORY_DONE: u32 = 0x10;
 const ROOT_OR_MOUNT_CHANGED: u32 = 0x20 | 0x40 | 0x80;
+const ITEM_CREATED: u32 = 0x100;
+const ITEM_RENAMED: u32 = 0x800;
+const ITEM_IS_DIR: u32 = 0x20000;
 const MAX_EVENTS: usize = 65536;
 
 struct State {
@@ -24,6 +27,7 @@ struct State {
     changes: Vec<Change>,
     position: u64,
     history_done: bool,
+    history_end: Option<u64>,
     reset: Option<&'static str>,
 }
 
@@ -66,12 +70,10 @@ impl MacJournal {
         let prefix = relative.to_path_buf();
         let uuid = device_uuid(device)?;
         let latest = device_latest(device)?;
-        let resumed = resume.is_some_and(|cursor| {
-            uuid.is_some_and(|uuid| cursor.epoch == uuid)
-                && cursor.kind == JournalKind::Fsevents
-                && cursor.volume == root_id.volume
-                && cursor.position <= latest
-        });
+        // Apple's sinceWhen contract accepts a saved callback ID directly. The
+        // conservative time lookup can trail it, so it only seeds a new scan.
+        // HistoryDone below validates the actual replay against this position.
+        let resumed = resume.is_some_and(|cursor| can_resume(cursor, uuid, root_id.volume));
         let position = if resumed {
             resume.unwrap().position
         } else {
@@ -88,6 +90,7 @@ impl MacJournal {
             changes: Vec::new(),
             position,
             history_done: uuid.is_none(),
+            history_end: None,
             reset: None,
         }));
         let name = CString::new(prefix.as_os_str().as_bytes())
@@ -272,11 +275,20 @@ extern "C" fn callback(
                 state.reset = Some("FSEvents dropped, wrapped, root or mount changed");
                 continue;
             }
-            state.position = state.position.max(id);
             if flag & HISTORY_DONE != 0 {
-                state.history_done = true;
-                continue; // the sentinel path is unspecified
+                state.history_end = Some(id);
+                // Compare the received ID before max() can hide a regression.
+                // A future/rolled-back checkpoint must never become caught up.
+                if id < state.position {
+                    state.reset = Some("FSEvents history ended before the requested cursor");
+                    state.history_done = false;
+                } else {
+                    state.position = id;
+                    state.history_done = true;
+                }
+                continue; // only the sentinel path is unspecified
             }
+            state.position = state.position.max(id);
             let path = unsafe { *paths.cast::<*const c_char>().add(index) };
             if path.is_null() {
                 state.reset = Some("missing FSEvents path");
@@ -317,10 +329,19 @@ fn queue_path(state: &mut State, bytes: &[u8], flag: u32) {
     }
     state.changes.push(Change::RelativePath {
         path: relative,
-        // A create can reuse a deleted directory's inode before replay. It
-        // needs enumeration even if the stored identity already exists.
-        subtree: flag & MUST_SCAN != 0 || flag & 0x20100 == 0x20100,
+        // A directory arriving from outside can reuse a stored inode. FSEvents
+        // has no paired move cookie, so both create and rename need enumeration.
+        subtree: flag & MUST_SCAN != 0
+            || (flag & ITEM_IS_DIR != 0 && flag & (ITEM_CREATED | ITEM_RENAMED) != 0),
     });
+}
+
+fn can_resume(cursor: JournalCursor, uuid: Option<u128>, volume: u64) -> bool {
+    uuid.is_some_and(|uuid| cursor.epoch == uuid)
+        && cursor.kind == JournalKind::Fsevents
+        && cursor.volume == volume
+        // u64::MAX means SinceNow, not a persistent event ID.
+        && cursor.position != u64::MAX
 }
 
 fn device_uuid(device: libc::dev_t) -> io::Result<Option<u128>> {
@@ -452,6 +473,7 @@ mod tests {
             changes: vec![],
             position: 2,
             history_done: false,
+            history_end: None,
             reset: None,
         };
         queue_path(&mut state, b"root/watch/file", 0x1000);
@@ -473,6 +495,7 @@ mod tests {
             changes: vec![],
             position: 0,
             history_done: false,
+            history_end: None,
             reset: None,
         };
         queue_path(&mut state, b"Users/file", 0);
@@ -485,12 +508,13 @@ mod tests {
         assert!(state.reset.is_some());
     }
     #[test]
-    fn created_directory_is_reconciled_even_if_its_inode_was_known() {
+    fn directory_arrival_is_reconciled_even_if_its_inode_was_known() {
         let mut state = State {
             prefix: PathBuf::new(),
             changes: vec![],
             position: 0,
             history_done: false,
+            history_end: None,
             reset: None,
         };
         queue_path(&mut state, b"created", 0x20100);
@@ -501,6 +525,11 @@ mod tests {
         queue_path(&mut state, b"renamed", 0x20800);
         assert!(matches!(
             state.changes[1],
+            Change::RelativePath { subtree: true, .. }
+        ));
+        queue_path(&mut state, b"renamed-file", 0x10800);
+        assert!(matches!(
+            state.changes[2],
             Change::RelativePath { subtree: false, .. }
         ));
     }
@@ -511,6 +540,7 @@ mod tests {
             changes: vec![],
             position: 20,
             history_done: false,
+            history_end: None,
             reset: None,
         }));
         let paths = [ptr::null::<c_char>()];
@@ -536,6 +566,64 @@ mod tests {
         assert!(state.lock().unwrap().changes.is_empty());
     }
 
+    #[test]
+    fn resume_requires_matching_identity_and_a_persistent_event_id() {
+        let cursor = JournalCursor {
+            kind: JournalKind::Fsevents,
+            epoch: 7,
+            volume: 3,
+            position: 20,
+        };
+        assert!(can_resume(cursor, Some(7), 3));
+        assert!(!can_resume(cursor, None, 3));
+        assert!(!can_resume(cursor, Some(8), 3));
+        assert!(!can_resume(cursor, Some(7), 4));
+        assert!(!can_resume(
+            JournalCursor {
+                kind: JournalKind::Usn,
+                ..cursor
+            },
+            Some(7),
+            3
+        ));
+        assert!(!can_resume(
+            JournalCursor {
+                position: u64::MAX,
+                ..cursor
+            },
+            Some(7),
+            3
+        ));
+    }
+
+    #[test]
+    fn history_completion_validates_the_received_id_before_advancing() {
+        for (completed, valid) in [(19, false), (20, true), (21, true)] {
+            let state = Arc::new(Mutex::new(State {
+                prefix: "root".into(),
+                changes: vec![],
+                position: 20,
+                history_done: false,
+                history_end: None,
+                reset: None,
+            }));
+            let paths = [ptr::null::<c_char>()];
+            callback(
+                ptr::null(),
+                Arc::as_ptr(&state).cast_mut().cast(),
+                1,
+                paths.as_ptr().cast_mut().cast(),
+                [HISTORY_DONE].as_ptr(),
+                [completed].as_ptr(),
+            );
+            let state = state.lock().unwrap();
+            assert_eq!(state.history_done, valid, "completion ID {completed}");
+            assert_eq!(state.reset.is_none(), valid, "completion ID {completed}");
+            assert_eq!(state.position, completed.max(20));
+            assert_eq!(state.history_end, Some(completed));
+            assert!(state.changes.is_empty());
+        }
+    }
     #[test]
     fn native_fsevents_delivers_changes_and_resumes_device_history() {
         let temp = tempfile::tempdir().unwrap();
@@ -578,15 +666,60 @@ mod tests {
         }
         let cursor = source.cursor();
         drop(source);
+        // No mutation is needed to prove that a saved callback cursor can resume.
+        let (mut source, resumed) = MacJournal::open(&root, root_id, Some(cursor)).unwrap();
+        assert!(
+            resumed,
+            "unchanged restart rejected saved={cursor:?}, source={:?}",
+            source.cursor()
+        );
+        let mut caught_up = false;
+        for _ in 0..20 {
+            let batch = source.poll().unwrap();
+            assert!(
+                !batch
+                    .changes
+                    .iter()
+                    .any(|change| matches!(change, Change::Reset(_))),
+                "unchanged restart reset: saved={cursor:?}, next={:?}, completion={:?}",
+                batch.next,
+                source.state.lock().unwrap().history_end
+            );
+            if batch.caught_up {
+                caught_up = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(
+            caught_up,
+            "unchanged restart never completed: saved={cursor:?}, source={:?}, completion={:?}",
+            source.cursor(),
+            source.state.lock().unwrap().history_end
+        );
+        let cursor = source.cursor();
+        drop(source);
         std::fs::write(root.join("after-restart"), b"def").unwrap();
         let (mut source, resumed) = MacJournal::open(&root, root_id, Some(cursor)).unwrap();
         assert!(
             resumed,
-            "device UUID and saved cursor must permit native replay"
+            "device UUID and saved cursor must permit native replay: saved={cursor:?}, source={:?}",
+            source.cursor()
         );
         let mut replayed = false;
+        let mut replay_caught_up = false;
         for _ in 0..20 {
             let batch = source.poll().unwrap();
+            assert!(
+                !batch
+                    .changes
+                    .iter()
+                    .any(|change| matches!(change, Change::Reset(_))),
+                "offline replay reset: saved={cursor:?}, next={:?}, completion={:?}",
+                batch.next,
+                source.state.lock().unwrap().history_end
+            );
+            replay_caught_up = batch.caught_up;
             replayed |= batch.changes.iter().any(|change| {
                 matches!(change,
                 Change::RelativePath { path, .. } if path == Path::new("after-restart"))
@@ -597,8 +730,39 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         assert!(
-            replayed,
-            "native FSEvents history omitted the offline change"
+            replayed && replay_caught_up,
+            "offline replay incomplete: replayed={replayed}, saved={cursor:?}, next={:?}, completion={:?}",
+            source.cursor(), source.state.lock().unwrap().history_end
+        );
+        // A nonempty directory renamed into the watched root needs recursive
+        // reconciliation even if its inode happened to be seen there before.
+        let outside = tempfile::tempdir_in(root.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(outside.path().join("incoming/nested")).unwrap();
+        std::fs::write(outside.path().join("incoming/nested/file"), b"moved").unwrap();
+        std::fs::rename(outside.path().join("incoming"), root.join("moved-in")).unwrap();
+        let mut arrived = false;
+        for _ in 0..20 {
+            let batch = source.poll().unwrap();
+            assert!(
+                !batch
+                    .changes
+                    .iter()
+                    .any(|change| matches!(change, Change::Reset(_))),
+                "directory arrival reset: next={:?}",
+                batch.next
+            );
+            arrived |= batch.changes.iter().any(|change| {
+                matches!(change, Change::RelativePath { path, subtree: true }
+                    if path == Path::new("moved-in") || path.as_os_str().is_empty())
+            });
+            if arrived && batch.caught_up {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(
+            arrived,
+            "native FSEvents omitted recursive directory arrival"
         );
     }
 }
