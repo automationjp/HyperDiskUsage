@@ -1,102 +1,549 @@
 {
-  "date": "2026-09-09",
-  "commit": "0a089c90c0e2995ef702ff053820d129265c3659",
+  "schema_version": 2,
+  "date": "2026-09-11",
+  "timezone": "UTC",
+  "commit": "2645689515ab2e608a78b7492637e55179e4739a",
+  "tree": "83dd0978e454d5ce4bc5b0c37d3c69a18a50e657",
+  "cargo_lock_sha256": "4fdb76dec33728e1aba3879a7a11b68962e23521a70018d1eb26ac986df7db47",
+  "release_status": "unreleased development snapshot",
+  "comparison": "HyperDU versus GNU coreutils du",
+  "workflow_run": "https://github.com/automationjp/HyperDiskUsage/actions/runs/34550503086",
+  "method": "https://github.com/automationjp/HyperDiskUsage/blob/2645689515ab2e608a78b7492637e55179e4739a/scripts/bench/du_same_conditions.py",
+  "documentation": "https://github.com/automationjp/HyperDiskUsage/blob/2645689515ab2e608a78b7492637e55179e4739a/docs/benchmarks.md",
+  "headline_ratio": 3.25,
+  "headline_shape": "wide",
+  "limitations": [
+    "GitHub hosted Linux X64; Ubuntu 24.04 runner image; shared virtual machine.",
+    "Warm cache after a full parity scan; process startup and all directory output included.",
+    "Three synthetic directory trees of 1,000,000 regular files each; 256 bytes per file.",
+    "Each tool runs eight times in alternating order. All workloads and all 48 samples are retained, including slower cases.",
+    "No claim about Windows/macOS, cold cache, whole disks, or other storage devices.",
+    "Environment records validate provenance consistency, not cryptographic attestation."
+  ],
+  "filters": [],
   "platforms": [
     {
-      "id": "windows",
-      "title": "Windows",
-      "subtitle": "NTFS / Native",
-      "machine": "Ryzen 9 3900X · 24 threads · Windows 11",
-      "baseline": "robocopy",
-      "rows": [
-        {
-          "label": "wide",
-          "shape": "500 dirs × 40 files",
-          "files": "20,000",
-          "hyperdu_ms": 30.7,
-          "baseline_ms": 57.4,
-          "ratio": 1.87,
-          "hyperdu_width": 53.5,
-          "baseline_width": 100.0
-        },
-        {
-          "label": "deep",
-          "shape": "400 levels × 5 files",
-          "files": "2,000",
-          "hyperdu_ms": 77.1,
-          "baseline_ms": 72.0,
-          "ratio": 0.93,
-          "hyperdu_width": 100.0,
-          "baseline_width": 93.41
-        },
-        {
-          "label": "flat",
-          "shape": "1 dir × 20,000 files",
-          "files": "20,000",
-          "hyperdu_ms": 34.1,
-          "baseline_ms": 42.8,
-          "ratio": 1.26,
-          "hyperdu_width": 79.58,
-          "baseline_width": 100.0
-        },
-        {
-          "label": "registry",
-          "shape": "Cargo registry",
-          "files": "111,813",
-          "hyperdu_ms": 332.2,
-          "baseline_ms": 1838.5,
-          "ratio": 5.53,
-          "hyperdu_width": 18.07,
-          "baseline_width": 100.0
-        }
-      ]
-    },
-    {
       "id": "linux",
-      "title": "Linux",
-      "subtitle": "ext4 / WSL2",
-      "machine": "Ubuntu 26.04 · 16 vCPU · uutils 0.8.0",
-      "baseline": "du",
+      "group": "linux",
+      "title": "HyperDU vs GNU du",
+      "subtitle": "GitHub Actions / Linux",
+      "machine": "AMD EPYC 9V74 80-Core Processor · 4 vCPU · 15.6 GiB RAM · ext4",
+      "candidate": "HyperDU",
+      "baseline": "GNU du",
+      "condition": {
+        "ja": "Ubuntu 24.04 · 各100万ファイル · 256 B / ファイル · 各ツール8回の中央値",
+        "en": "Ubuntu 24.04 · 1M files per tree · 256 B per file · median of 8 runs per tool",
+        "zh-CN": "Ubuntu 24.04 · 每种结构100万文件 · 每文件256 B · 每个工具8次运行的中位数"
+      },
+      "provenance": {
+        "complete": true,
+        "run_url": "https://github.com/automationjp/HyperDiskUsage/actions/runs/34550503086",
+        "run_id": "34550503086",
+        "run_attempt": "1",
+        "job": "benchmark-du",
+        "provider": "GitHub Actions",
+        "runner_environment": "github-hosted",
+        "runner_os": "Linux",
+        "runner_arch": "X64",
+        "image_os": "ubuntu24",
+        "image_version": "20260907.300.1",
+        "kernel": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+        "build": {
+          "head": "2645689515ab2e608a78b7492637e55179e4739a",
+          "binary_sha256": "6cb0b3aa438eca6216f95880861ed1aca7d6930cb743ccfa74750ef84969c3ce",
+          "source_snapshot_sha256": "2cba546df22978eac2b560b07652fa4bcaaca9293eb83322480400c15828abb2",
+          "build_command": "cargo build --locked --release -p hyperdu",
+          "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8",
+          "profile": {
+            "opt_level": 3,
+            "lto": "thin",
+            "codegen_units": 1,
+            "debug": true,
+            "strip": true,
+            "panic": "abort",
+            "incremental": false
+          },
+          "features": "default",
+          "rustflags": "",
+          "cargo_encoded_rustflags": ""
+        },
+        "du": {
+          "binary_sha256": "872ef616defa9ecfc93c50a8da5d6144b4dfc93378882ad82198369433bd16c1",
+          "version": "du (GNU coreutils) 9.4",
+          "package": "coreutils\t9.4-3ubuntu6.3"
+        },
+        "source_snapshot_sha256": "2cba546df22978eac2b560b07652fa4bcaaca9293eb83322480400c15828abb2",
+        "environment_record_sha256": "5e7897c7bc13bb5952f3bea292a75d7d75817554f1ef2b2bae545f5bae3c887c",
+        "completed_manifest_sha256": "53a01e989096f07d7e341525b8409bec7a353c04bfdeae04b5917bd55cda1b8b"
+      },
       "rows": [
         {
-          "label": "wide",
-          "shape": "500 dirs × 40 files",
-          "files": "20,000",
-          "hyperdu_ms": 47.3,
-          "baseline_ms": 208.6,
-          "ratio": 4.41,
-          "hyperdu_width": 22.7,
-          "baseline_width": 100.0
+          "label": {
+            "ja": "平坦なフォルダ",
+            "en": "Flat directory",
+            "zh-CN": "平铺目录"
+          },
+          "shape": "flat",
+          "files": "1,000,000",
+          "file_count": 1000000,
+          "bytes_per_file": 256,
+          "hyperdu_ms": 2327.49,
+          "baseline_ms": 2763.52,
+          "ratio": 1.187,
+          "ratio_exact": 1.1873386207554095,
+          "median_ms_exact": {
+            "hyperdu": 2327.4885485,
+            "du": 2763.517043
+          },
+          "hyperdu_width": 84.222,
+          "baseline_width": 100.0,
+          "all_directory_parity": "PASS",
+          "directory_count": 1,
+          "dataset_fingerprint": "5930154aba1fbdab2059c93a3134610ea682fc81ba74a79629ac46a77caf0fc5",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 2367.174907,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-flat-84lpk1fr'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 0,
+              "tool": "du",
+              "elapsed_ms": 2748.247731,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 1,
+              "tool": "du",
+              "elapsed_ms": 2748.382766,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 2329.193714,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-flat-84lpk1fr'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 2,
+              "tool": "hyperdu",
+              "elapsed_ms": 2317.46483,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-flat-84lpk1fr'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 2,
+              "tool": "du",
+              "elapsed_ms": 2733.311602,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 3,
+              "tool": "du",
+              "elapsed_ms": 2782.36263,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 3,
+              "tool": "hyperdu",
+              "elapsed_ms": 2328.84,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-flat-84lpk1fr'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 4,
+              "tool": "hyperdu",
+              "elapsed_ms": 2324.945572,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-flat-84lpk1fr'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 4,
+              "tool": "du",
+              "elapsed_ms": 2762.275895,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 5,
+              "tool": "du",
+              "elapsed_ms": 2764.758191,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 5,
+              "tool": "hyperdu",
+              "elapsed_ms": 2329.531805,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-flat-84lpk1fr'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 6,
+              "tool": "hyperdu",
+              "elapsed_ms": 2323.497298,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-flat-84lpk1fr'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 6,
+              "tool": "du",
+              "elapsed_ms": 2781.876689,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 7,
+              "tool": "du",
+              "elapsed_ms": 2800.452152,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 7,
+              "tool": "hyperdu",
+              "elapsed_ms": 2326.137097,
+              "stdout_sha256": "d96c73498ef8918f5363bb95550bfbb415a153386872188e67f2a8da4aa29864",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-flat-84lpk1fr'\n",
+              "direct_directory_parity": true
+            }
+          ],
+          "source_record_sha256": "8b5fab1e65080560239b7b044ba9aaf7822608ccea1872072ccffd7baf189c1a",
+          "finished_at": "2026-09-11T01:30:49.307789+00:00"
         },
         {
-          "label": "deep",
-          "shape": "400 levels × 5 files",
-          "files": "2,000",
-          "hyperdu_ms": 89.1,
-          "baseline_ms": 143.4,
-          "ratio": 1.61,
-          "hyperdu_width": 62.16,
-          "baseline_width": 100.0
+          "label": {
+            "ja": "横に広いフォルダ",
+            "en": "Wide directory tree",
+            "zh-CN": "宽目录树"
+          },
+          "shape": "wide",
+          "files": "1,000,000",
+          "file_count": 1000000,
+          "bytes_per_file": 256,
+          "hyperdu_ms": 745.96,
+          "baseline_ms": 2428.8,
+          "ratio": 3.256,
+          "ratio_exact": 3.2559381252682082,
+          "median_ms_exact": {
+            "hyperdu": 745.9616335000001,
+            "du": 2428.8049225000004
+          },
+          "hyperdu_width": 30.7131,
+          "baseline_width": 100.0,
+          "all_directory_parity": "PASS",
+          "directory_count": 7814,
+          "dataset_fingerprint": "a76100cb334a35eafe017092ec1ffd7c5a6a22950d829da68c394f011ef0e6e9",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 752.535421,
+              "stdout_sha256": "d67a36482951baad477667f9ba5cc68fd499279b3b1da226bd091de9715f8be0",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-wide-489z_328'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 0,
+              "tool": "du",
+              "elapsed_ms": 2446.450576,
+              "stdout_sha256": "3798cf6e0eecdc28aeaa062446630b1d9fea49984da1ffd334b0036c5effc3a4",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 1,
+              "tool": "du",
+              "elapsed_ms": 2411.159269,
+              "stdout_sha256": "3798cf6e0eecdc28aeaa062446630b1d9fea49984da1ffd334b0036c5effc3a4",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 749.321684,
+              "stdout_sha256": "d67a36482951baad477667f9ba5cc68fd499279b3b1da226bd091de9715f8be0",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-wide-489z_328'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 2,
+              "tool": "hyperdu",
+              "elapsed_ms": 744.160878,
+              "stdout_sha256": "d67a36482951baad477667f9ba5cc68fd499279b3b1da226bd091de9715f8be0",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-wide-489z_328'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 2,
+              "tool": "du",
+              "elapsed_ms": 2461.453751,
+              "stdout_sha256": "3798cf6e0eecdc28aeaa062446630b1d9fea49984da1ffd334b0036c5effc3a4",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 3,
+              "tool": "du",
+              "elapsed_ms": 2453.041331,
+              "stdout_sha256": "3798cf6e0eecdc28aeaa062446630b1d9fea49984da1ffd334b0036c5effc3a4",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 3,
+              "tool": "hyperdu",
+              "elapsed_ms": 744.454915,
+              "stdout_sha256": "d67a36482951baad477667f9ba5cc68fd499279b3b1da226bd091de9715f8be0",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-wide-489z_328'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 4,
+              "tool": "hyperdu",
+              "elapsed_ms": 744.759966,
+              "stdout_sha256": "d67a36482951baad477667f9ba5cc68fd499279b3b1da226bd091de9715f8be0",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-wide-489z_328'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 4,
+              "tool": "du",
+              "elapsed_ms": 2501.471088,
+              "stdout_sha256": "3798cf6e0eecdc28aeaa062446630b1d9fea49984da1ffd334b0036c5effc3a4",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 5,
+              "tool": "du",
+              "elapsed_ms": 2406.75635,
+              "stdout_sha256": "3798cf6e0eecdc28aeaa062446630b1d9fea49984da1ffd334b0036c5effc3a4",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 5,
+              "tool": "hyperdu",
+              "elapsed_ms": 747.163301,
+              "stdout_sha256": "d67a36482951baad477667f9ba5cc68fd499279b3b1da226bd091de9715f8be0",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-wide-489z_328'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 6,
+              "tool": "hyperdu",
+              "elapsed_ms": 743.394615,
+              "stdout_sha256": "d67a36482951baad477667f9ba5cc68fd499279b3b1da226bd091de9715f8be0",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-wide-489z_328'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 6,
+              "tool": "du",
+              "elapsed_ms": 2390.379599,
+              "stdout_sha256": "3798cf6e0eecdc28aeaa062446630b1d9fea49984da1ffd334b0036c5effc3a4",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 7,
+              "tool": "du",
+              "elapsed_ms": 2406.889229,
+              "stdout_sha256": "3798cf6e0eecdc28aeaa062446630b1d9fea49984da1ffd334b0036c5effc3a4",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 7,
+              "tool": "hyperdu",
+              "elapsed_ms": 752.327,
+              "stdout_sha256": "d67a36482951baad477667f9ba5cc68fd499279b3b1da226bd091de9715f8be0",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-wide-489z_328'\n",
+              "direct_directory_parity": true
+            }
+          ],
+          "source_record_sha256": "6db60c1383eb47af4a6ee17cd51804c995fd46369794d64a95e3a7c1a8d67ee7",
+          "finished_at": "2026-09-11T01:35:01.447927+00:00"
         },
         {
-          "label": "flat",
-          "shape": "1 dir × 20,000 files",
-          "files": "20,000",
-          "hyperdu_ms": 130.5,
-          "baseline_ms": 184.4,
-          "ratio": 1.41,
-          "hyperdu_width": 70.76,
-          "baseline_width": 100.0
-        },
-        {
-          "label": "registry",
-          "shape": "Cargo registry",
-          "files": "37,814",
-          "hyperdu_ms": 144.6,
-          "baseline_ms": 978.9,
-          "ratio": 6.77,
-          "hyperdu_width": 14.77,
-          "baseline_width": 100.0
+          "label": {
+            "ja": "深い階層のフォルダ",
+            "en": "Deep directory tree",
+            "zh-CN": "深目录树"
+          },
+          "shape": "deep",
+          "files": "1,000,000",
+          "file_count": 1000000,
+          "bytes_per_file": 256,
+          "hyperdu_ms": 764.67,
+          "baseline_ms": 2434.28,
+          "ratio": 3.183,
+          "ratio_exact": 3.1834516014952903,
+          "median_ms_exact": {
+            "hyperdu": 764.665783,
+            "du": 2434.2765115
+          },
+          "hyperdu_width": 31.4124,
+          "baseline_width": 100.0,
+          "all_directory_parity": "PASS",
+          "directory_count": 10430,
+          "dataset_fingerprint": "f2e19415c226df10da15fef0e1c334c09752603126515056949dfec1e1ce7fc6",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 764.695899,
+              "stdout_sha256": "f3301d27ed3b1e72fa4702472c227f8d3a1c30577f148f8db56c7a62d7888199",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-deep-uwo5vka5'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 0,
+              "tool": "du",
+              "elapsed_ms": 2460.134354,
+              "stdout_sha256": "c1e442d91c8d1f3034ba3e7457aa6b185dbb57ac78c65608290fd5925b170c7c",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 1,
+              "tool": "du",
+              "elapsed_ms": 2426.104713,
+              "stdout_sha256": "c1e442d91c8d1f3034ba3e7457aa6b185dbb57ac78c65608290fd5925b170c7c",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 763.779596,
+              "stdout_sha256": "f3301d27ed3b1e72fa4702472c227f8d3a1c30577f148f8db56c7a62d7888199",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-deep-uwo5vka5'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 2,
+              "tool": "hyperdu",
+              "elapsed_ms": 763.967765,
+              "stdout_sha256": "f3301d27ed3b1e72fa4702472c227f8d3a1c30577f148f8db56c7a62d7888199",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-deep-uwo5vka5'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 2,
+              "tool": "du",
+              "elapsed_ms": 2434.051347,
+              "stdout_sha256": "c1e442d91c8d1f3034ba3e7457aa6b185dbb57ac78c65608290fd5925b170c7c",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 3,
+              "tool": "du",
+              "elapsed_ms": 2410.553629,
+              "stdout_sha256": "c1e442d91c8d1f3034ba3e7457aa6b185dbb57ac78c65608290fd5925b170c7c",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 3,
+              "tool": "hyperdu",
+              "elapsed_ms": 757.467042,
+              "stdout_sha256": "f3301d27ed3b1e72fa4702472c227f8d3a1c30577f148f8db56c7a62d7888199",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-deep-uwo5vka5'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 4,
+              "tool": "hyperdu",
+              "elapsed_ms": 768.355401,
+              "stdout_sha256": "f3301d27ed3b1e72fa4702472c227f8d3a1c30577f148f8db56c7a62d7888199",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-deep-uwo5vka5'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 4,
+              "tool": "du",
+              "elapsed_ms": 2449.820201,
+              "stdout_sha256": "c1e442d91c8d1f3034ba3e7457aa6b185dbb57ac78c65608290fd5925b170c7c",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 5,
+              "tool": "du",
+              "elapsed_ms": 2434.501676,
+              "stdout_sha256": "c1e442d91c8d1f3034ba3e7457aa6b185dbb57ac78c65608290fd5925b170c7c",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 5,
+              "tool": "hyperdu",
+              "elapsed_ms": 767.394062,
+              "stdout_sha256": "f3301d27ed3b1e72fa4702472c227f8d3a1c30577f148f8db56c7a62d7888199",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-deep-uwo5vka5'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 6,
+              "tool": "hyperdu",
+              "elapsed_ms": 764.635667,
+              "stdout_sha256": "f3301d27ed3b1e72fa4702472c227f8d3a1c30577f148f8db56c7a62d7888199",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-deep-uwo5vka5'\n",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 6,
+              "tool": "du",
+              "elapsed_ms": 2451.254546,
+              "stdout_sha256": "c1e442d91c8d1f3034ba3e7457aa6b185dbb57ac78c65608290fd5925b170c7c",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 7,
+              "tool": "du",
+              "elapsed_ms": 2422.002994,
+              "stdout_sha256": "c1e442d91c8d1f3034ba3e7457aa6b185dbb57ac78c65608290fd5925b170c7c",
+              "stderr": "",
+              "direct_directory_parity": true
+            },
+            {
+              "round": 7,
+              "tool": "hyperdu",
+              "elapsed_ms": 770.091767,
+              "stdout_sha256": "f3301d27ed3b1e72fa4702472c227f8d3a1c30577f148f8db56c7a62d7888199",
+              "stderr": "fs-auto: fs='ext4' strategy='ext4' reason='fstype=ext4' changes=[getdents_buf_kb=128] for '/home/runner/work/_temp/hyperdu-product-benchmark/corpora/hyperdu-deep-uwo5vka5'\n",
+              "direct_directory_parity": true
+            }
+          ],
+          "source_record_sha256": "dca0d66c0aa33942e0f4f9025508e316f42f959699005e59e7b28429685ea1ab",
+          "finished_at": "2026-09-11T01:40:53.871281+00:00"
         }
       ]
     }

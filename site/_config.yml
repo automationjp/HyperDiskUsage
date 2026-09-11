@@ -16,6 +16,10 @@ url: https://automationjp.github.io
 baseurl: /HyperDiskUsage
 
 repository: automationjp/HyperDiskUsage
+published_cli_url: https://crates.io/crates/hyperdu-cli
+
+# This unreleased source snapshot is the version described and measured below.
+source_revision: 2645689515ab2e608a78b7492637e55179e4739a
 
 # The three language trees. The layout builds its switcher from this list, so
 # adding a language here and a page under `site/<code>/` is all it takes.

@@ -198,20 +198,10 @@ code,.mono {
 .brand-mark {
   width:23px;
   height:23px;
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:3px;
-  transform:rotate(-8deg);
+  display:block;
+  flex:0 0 23px;
+  object-fit:contain;
   margin-right:3px;
-}
-
-.brand-mark i {
-  background:var(--green);
-  border-radius:1px;
-}
-
-.brand-mark i:last-child {
-  background:#91ab65;
 }
 
 .beta {
@@ -813,6 +803,10 @@ td {
   grid-template-columns:1fr 1fr;
   gap:78px;
   padding:56px;
+}
+
+.agent-copy,.agent-tools {
+  min-width:0;
 }
 
 .agent-section h2 {
