@@ -1,102 +1,663 @@
 {
-  "date": "2026-09-09",
-  "commit": "0a089c90c0e2995ef702ff053820d129265c3659",
+  "schema_version": 1,
+  "date": "2026-09-11",
+  "timezone": "Asia/Tokyo",
+  "commit": "99aaaff2ba50fa10f2e5c5a67b8c5d0d12208e89",
+  "tree": "dea5c7729e373c31f39b8b839d666132e435c575",
+  "release_status": "unreleased development snapshot",
+  "cargo_lock_sha256": "4fdb76dec33728e1aba3879a7a11b68962e23521a70018d1eb26ac986df7db47",
+  "comparison": "same HyperDU executable: selected metadata backend versus its fallback; not a du comparison",
+  "native_ci": "https://github.com/automationjp/HyperDiskUsage/actions/runs/34537709387",
+  "method": "https://github.com/automationjp/HyperDiskUsage/blob/99aaaff2ba50fa10f2e5c5a67b8c5d0d12208e89/scripts/bench/remeasure.py",
+  "documentation": "https://github.com/automationjp/HyperDiskUsage/blob/99aaaff2ba50fa10f2e5c5a67b8c5d0d12208e89/docs/benchmarks.md",
+  "public_record_note": "All measured trial values retained. Local corpus/executable/output paths and path-bearing diagnostics omitted; normalized command template and source-record SHA-256 retained.",
+  "limitations": [
+    "Warm cache only; no cold-cache, HDD, SMB or NFS timings.",
+    "Windows and WSL2 share one host and NVMe; runs were serial. This was not an isolated lab.",
+    "macOS uses 25,000 files per shape and the hosted CI build profile (LTO=false, codegen-units=16), not the Windows/Linux 1M-file profile (thin LTO, codegen-units=1).",
+    "Compare variants within a row only. These results do not rank operating systems, machines or competing tools.",
+    "io_uring is an optional Linux build feature. Main install instructions do not enable this optional feature.",
+    "Raw MFT microbenchmarks are excluded from this end-to-end CLI table.",
+    "Separate untimed 128-file subtree probe with one worker. Counts cover only three io_uring syscalls and are NOT counts from the 1M-file timings. Full-corpus all-syscall/metadata totals were not collected because tracing overhead exceeded bounded limits."
+  ],
+  "filters": [
+    {
+      "id": "windows",
+      "label": "Windows"
+    },
+    {
+      "id": "linux",
+      "label": "Linux"
+    },
+    {
+      "id": "macos",
+      "label": "macOS"
+    }
+  ],
   "platforms": [
     {
       "id": "windows",
+      "group": "windows",
       "title": "Windows",
       "subtitle": "NTFS / Native",
-      "machine": "Ryzen 9 3900X · 24 threads · Windows 11",
-      "baseline": "robocopy",
+      "machine": "Ryzen 9 3900X · 24 threads · Windows 11 · NVMe",
+      "candidate": "NTQuery",
+      "baseline": "Win32",
+      "condition": {
+        "ja": "100万ファイル / 構成 · 256 B / ファイル · 共有PC",
+        "en": "1M files / tree · 256 B / file · shared PC",
+        "zh-CN": "每种结构 100 万文件 · 每文件 256 B · 共享主机"
+      },
+      "provenance": {
+        "complete": true,
+        "original_record_sha256": "a9bb0320e6c25c30890b9019078ccd8030316c94394513f60d255b1fc14951c0",
+        "started_at": "2026-09-10T22:39:16Z",
+        "finished_at": "2026-09-10T23:21:42Z",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "machine": "AMD64",
+        "environment_label": "Windows NTFS C: GIGABYTE GP-ASM2NE6100TTTD NVMe; shared host; native enumeration comparison",
+        "storage_kind": "nvme",
+        "cache": "warm",
+        "cache_evidence": "untimed warm-up before trials",
+        "runs_per_variant": 4,
+        "build": {
+          "head": "99aaaff2ba50fa10f2e5c5a67b8c5d0d12208e89",
+          "tree": "dea5c7729e373c31f39b8b839d666132e435c575",
+          "binary_sha256": "076c611de8057d782901ef2096a3aea01952ebf35030579ff4bf16b30ea12f3a",
+          "build_command": "cargo build --locked --workspace --release",
+          "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\r\nbinary: rustc\r\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\r\ncommit-date: 2026-09-01\r\nhost: x86_64-pc-windows-msvc\r\nrelease: 1.98.1\r\nLLVM version: 22.1.8",
+          "lock_sha256": "4fdb76dec33728e1aba3879a7a11b68962e23521a70018d1eb26ac986df7db47",
+          "release_profile": {
+            "opt-level": 3,
+            "lto": "thin",
+            "codegen-units": 1,
+            "panic": "abort",
+            "strip": true,
+            "debug": true,
+            "incremental": false
+          },
+          "profile_environment": {},
+          "features": [],
+          "storage": "NTFS on C: GIGABYTE GP-ASM2NE6100TTTD NVMe; shared Windows host"
+        },
+        "flags": {
+          "candidate": [],
+          "baseline": []
+        },
+        "environment": {
+          "candidate": {},
+          "baseline": {
+            "HYPERDU_WIN_USE_NTQUERY": "0"
+          }
+        },
+        "accounting": "regular-file logical/allocated bytes, hardlinks once, no-follow, one filesystem",
+        "timing_scope": "scan + rollup + full directory JSON/console report",
+        "corpus": {
+          "entries": 1000000,
+          "depth": 16,
+          "file_size": 256,
+          "shapes": []
+        },
+        "command_template": "hyperdu CORPUS --exclude \"\" --one-file-system --progress-every 0 --top 1 --json OUTPUT [variant flags]"
+      },
       "rows": [
         {
-          "label": "wide",
-          "shape": "500 dirs × 40 files",
-          "files": "20,000",
-          "hyperdu_ms": 30.7,
-          "baseline_ms": 57.4,
-          "ratio": 1.87,
-          "hyperdu_width": 53.5,
-          "baseline_width": 100.0
+          "label": "flat",
+          "shape": "1 dirs",
+          "files": "1,000,000",
+          "hyperdu_ms": 709.723,
+          "baseline_ms": 118053.166,
+          "ratio": 166.34,
+          "hyperdu_width": 0.6,
+          "baseline_width": 100.0,
+          "accounted_files": 1000000,
+          "entries": 1000000,
+          "entries_definition": "names enumerated in traversed directories, including skipped names; no skipped descendants",
+          "directories": 1,
+          "logical_bytes": 256000000,
+          "allocated_bytes": 256000000,
+          "fingerprint_sha256": "e78a19ae7ee852af2bd38b6bb78523ea89436b4a3913bceea4210cebe063bb20",
+          "all_directory_parity": "PASS",
+          "unchanged_corpus_before_after": true,
+          "median_seconds": {
+            "candidate": 0.7097232999949483,
+            "baseline": 118.0531656000021
+          },
+          "baseline_over_candidate": 166.33688875769244,
+          "samples": [
+          {"tool": "candidate", "iteration": 0, "wall_seconds": 0.5418006999971112, "cpu_seconds": 0.8125, "user_seconds": 0.5, "kernel_seconds": 0.3125, "peak_rss_bytes": 54738944, "page_faults": 13739, "minor_faults": null, "major_faults": null, "bytes_read": 24997, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 1845697.1355063436, "exit_code": 0},
+          {"tool": "baseline", "iteration": 0, "wall_seconds": 115.15841139999975, "cpu_seconds": 154.25, "user_seconds": 21.390625, "kernel_seconds": 132.859375, "peak_rss_bytes": 50176000, "page_faults": 18864, "minor_faults": null, "major_faults": null, "bytes_read": 0, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 8683.690473347413, "exit_code": 0},
+          {"tool": "baseline", "iteration": 1, "wall_seconds": 110.39958990000014, "cpu_seconds": 150.65625, "user_seconds": 23.1875, "kernel_seconds": 127.46875, "peak_rss_bytes": 50683904, "page_faults": 18092, "minor_faults": null, "major_faults": null, "bytes_read": 50242, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 9058.004662026364, "exit_code": 0},
+          {"tool": "candidate", "iteration": 1, "wall_seconds": 1.1532773999933852, "cpu_seconds": 1.09375, "user_seconds": 0.5625, "kernel_seconds": 0.53125, "peak_rss_bytes": 53862400, "page_faults": 15443, "minor_faults": null, "major_faults": null, "bytes_read": 50614, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 867094.0746829303, "exit_code": 0},
+          {"tool": "candidate", "iteration": 2, "wall_seconds": 0.8776458999927854, "cpu_seconds": 0.90625, "user_seconds": 0.671875, "kernel_seconds": 0.234375, "peak_rss_bytes": 55365632, "page_faults": 14937, "minor_faults": null, "major_faults": null, "bytes_read": 0, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 1139411.6921280215, "exit_code": 0},
+          {"tool": "baseline", "iteration": 2, "wall_seconds": 145.25782810000237, "cpu_seconds": 193.4375, "user_seconds": 29.0625, "kernel_seconds": 164.375, "peak_rss_bytes": 50368512, "page_faults": 18787, "minor_faults": null, "major_faults": null, "bytes_read": 0, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 6884.310560609186, "exit_code": 0},
+          {"tool": "baseline", "iteration": 3, "wall_seconds": 120.94791980000446, "cpu_seconds": 165.875, "user_seconds": 27.09375, "kernel_seconds": 138.78125, "peak_rss_bytes": 50454528, "page_faults": 18561, "minor_faults": null, "major_faults": null, "bytes_read": 0, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 8268.021489361434, "exit_code": 0},
+          {"tool": "candidate", "iteration": 3, "wall_seconds": 0.47520780000195373, "cpu_seconds": 0.875, "user_seconds": 0.484375, "kernel_seconds": 0.390625, "peak_rss_bytes": 55529472, "page_faults": 14372, "minor_faults": null, "major_faults": null, "bytes_read": 0, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 2104342.5633920333, "exit_code": 0}
+        ],
+          "syscalls": {
+            "candidate": {
+              "count": null,
+              "reason": "unavailable: strace supported only on Linux",
+              "timed": false,
+              "per_entry": null
+            },
+            "baseline": {
+              "count": null,
+              "reason": "unavailable: strace supported only on Linux",
+              "timed": false,
+              "per_entry": null
+            }
+          }
         },
         {
           "label": "deep",
-          "shape": "400 levels × 5 files",
-          "files": "2,000",
-          "hyperdu_ms": 77.1,
-          "baseline_ms": 72.0,
-          "ratio": 0.93,
-          "hyperdu_width": 100.0,
-          "baseline_width": 93.41
-        },
-        {
-          "label": "flat",
-          "shape": "1 dir × 20,000 files",
-          "files": "20,000",
-          "hyperdu_ms": 34.1,
-          "baseline_ms": 42.8,
-          "ratio": 1.26,
-          "hyperdu_width": 79.58,
-          "baseline_width": 100.0
-        },
-        {
-          "label": "registry",
-          "shape": "Cargo registry",
-          "files": "111,813",
-          "hyperdu_ms": 332.2,
-          "baseline_ms": 1838.5,
-          "ratio": 5.53,
-          "hyperdu_width": 18.07,
-          "baseline_width": 100.0
+          "shape": "10,430 dirs · depth 16",
+          "files": "1,000,000",
+          "hyperdu_ms": 3042.56,
+          "baseline_ms": 48145.44,
+          "ratio": 15.82,
+          "hyperdu_width": 6.32,
+          "baseline_width": 100.0,
+          "accounted_files": 1000000,
+          "entries": 1010429,
+          "entries_definition": "names enumerated in traversed directories, including skipped names; no skipped descendants",
+          "directories": 10430,
+          "logical_bytes": 256000000,
+          "allocated_bytes": 256000000,
+          "fingerprint_sha256": "4dc46e5f408be7a8d6a9102077fa16407ff8d7125feec2908f7cd16395b4ed19",
+          "all_directory_parity": "PASS",
+          "unchanged_corpus_before_after": true,
+          "median_seconds": {
+            "candidate": 3.0425602000032086,
+            "baseline": 48.14543984999909
+          },
+          "baseline_over_candidate": 15.823989234444177,
+          "samples": [
+          {"tool": "candidate", "iteration": 0, "wall_seconds": 3.475156500004232, "cpu_seconds": 6.359375, "user_seconds": 1.34375, "kernel_seconds": 5.015625, "peak_rss_bytes": 114085888, "page_faults": 31633, "minor_faults": null, "major_faults": null, "bytes_read": 17180, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 290757.8406896983, "exit_code": 0},
+          {"tool": "baseline", "iteration": 0, "wall_seconds": 46.98032919999969, "cpu_seconds": 396.796875, "user_seconds": 11.90625, "kernel_seconds": 384.890625, "peak_rss_bytes": 110067712, "page_faults": 34349, "minor_faults": null, "major_faults": null, "bytes_read": 17180, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 21507.490841507486, "exit_code": 0},
+          {"tool": "baseline", "iteration": 1, "wall_seconds": 45.30084320000606, "cpu_seconds": 406.59375, "user_seconds": 14.1875, "kernel_seconds": 392.40625, "peak_rss_bytes": 108728320, "page_faults": 34606, "minor_faults": null, "major_faults": null, "bytes_read": 0, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 22304.86076250044, "exit_code": 0},
+          {"tool": "candidate", "iteration": 1, "wall_seconds": 2.8407359999982873, "cpu_seconds": 5.75, "user_seconds": 1.421875, "kernel_seconds": 4.328125, "peak_rss_bytes": 115904512, "page_faults": 31520, "minor_faults": null, "major_faults": null, "bytes_read": 0, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 355692.6796437998, "exit_code": 0},
+          {"tool": "candidate", "iteration": 2, "wall_seconds": 2.953909300005762, "cpu_seconds": 6.140625, "user_seconds": 1.5, "kernel_seconds": 4.640625, "peak_rss_bytes": 116170752, "page_faults": 31636, "minor_faults": null, "major_faults": null, "bytes_read": 0, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 342065.00517738616, "exit_code": 0},
+          {"tool": "baseline", "iteration": 2, "wall_seconds": 49.3105504999985, "cpu_seconds": 415.96875, "user_seconds": 14.578125, "kernel_seconds": 401.390625, "peak_rss_bytes": 108433408, "page_faults": 33481, "minor_faults": null, "major_faults": null, "bytes_read": 0, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 20491.132014436356, "exit_code": 0},
+          {"tool": "baseline", "iteration": 3, "wall_seconds": 50.35051370000292, "cpu_seconds": 423.1875, "user_seconds": 12.859375, "kernel_seconds": 410.328125, "peak_rss_bytes": 109084672, "page_faults": 33394, "minor_faults": null, "major_faults": null, "bytes_read": 0, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 20067.898532680538, "exit_code": 0},
+          {"tool": "candidate", "iteration": 3, "wall_seconds": 3.1312111000006553, "cpu_seconds": 6.25, "user_seconds": 1.265625, "kernel_seconds": 4.984375, "peak_rss_bytes": 116486144, "page_faults": 31883, "minor_faults": null, "major_faults": null, "bytes_read": 0, "bytes_read_method": "GetProcessIoCounters: process read transfers, not device bytes", "entries_per_second": 322695.9051083424, "exit_code": 0}
+        ],
+          "syscalls": {
+            "candidate": {
+              "count": null,
+              "reason": "unavailable: strace supported only on Linux",
+              "timed": false,
+              "per_entry": null
+            },
+            "baseline": {
+              "count": null,
+              "reason": "unavailable: strace supported only on Linux",
+              "timed": false,
+              "per_entry": null
+            }
+          }
         }
       ]
     },
     {
       "id": "linux",
+      "group": "linux",
       "title": "Linux",
       "subtitle": "ext4 / WSL2",
-      "machine": "Ubuntu 26.04 · 16 vCPU · uutils 0.8.0",
-      "baseline": "du",
+      "machine": "WSL2 Ubuntu 26.04 · ext4 VHD · host NVMe",
+      "candidate": "io_uring",
+      "baseline": "statx",
+      "condition": {
+        "ja": "100万ファイル / 構成 · 256 B / ファイル · io_uring は任意機能",
+        "en": "1M files / tree · 256 B / file · optional io_uring",
+        "zh-CN": "每种结构 100 万文件 · 每文件 256 B · 可选 io_uring"
+      },
+      "provenance": {
+        "complete": true,
+        "original_record_sha256": "37247ee1ba8bdfeb50afa899216c784aa98d9514bdabb2241a16c569038e8e07",
+        "started_at": "2026-09-10T23:42:19Z",
+        "finished_at": "2026-09-10T23:46:28Z",
+        "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+        "machine": "x86_64",
+        "environment_label": "WSL2 Ubuntu26.04 ext4 /dev/sdf VHD on host C: GIGABYTE GP-ASM2NE6100TTTD NVMe; shared Windows host; optional io_uring versus synchronous statx",
+        "storage_kind": "nvme",
+        "cache": "warm",
+        "cache_evidence": "untimed warm-up before trials",
+        "runs_per_variant": 4,
+        "build": {
+          "head": "99aaaff2ba50fa10f2e5c5a67b8c5d0d12208e89",
+          "tree": "dea5c7729e373c31f39b8b839d666132e435c575",
+          "binary_sha256": "607c3d94e75ee47dc1473565ceac1b9b77ffce3c0c960778fadcadda05d784b7",
+          "build_command": "cargo build --locked -p hyperdu --release --features linux-io-uring",
+          "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6\n",
+          "lock_sha256": "4fdb76dec33728e1aba3879a7a11b68962e23521a70018d1eb26ac986df7db47",
+          "release_profile": {
+            "opt-level": 3,
+            "lto": "thin",
+            "codegen-units": 1,
+            "panic": "abort",
+            "strip": true,
+            "debug": true,
+            "incremental": false
+          },
+          "profile_environment": {},
+          "features": [
+            "linux-io-uring"
+          ],
+          "storage": "WSL2 Ubuntu26.04 ext4 /dev/sdf VHD on host C: GIGABYTE GP-ASM2NE6100TTTD NVMe; shared Windows host; corpus not tmpfs"
+        },
+        "flags": {
+          "candidate": [
+            "--io-uring"
+          ],
+          "baseline": []
+        },
+        "environment": {
+          "candidate": {},
+          "baseline": {}
+        },
+        "accounting": "regular-file logical/allocated bytes, hardlinks once, no-follow, one filesystem",
+        "timing_scope": "scan + rollup + full directory JSON/console report",
+        "corpus": {
+          "entries": 1000000,
+          "depth": 16,
+          "file_size": 256,
+          "shapes": []
+        },
+        "command_template": "hyperdu CORPUS --exclude \"\" --one-file-system --progress-every 0 --top 1 --json OUTPUT [variant flags]",
+        "native_backend_probe": {
+          "complete": true,
+          "head": "99aaaff2ba50fa10f2e5c5a67b8c5d0d12208e89",
+          "binary_sha256": "607c3d94e75ee47dc1473565ceac1b9b77ffce3c0c960778fadcadda05d784b7",
+          "measurement_sha256": "37247ee1ba8bdfeb50afa899216c784aa98d9514bdabb2241a16c569038e8e07",
+          "timed": false,
+          "scope": [
+            "io_uring_setup",
+            "io_uring_enter",
+            "io_uring_register"
+          ],
+          "probe_kind": "native backend execution only",
+          "accounted_files": 128,
+          "directories": 1,
+          "fingerprint": "62010afefa678a4adb3b15fcb6c6aa5c65c0a5efbdccd09bab2ea9d6ee040775",
+          "diagnostic_flags": [
+            "--threads",
+            "1"
+          ],
+          "limitation": "Separate untimed 128-file subtree probe with one worker. Counts cover only three io_uring syscalls and are NOT counts from the 1M-file timings. Full-corpus all-syscall/metadata totals were not collected because tracing overhead exceeded bounded limits.",
+          "variants": {
+            "baseline": {
+              "raw": "",
+              "counts": {},
+              "count": 0,
+              "all_directory_parity": "PASS",
+              "flags": [
+                "--threads",
+                "1"
+              ]
+            },
+            "candidate": {
+              "raw": "% time     seconds  usecs/call     calls    errors syscall\n------ ----------- ----------- --------- --------- ------------------\n 67.21    0.000861         430         2           io_uring_enter\n 30.76    0.000394         394         1           io_uring_setup\n  2.03    0.000026          26         1           io_uring_register\n------ ----------- ----------- --------- --------- ------------------\n100.00    0.001281         320         4           total\n",
+              "counts": {
+                "io_uring_enter": {
+                  "calls": 2,
+                  "errors": 0
+                },
+                "io_uring_setup": {
+                  "calls": 1,
+                  "errors": 0
+                },
+                "io_uring_register": {
+                  "calls": 1,
+                  "errors": 0
+                }
+              },
+              "count": 4,
+              "all_directory_parity": "PASS",
+              "flags": [
+                "--threads",
+                "1",
+                "--io-uring"
+              ]
+            }
+          },
+          "unchanged_corpus_before_after": true,
+          "original_record_sha256": "26d8ba9081902f6ac72d7ddea36dcabc65ee347c5472bfbc8f5cea5a89d5fe78"
+        },
+        "syscall_diagnostic": {
+          "collected_for_timed_corpora": false,
+          "reason": "All-syscall trace exceeded 600 s. A metadata-scoped trace was stopped for excessive overhead; a three-call full-corpus trace also exceeded 120 s.",
+          "timing_protocol": "--syscalls off; separate native execution probe only"
+        }
+      },
       "rows": [
         {
-          "label": "wide",
-          "shape": "500 dirs × 40 files",
-          "files": "20,000",
-          "hyperdu_ms": 47.3,
-          "baseline_ms": 208.6,
-          "ratio": 4.41,
-          "hyperdu_width": 22.7,
-          "baseline_width": 100.0
+          "label": "flat",
+          "shape": "1 dirs",
+          "files": "1,000,000",
+          "hyperdu_ms": 3668.206,
+          "baseline_ms": 2518.379,
+          "ratio": 0.69,
+          "hyperdu_width": 100.0,
+          "baseline_width": 68.65,
+          "accounted_files": 1000000,
+          "entries": 1000000,
+          "entries_definition": "names enumerated in traversed directories, including skipped names; no skipped descendants",
+          "directories": 1,
+          "logical_bytes": 256000000,
+          "allocated_bytes": 4096000000,
+          "fingerprint_sha256": "959baa9972ec8b34bd2734ff2fdfe4901f58eea51a9776197a668492f24c0494",
+          "all_directory_parity": "PASS",
+          "unchanged_corpus_before_after": true,
+          "median_seconds": {
+            "candidate": 3.6682057575089857,
+            "baseline": 2.518378501496045
+          },
+          "baseline_over_candidate": 0.6865423228620173,
+          "samples": [
+          {"tool": "candidate", "iteration": 0, "wall_seconds": 3.660671674006153, "cpu_seconds": 9.376611, "user_seconds": 0.639946, "kernel_seconds": 8.736665, "peak_rss_bytes": 475488256, "page_faults": 1735, "minor_faults": 1735, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 273173.9115258112, "exit_code": 0},
+          {"tool": "baseline", "iteration": 0, "wall_seconds": 2.477437623994774, "cpu_seconds": 3.5970969999999998, "user_seconds": 0.364705, "kernel_seconds": 3.232392, "peak_rss_bytes": 475488256, "page_faults": 1528, "minor_faults": 1528, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 403642.85676243907, "exit_code": 0},
+          {"tool": "baseline", "iteration": 1, "wall_seconds": 2.4134902660007356, "cpu_seconds": 3.462703, "user_seconds": 0.381484, "kernel_seconds": 3.081219, "peak_rss_bytes": 475488256, "page_faults": 1527, "minor_faults": 1527, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 414337.6976021727, "exit_code": 0},
+          {"tool": "candidate", "iteration": 1, "wall_seconds": 3.413969436995103, "cpu_seconds": 8.680366000000001, "user_seconds": 0.457368, "kernel_seconds": 8.222998, "peak_rss_bytes": 475488256, "page_faults": 1794, "minor_faults": 1794, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 292914.1629575269, "exit_code": 0},
+          {"tool": "candidate", "iteration": 2, "wall_seconds": 3.6757398410118185, "cpu_seconds": 9.402138, "user_seconds": 0.621204, "kernel_seconds": 8.780934, "peak_rss_bytes": 475488256, "page_faults": 1816, "minor_faults": 1816, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 272054.074350575, "exit_code": 0},
+          {"tool": "baseline", "iteration": 2, "wall_seconds": 2.6578142959915567, "cpu_seconds": 3.897045, "user_seconds": 0.395982, "kernel_seconds": 3.501063, "peak_rss_bytes": 475488256, "page_faults": 1525, "minor_faults": 1525, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 376249.010891458, "exit_code": 0},
+          {"tool": "baseline", "iteration": 3, "wall_seconds": 2.5593193789973157, "cpu_seconds": 3.737696, "user_seconds": 0.392434, "kernel_seconds": 3.345262, "peak_rss_bytes": 475488256, "page_faults": 1526, "minor_faults": 1526, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 390728.8821420083, "exit_code": 0},
+          {"tool": "candidate", "iteration": 3, "wall_seconds": 3.942959519001306, "cpu_seconds": 10.086373, "user_seconds": 0.720455, "kernel_seconds": 9.365918, "peak_rss_bytes": 475488256, "page_faults": 1725, "minor_faults": 1725, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 253616.60325979846, "exit_code": 0}
+        ],
+          "syscalls": {}
         },
         {
           "label": "deep",
-          "shape": "400 levels × 5 files",
-          "files": "2,000",
-          "hyperdu_ms": 89.1,
-          "baseline_ms": 143.4,
-          "ratio": 1.61,
-          "hyperdu_width": 62.16,
-          "baseline_width": 100.0
+          "shape": "10,430 dirs · depth 16",
+          "files": "1,000,000",
+          "hyperdu_ms": 1593.92,
+          "baseline_ms": 608.292,
+          "ratio": 0.38,
+          "hyperdu_width": 100.0,
+          "baseline_width": 38.16,
+          "accounted_files": 1000000,
+          "entries": 1010429,
+          "entries_definition": "names enumerated in traversed directories, including skipped names; no skipped descendants",
+          "directories": 10430,
+          "logical_bytes": 256000000,
+          "allocated_bytes": 4096000000,
+          "fingerprint_sha256": "bf14b6707ab5a3e141a484cfd10509b8d212c44d792fe6b49326f0c27528b88d",
+          "all_directory_parity": "PASS",
+          "unchanged_corpus_before_after": true,
+          "median_seconds": {
+            "candidate": 1.5939199949934846,
+            "baseline": 0.6082922764981049
+          },
+          "baseline_over_candidate": 0.38163287894546516,
+          "samples": [
+          {"tool": "candidate", "iteration": 0, "wall_seconds": 1.5189840770035516, "cpu_seconds": 11.263568999999999, "user_seconds": 0.5375409999999999, "kernel_seconds": 10.726028, "peak_rss_bytes": 500793344, "page_faults": 14978, "minor_faults": 14978, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 665200.5213861353, "exit_code": 0},
+          {"tool": "baseline", "iteration": 0, "wall_seconds": 0.6128799110010732, "cpu_seconds": 3.837802, "user_seconds": 0.330567, "kernel_seconds": 3.507235, "peak_rss_bytes": 500793344, "page_faults": 8950, "minor_faults": 8950, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 1648657.399048328, "exit_code": 0},
+          {"tool": "baseline", "iteration": 1, "wall_seconds": 0.6357932399987476, "cpu_seconds": 4.069461, "user_seconds": 0.367409, "kernel_seconds": 3.702052, "peak_rss_bytes": 500793344, "page_faults": 8941, "minor_faults": 8941, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 1589241.4961851283, "exit_code": 0},
+          {"tool": "candidate", "iteration": 1, "wall_seconds": 1.84483138199721, "cpu_seconds": 13.476409, "user_seconds": 0.671192, "kernel_seconds": 12.805217, "peak_rss_bytes": 500793344, "page_faults": 14573, "minor_faults": 14573, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 547708.0506436919, "exit_code": 0},
+          {"tool": "candidate", "iteration": 2, "wall_seconds": 1.6008078899903921, "cpu_seconds": 11.193396, "user_seconds": 0.49832099999999996, "kernel_seconds": 10.695075, "peak_rss_bytes": 500793344, "page_faults": 14953, "minor_faults": 14953, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 631199.4126953387, "exit_code": 0},
+          {"tool": "baseline", "iteration": 2, "wall_seconds": 0.5952470349875512, "cpu_seconds": 3.642527, "user_seconds": 0.341738, "kernel_seconds": 3.300789, "peak_rss_bytes": 500793344, "page_faults": 9011, "minor_faults": 9011, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 1697495.2256942058, "exit_code": 0},
+          {"tool": "baseline", "iteration": 3, "wall_seconds": 0.6037046419951366, "cpu_seconds": 3.550457, "user_seconds": 0.32493, "kernel_seconds": 3.225527, "peak_rss_bytes": 500793344, "page_faults": 8798, "minor_faults": 8798, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 1673714.1471377653, "exit_code": 0},
+          {"tool": "candidate", "iteration": 3, "wall_seconds": 1.587032099996577, "cpu_seconds": 11.619627, "user_seconds": 0.5617219999999999, "kernel_seconds": 11.057905, "peak_rss_bytes": 500793344, "page_faults": 14812, "minor_faults": 14812, "major_faults": 0, "bytes_read": 0, "bytes_read_method": "/proc/pid/io read_bytes: storage-layer reads", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 636678.3633438664, "exit_code": 0}
+        ],
+          "syscalls": {}
+        }
+      ]
+    },
+    {
+      "id": "macos-arm",
+      "group": "macos",
+      "title": "macOS / ARM64",
+      "subtitle": "GitHub Actions",
+      "machine": "macos-15 · ARM64 · hosted runner",
+      "candidate": "bulk",
+      "baseline": "lstat",
+      "condition": {
+        "ja": "2.5万ファイル / 構成 · 256 B / ファイル · CI用ビルド",
+        "en": "25K files / tree · 256 B / file · CI build profile",
+        "zh-CN": "每种结构 2.5 万文件 · 每文件 256 B · CI 构建配置"
+      },
+      "provenance": {
+        "complete": true,
+        "original_record_sha256": "c1adc6f7f91ac839e42e528d1201f1464c102a7190cd28de95513a13673f6c4f",
+        "started_at": "2026-09-10T22:32:05Z",
+        "finished_at": "2026-09-10T22:32:10Z",
+        "platform": "macOS-15.7.9-arm64-arm-64bit-Mach-O",
+        "machine": "arm64",
+        "environment_label": "GitHub hosted macOS ARM64",
+        "storage_kind": "unknown",
+        "cache": "warm",
+        "cache_evidence": "untimed warm-up before trials",
+        "runs_per_variant": 4,
+        "build": {
+          "head": "99aaaff2ba50fa10f2e5c5a67b8c5d0d12208e89",
+          "binary_sha256": "35146421adefa8dd7d3d586a32908c9fa837b50ed4bfcc1369567aba9d8b2d2a",
+          "build_command": "cargo build --workspace --release",
+          "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: aarch64-apple-darwin\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+          "lto": "false",
+          "codegen_units": "16"
         },
+        "flags": {
+          "candidate": [],
+          "baseline": []
+        },
+        "environment": {
+          "candidate": {},
+          "baseline": {
+            "HYPERDU_MAC_USE_GALB": "0"
+          }
+        },
+        "accounting": "regular-file logical/allocated bytes, hardlinks once, no-follow, one filesystem",
+        "timing_scope": "scan + rollup + full directory JSON/console report",
+        "corpus": {
+          "entries": 25000,
+          "depth": 16,
+          "file_size": 256,
+          "shapes": [
+            "flat",
+            "deep"
+          ]
+        },
+        "command_template": "hyperdu CORPUS --exclude \"\" --one-file-system --progress-every 0 --top 1 --json OUTPUT [variant flags]"
+      },
+      "rows": [
         {
           "label": "flat",
-          "shape": "1 dir × 20,000 files",
-          "files": "20,000",
-          "hyperdu_ms": 130.5,
-          "baseline_ms": 184.4,
-          "ratio": 1.41,
-          "hyperdu_width": 70.76,
-          "baseline_width": 100.0
+          "shape": "1 dirs",
+          "files": "25,000",
+          "hyperdu_ms": 50.359,
+          "baseline_ms": 74.751,
+          "ratio": 1.48,
+          "hyperdu_width": 67.37,
+          "baseline_width": 100.0,
+          "accounted_files": 25000,
+          "entries": 25000,
+          "entries_definition": "names enumerated in traversed directories, including skipped names; no skipped descendants",
+          "directories": 1,
+          "logical_bytes": 6400000,
+          "allocated_bytes": 102400000,
+          "fingerprint_sha256": "dd6520713f211867a99cdfe38d40198ba83d8ff3978ff54c5ac2d96e795e8fca",
+          "all_directory_parity": "PASS",
+          "unchanged_corpus_before_after": true,
+          "median_seconds": {
+            "candidate": 0.050359250000013844,
+            "baseline": 0.07475141649999273
+          },
+          "baseline_over_candidate": 1.484363180547212,
+          "samples": [
+          {"tool": "candidate", "iteration": 0, "wall_seconds": 0.05234191599998894, "cpu_seconds": 0.03309, "user_seconds": 0.004147, "kernel_seconds": 0.028943, "peak_rss_bytes": 8306688, "page_faults": 835, "minor_faults": 835, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 477628.6752667839, "exit_code": 0},
+          {"tool": "baseline", "iteration": 0, "wall_seconds": 0.07182912500002203, "cpu_seconds": 0.06466, "user_seconds": 0.013035999999999999, "kernel_seconds": 0.051623999999999996, "peak_rss_bytes": 8437760, "page_faults": 844, "minor_faults": 844, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 348048.23252395645, "exit_code": 0},
+          {"tool": "baseline", "iteration": 1, "wall_seconds": 0.07767370799996343, "cpu_seconds": 0.064261, "user_seconds": 0.012979, "kernel_seconds": 0.051281999999999994, "peak_rss_bytes": 8601600, "page_faults": 854, "minor_faults": 854, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 321859.23195544846, "exit_code": 0},
+          {"tool": "candidate", "iteration": 1, "wall_seconds": 0.0512573749999774, "cpu_seconds": 0.034312999999999996, "user_seconds": 0.004247, "kernel_seconds": 0.030066, "peak_rss_bytes": 8552448, "page_faults": 835, "minor_faults": 835, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 487734.6918372434, "exit_code": 0},
+          {"tool": "candidate", "iteration": 2, "wall_seconds": 0.04946112500005029, "cpu_seconds": 0.033021, "user_seconds": 0.0041789999999999996, "kernel_seconds": 0.028842, "peak_rss_bytes": 8388608, "page_faults": 841, "minor_faults": 841, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 505447.45999963774, "exit_code": 0},
+          {"tool": "baseline", "iteration": 2, "wall_seconds": 0.08363129100001743, "cpu_seconds": 0.06178499999999999, "user_seconds": 0.012532999999999999, "kernel_seconds": 0.049252, "peak_rss_bytes": 8667136, "page_faults": 857, "minor_faults": 857, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 298931.17397882557, "exit_code": 0},
+          {"tool": "baseline", "iteration": 3, "wall_seconds": 0.06853845800003455, "cpu_seconds": 0.064481, "user_seconds": 0.012922, "kernel_seconds": 0.051559, "peak_rss_bytes": 8503296, "page_faults": 850, "minor_faults": 850, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 364758.7169233862, "exit_code": 0},
+          {"tool": "candidate", "iteration": 3, "wall_seconds": 0.04082758299995248, "cpu_seconds": 0.037942000000000004, "user_seconds": 0.004262999999999999, "kernel_seconds": 0.033679, "peak_rss_bytes": 8486912, "page_faults": 848, "minor_faults": 848, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 612331.1291787489, "exit_code": 0}
+        ],
+          "syscalls": {}
         },
         {
-          "label": "registry",
-          "shape": "Cargo registry",
-          "files": "37,814",
-          "hyperdu_ms": 144.6,
-          "baseline_ms": 978.9,
-          "ratio": 6.77,
-          "hyperdu_width": 14.77,
-          "baseline_width": 100.0
+          "label": "deep",
+          "shape": "275 dirs · depth 16",
+          "files": "25,000",
+          "hyperdu_ms": 44.606,
+          "baseline_ms": 61.102,
+          "ratio": 1.37,
+          "hyperdu_width": 73.0,
+          "baseline_width": 100.0,
+          "accounted_files": 25000,
+          "entries": 25274,
+          "entries_definition": "names enumerated in traversed directories, including skipped names; no skipped descendants",
+          "directories": 275,
+          "logical_bytes": 6400000,
+          "allocated_bytes": 102400000,
+          "fingerprint_sha256": "a122748d9bee28a6d69b91c1d04dd398824c45c6d92f1ede71334e59ee138350",
+          "all_directory_parity": "PASS",
+          "unchanged_corpus_before_after": true,
+          "median_seconds": {
+            "candidate": 0.04460556250000991,
+            "baseline": 0.061102104000013924
+          },
+          "baseline_over_candidate": 1.3698314868241006,
+          "samples": [
+          {"tool": "candidate", "iteration": 0, "wall_seconds": 0.04125291700000844, "cpu_seconds": 0.047947, "user_seconds": 0.007847999999999999, "kernel_seconds": 0.040098999999999996, "peak_rss_bytes": 12320768, "page_faults": 1086, "minor_faults": 1086, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 612659.7059789695, "exit_code": 0},
+          {"tool": "baseline", "iteration": 0, "wall_seconds": 0.057471999999961554, "cpu_seconds": 0.09418099999999999, "user_seconds": 0.017161, "kernel_seconds": 0.07701999999999999, "peak_rss_bytes": 12189696, "page_faults": 1078, "minor_faults": 1078, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 439761.97104706476, "exit_code": 0},
+          {"tool": "baseline", "iteration": 1, "wall_seconds": 0.060870458000010785, "cpu_seconds": 0.09378899999999998, "user_seconds": 0.017462, "kernel_seconds": 0.07632699999999999, "peak_rss_bytes": 12189696, "page_faults": 1079, "minor_faults": 1079, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 415209.62434676476, "exit_code": 0},
+          {"tool": "candidate", "iteration": 1, "wall_seconds": 0.04795820800001138, "cpu_seconds": 0.048889, "user_seconds": 0.007947, "kernel_seconds": 0.040942, "peak_rss_bytes": 12713984, "page_faults": 1111, "minor_faults": 1111, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 527000.508442559, "exit_code": 0},
+          {"tool": "candidate", "iteration": 2, "wall_seconds": 0.03700770799997599, "cpu_seconds": 0.04814499999999999, "user_seconds": 0.007871999999999999, "kernel_seconds": 0.040272999999999996, "peak_rss_bytes": 12713984, "page_faults": 1110, "minor_faults": 1110, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 682938.808315727, "exit_code": 0},
+          {"tool": "baseline", "iteration": 2, "wall_seconds": 0.06133375000001706, "cpu_seconds": 0.094552, "user_seconds": 0.017062, "kernel_seconds": 0.07749, "peak_rss_bytes": 12304384, "page_faults": 1086, "minor_faults": 1086, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 412073.2875454863, "exit_code": 0},
+          {"tool": "baseline", "iteration": 3, "wall_seconds": 0.08295508300000165, "cpu_seconds": 0.100776, "user_seconds": 0.017778, "kernel_seconds": 0.082998, "peak_rss_bytes": 12140544, "page_faults": 1076, "minor_faults": 1076, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 304670.90244487487, "exit_code": 0},
+          {"tool": "candidate", "iteration": 3, "wall_seconds": 0.050418917000001784, "cpu_seconds": 0.048041, "user_seconds": 0.0074659999999999995, "kernel_seconds": 0.040575, "peak_rss_bytes": 13025280, "page_faults": 1128, "minor_faults": 1128, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 501280.1048463438, "exit_code": 0}
+        ],
+          "syscalls": {}
+        }
+      ]
+    },
+    {
+      "id": "macos-intel",
+      "group": "macos",
+      "title": "macOS / Intel",
+      "subtitle": "GitHub Actions",
+      "machine": "macos-15-intel · x86_64 · hosted runner",
+      "candidate": "bulk",
+      "baseline": "lstat",
+      "condition": {
+        "ja": "2.5万ファイル / 構成 · 256 B / ファイル · CI用ビルド",
+        "en": "25K files / tree · 256 B / file · CI build profile",
+        "zh-CN": "每种结构 2.5 万文件 · 每文件 256 B · CI 构建配置"
+      },
+      "provenance": {
+        "complete": true,
+        "original_record_sha256": "6133fd29e5a204369ce5bfcb305a017d06888a6c3aca8f214c8ff8baed4efa2e",
+        "started_at": "2026-09-10T22:35:10Z",
+        "finished_at": "2026-09-10T22:35:30Z",
+        "platform": "macOS-15.7.9-x86_64-i386-64bit-Mach-O",
+        "machine": "x86_64",
+        "environment_label": "GitHub hosted macOS X64",
+        "storage_kind": "unknown",
+        "cache": "warm",
+        "cache_evidence": "untimed warm-up before trials",
+        "runs_per_variant": 4,
+        "build": {
+          "head": "99aaaff2ba50fa10f2e5c5a67b8c5d0d12208e89",
+          "binary_sha256": "d95cbf84a689ccfb79b363236356f5d4305ab9d24d9a722009c391c4c9f935d8",
+          "build_command": "cargo build --workspace --release",
+          "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-apple-darwin\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+          "lto": "false",
+          "codegen_units": "16"
+        },
+        "flags": {
+          "candidate": [],
+          "baseline": []
+        },
+        "environment": {
+          "candidate": {},
+          "baseline": {
+            "HYPERDU_MAC_USE_GALB": "0"
+          }
+        },
+        "accounting": "regular-file logical/allocated bytes, hardlinks once, no-follow, one filesystem",
+        "timing_scope": "scan + rollup + full directory JSON/console report",
+        "corpus": {
+          "entries": 25000,
+          "depth": 16,
+          "file_size": 256,
+          "shapes": [
+            "flat",
+            "deep"
+          ]
+        },
+        "command_template": "hyperdu CORPUS --exclude \"\" --one-file-system --progress-every 0 --top 1 --json OUTPUT [variant flags]"
+      },
+      "rows": [
+        {
+          "label": "flat",
+          "shape": "1 dirs",
+          "files": "25,000",
+          "hyperdu_ms": 80.44,
+          "baseline_ms": 179.372,
+          "ratio": 2.23,
+          "hyperdu_width": 44.85,
+          "baseline_width": 100.0,
+          "accounted_files": 25000,
+          "entries": 25000,
+          "entries_definition": "names enumerated in traversed directories, including skipped names; no skipped descendants",
+          "directories": 1,
+          "logical_bytes": 6400000,
+          "allocated_bytes": 102400000,
+          "fingerprint_sha256": "6bce30dc0f74e2456e6e29eaa906236db1e2b60ccbe54d1cc088e989df6df193",
+          "all_directory_parity": "PASS",
+          "unchanged_corpus_before_after": true,
+          "median_seconds": {
+            "candidate": 0.08044009450003387,
+            "baseline": 0.17937184400000206
+          },
+          "baseline_over_candidate": 2.229881070066701,
+          "samples": [
+          {"tool": "candidate", "iteration": 0, "wall_seconds": 0.07936874700010321, "cpu_seconds": 0.073279, "user_seconds": 0.010610999999999999, "kernel_seconds": 0.062668, "peak_rss_bytes": 5844992, "page_faults": 1980, "minor_faults": 1980, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 314985.44382926304, "exit_code": 0},
+          {"tool": "baseline", "iteration": 0, "wall_seconds": 0.18356845099992825, "cpu_seconds": 0.20398699999999997, "user_seconds": 0.040483, "kernel_seconds": 0.16350399999999998, "peak_rss_bytes": 5869568, "page_faults": 1981, "minor_faults": 1981, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 136188.97944511048, "exit_code": 0},
+          {"tool": "baseline", "iteration": 1, "wall_seconds": 0.16922893899993596, "cpu_seconds": 0.192246, "user_seconds": 0.039821999999999996, "kernel_seconds": 0.152424, "peak_rss_bytes": 5885952, "page_faults": 1982, "minor_faults": 1982, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 147728.87041506218, "exit_code": 0},
+          {"tool": "candidate", "iteration": 1, "wall_seconds": 0.06514978699999574, "cpu_seconds": 0.05895, "user_seconds": 0.009724, "kernel_seconds": 0.049226, "peak_rss_bytes": 5865472, "page_faults": 1983, "minor_faults": 1983, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 383731.1087448626, "exit_code": 0},
+          {"tool": "candidate", "iteration": 2, "wall_seconds": 0.08151144199996452, "cpu_seconds": 0.076073, "user_seconds": 0.011573, "kernel_seconds": 0.0645, "peak_rss_bytes": 5812224, "page_faults": 1966, "minor_faults": 1966, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 306705.4070766026, "exit_code": 0},
+          {"tool": "baseline", "iteration": 2, "wall_seconds": 0.17983722799999668, "cpu_seconds": 0.182837, "user_seconds": 0.038807, "kernel_seconds": 0.14403, "peak_rss_bytes": 5861376, "page_faults": 1972, "minor_faults": 1972, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 139014.59824547818, "exit_code": 0},
+          {"tool": "baseline", "iteration": 3, "wall_seconds": 0.17890646000000743, "cpu_seconds": 0.205274, "user_seconds": 0.041166, "kernel_seconds": 0.164108, "peak_rss_bytes": 5877760, "page_faults": 1963, "minor_faults": 1963, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 139737.82724223018, "exit_code": 0},
+          {"tool": "candidate", "iteration": 3, "wall_seconds": 0.08242093900003056, "cpu_seconds": 0.082254, "user_seconds": 0.011432999999999999, "kernel_seconds": 0.070821, "peak_rss_bytes": 5832704, "page_faults": 1956, "minor_faults": 1956, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 303320.98012121324, "exit_code": 0}
+        ],
+          "syscalls": {}
+        },
+        {
+          "label": "deep",
+          "shape": "275 dirs · depth 16",
+          "files": "25,000",
+          "hyperdu_ms": 116.29,
+          "baseline_ms": 133.742,
+          "ratio": 1.15,
+          "hyperdu_width": 86.95,
+          "baseline_width": 100.0,
+          "accounted_files": 25000,
+          "entries": 25274,
+          "entries_definition": "names enumerated in traversed directories, including skipped names; no skipped descendants",
+          "directories": 275,
+          "logical_bytes": 6400000,
+          "allocated_bytes": 102400000,
+          "fingerprint_sha256": "122227a0b030ee4386e5aca7c09657332aff1dac6a7a9abc03f0194036c34431",
+          "all_directory_parity": "PASS",
+          "unchanged_corpus_before_after": true,
+          "median_seconds": {
+            "candidate": 0.11628956650008604,
+            "baseline": 0.13374203900002612
+          },
+          "baseline_over_candidate": 1.15007771569883,
+          "samples": [
+          {"tool": "candidate", "iteration": 0, "wall_seconds": 0.10015061199999309, "cpu_seconds": 0.11665199999999999, "user_seconds": 0.01995, "kernel_seconds": 0.096702, "peak_rss_bytes": 8466432, "page_faults": 2655, "minor_faults": 2655, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 252359.91568380775, "exit_code": 0},
+          {"tool": "baseline", "iteration": 0, "wall_seconds": 0.14730746400005046, "cpu_seconds": 0.231123, "user_seconds": 0.047369999999999995, "kernel_seconds": 0.183753, "peak_rss_bytes": 7618560, "page_faults": 2478, "minor_faults": 2478, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 171573.11186886867, "exit_code": 0},
+          {"tool": "baseline", "iteration": 1, "wall_seconds": 0.11272207499996512, "cpu_seconds": 0.21350999999999998, "user_seconds": 0.044694, "kernel_seconds": 0.168816, "peak_rss_bytes": 7696384, "page_faults": 2445, "minor_faults": 2445, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 224215.17701841294, "exit_code": 0},
+          {"tool": "candidate", "iteration": 1, "wall_seconds": 0.11736999800007197, "cpu_seconds": 0.123719, "user_seconds": 0.021311999999999998, "kernel_seconds": 0.102407, "peak_rss_bytes": 8151040, "page_faults": 2635, "minor_faults": 2635, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 215336.12022370915, "exit_code": 0},
+          {"tool": "candidate", "iteration": 2, "wall_seconds": 0.1152091350001001, "cpu_seconds": 0.142531, "user_seconds": 0.021356, "kernel_seconds": 0.12117499999999999, "peak_rss_bytes": 8093696, "page_faults": 2524, "minor_faults": 2524, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 219374.96536171407, "exit_code": 0},
+          {"tool": "baseline", "iteration": 2, "wall_seconds": 0.12017661400000179, "cpu_seconds": 0.218271, "user_seconds": 0.043698999999999995, "kernel_seconds": 0.174572, "peak_rss_bytes": 7864320, "page_faults": 2475, "minor_faults": 2475, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 210307.14012294958, "exit_code": 0},
+          {"tool": "baseline", "iteration": 3, "wall_seconds": 0.1565019360000406, "cpu_seconds": 0.22105299999999997, "user_seconds": 0.046116, "kernel_seconds": 0.17493699999999998, "peak_rss_bytes": 7614464, "page_faults": 2416, "minor_faults": 2416, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 161493.20989865228, "exit_code": 0},
+          {"tool": "candidate", "iteration": 3, "wall_seconds": 0.12096221600006629, "cpu_seconds": 0.11652599999999999, "user_seconds": 0.020197, "kernel_seconds": 0.096329, "peak_rss_bytes": 7565312, "page_faults": 2451, "minor_faults": 2451, "major_faults": 0, "bytes_read": null, "bytes_read_method": "unavailable: this OS does not expose final process storage bytes", "input_blocks": 0, "output_blocks": 0, "entries_per_second": 208941.27799366828, "exit_code": 0}
+        ],
+          "syscalls": {}
         }
       ]
     }
