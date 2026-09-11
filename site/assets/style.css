@@ -815,6 +815,10 @@ td {
   padding:56px;
 }
 
+.agent-copy,.agent-tools {
+  min-width:0;
+}
+
 .agent-section h2 {
   font-size:clamp(27px,3vw,40px);
   margin-bottom:22px;

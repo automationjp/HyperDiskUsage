@@ -27,6 +27,6 @@
   <nav class="lang-switch" aria-label="Language">{% for lang in site.languages %}<a href="{{ lang.path | relative_url }}" lang="{{ lang.code }}" hreflang="{{ lang.code }}"{% if lang.code == page.lang %} aria-current="page"{% endif %}>{{ lang.label }}</a>{% endfor %}</nav>
 </header>
 <main id="main">{{ content }}</main>
-<footer class="site-foot wrap"><div><a class="brand" href="#top">HyperDU<span aria-hidden="true">↗</span></a><p>{{ t.footer }}</p></div><p><a href="https://github.com/{{ site.repository }}">GitHub</a> / <a href="https://crates.io/crates/hyperdu">crates.io</a> / <a href="https://github.com/{{ site.repository }}/blob/main/LICENSE">MIT License</a></p><a class="top-link" href="#top">↑ <span>{{ t.back_top }}</span></a></footer>
+<footer class="site-foot wrap"><div><a class="brand" href="#top">HyperDU<span aria-hidden="true">↗</span></a><p>{{ t.footer }}</p></div><p><a href="https://github.com/{{ site.repository }}">GitHub</a> / <a href="{{ site.published_cli_url }}">crates.io</a> / <a href="https://github.com/{{ site.repository }}/blob/main/LICENSE">MIT License</a></p><a class="top-link" href="#top">↑ <span>{{ t.back_top }}</span></a></footer>
 </body>
 </html>
