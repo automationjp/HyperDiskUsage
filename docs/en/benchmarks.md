@@ -1,24 +1,41 @@
 # HyperDU compared with du
 
-A fresh AWS EC2 benchmark is being prepared. Only results with directly matching GNU du directory totals will be published: allocated bytes, no symlink following, hardlink deduplication, one filesystem and all directory rows. The previous WSL2 timings required an accounting adjustment and have been withdrawn as evidence of comparative speed.
+Successful measurements match an independent oracle, and completed comparisons also match GNU `du` directly. No external byte adjustment is applied, and WSL2 timings are not current speed evidence. The measured source was `2645689515ab2e608a78b7492637e55179e4739a`; detailed hashes, all raw samples and corpus fingerprints are in the [published measurement result JSON](https://automationjp.github.io/HyperDiskUsage/benchmarks.json).
 
-## Acceptance protocol
+## Linux results (GitHub Actions)
 
-Build the latest source snapshot in release mode on AWS EC2 Linux x86_64. Record source/binary hashes, GNU du version, acquisition time, instance/CPU/RAM/EBS/filesystem/kernel. Both tools use the same immutable data, privileges, accounting and output granularity. No Python byte adjustment is permitted.
+The GitHub-hosted runner used Ubuntu 24.04/ext4 with 1,000,000 regular 256 B files in flat, wide and deep shapes. Each tool ran eight alternating warm trials, for 48 raw samples total. Timings include process startup and directory output; allocated-byte values matched for every directory row.
+
+Linux medians (HyperDU / GNU `du`; GNU `du` / HyperDU speed ratio) are Flat 2327.49 / 2763.52 ms (1.187x), Wide 745.96 / 2428.80 ms (3.256x), and Deep 764.67 / 2434.28 ms (3.183x).
+
+The conservative headline is 3.25x (wide, Linux only). The [GitHub Actions Linux run](https://github.com/automationjp/HyperDiskUsage/actions/runs/34550503086) contains the matching source, build, corpus and parity evidence.
+
+### Linux command
 
 ```bash
 hyperdu --compat gnu-strict --block-size 1 --one-file-system ROOT
 du -x --block-size=1 ROOT
 ```
 
-Every directory row and byte total must match directly before and during timing. Errors, mismatches or dataset changes invalidate the measurement. Select performance settings in a separate pilot and freeze them before eight alternating warm trials per tool. Include startup/output costs, all samples, medians and unfavorable results. Approximate or logical-only sizes cannot substitute for allocated bytes.
+Both tools emit every directory row. Row order is normalized only for comparison; totals and byte values are not adjusted.
 
-Linux uses the same enumeration engine for a mounted filesystem root and a directory; there is no Linux MFT fast path. A dedicated EBS mount root and representative directory are possible scopes. A changing operating-system root is excluded. Final commands will disclose all selected performance flags.
+## Windows supplemental results (local)
 
-## Status
+The local machine was Windows 11 on NTFS/NVMe with a Ryzen 9 3900X (12 cores / 24 threads, 128 GiB). GNU `du` was GNU coreutils 8.32 from Git for Windows MSYS. Both tools used `--apparent-size` for logical-byte accounting, with warm timings.
 
-Local Linux regression tests reproduced the discrepancy and verified direct GNU du parity after the fix; these are correctness tests, not AWS performance measurements. AWS target and valid credentials are still pending, so there are no current AWS speed figures yet.
+For 1M flat, HyperDU ran standalone for eight trials with a 589.91 ms median. GNU `du` timed out after 600 seconds during warmup, so there is no accepted 1M comparison or 1M ratio. The wide and deep 1M workloads were not run.
 
-[Reproducible benchmark runner](../../scripts/bench/du_same_conditions.py)
+A separate 10K diagnostic used three shapes and two alternating trials per tool, retaining 12 measured samples plus 6 warmups. All directory rows matched, but these ratios apply only to this small diagnostic and are not a general 1M headline.
 
-[AWS runbook and provenance records](../benchmarks/aws-protocol.md)
+The 10K diagnostic medians (HyperDU / GNU `du`; GNU `du` / HyperDU speed ratio) are Flat 32.98 / 704.17 ms (21.35x), Wide 27.46 / 712.33 ms (25.94x), and Deep 32.32 / 836.73 ms (25.89x).
+
+### Windows command
+
+```powershell
+hyperdu --compat gnu-strict --apparent-size --block-size 1 --one-file-system --io-profile balanced ROOT
+du -x --apparent-size --block-size=1 ROOT
+```
+
+The AWS runbook is retained as an unexecuted plan; it contributes no current result or speed figure. See the [AWS runbook (unexecuted plan)](../benchmarks/aws-protocol.md).
+
+[Reproducible Linux benchmark runner](../../scripts/bench/du_same_conditions.py)

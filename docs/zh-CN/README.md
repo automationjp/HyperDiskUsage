@@ -23,7 +23,7 @@ Linux 需要原生构建工具，Linux GUI 还需要 X11/Wayland 开发库。
 
 ## 如何阅读性能结果
 
-原生枚举与并行处理见[性能设计](performance.md)。正在准备AWS EC2测量，要求与GNU du统计条件及目录总量直接一致。旧WSL2倍率不作为当前速度依据。见[比较条件与状态](benchmarks.md)。
+原生枚举与并行处理见[性能设计](performance.md)。当前Linux结果来自GitHub Actions Ubuntu 24.04/ext4：每种结构100万个256 B普通文件，三种结构各工具交替warm运行8次，共48个raw sample，所有目录行的物理分配字节直接一致。GNU du / HyperDU中位数倍率为平铺1.187x、宽目录3.256x、深目录3.183x；保守的3.25x标题值仅适用于Linux。Windows 11补充结果和未执行的AWS runbook见[比较结果与方法](benchmarks.md)。旧WSL2倍率不作为当前速度依据。
 
 ## 现行文档与历史记录
 

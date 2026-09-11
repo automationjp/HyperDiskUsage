@@ -52,7 +52,29 @@ HyperDU の主題は **高速なディスク使用量解析**です。
 
 ### HyperDU と du の比較
 
-最新版のAWS EC2ベンチマークを準備中です。GNU `du` と同じ条件（物理割当量・リンク非追跡・ハードリンク重複排除・同一filesystem・全ディレクトリ出力）で、各ディレクトリの表示バイト数が直接一致した結果だけを掲載します。以前のWSL2測定は補正を要する異なる集計条件だったため、速度の根拠から外しました。 [Details](docs/benchmarks.md)
+Linux と Windows の実測結果を、各環境の条件とともに掲載します。成功したディレクトリ行はすべて独立した oracle と一致しました。速度比は GNU `du` の時間 ÷ HyperDU の時間です。測定ソースは `2645689515ab2e608a78b7492637e55179e4739a`。 [GitHub Actions の実行](https://github.com/automationjp/HyperDiskUsage/actions/runs/34550503086) · [benchmarks.json](https://automationjp.github.io/HyperDiskUsage/benchmarks.json) · [サイトの性能結果](https://automationjp.github.io/HyperDiskUsage/#performance) · [Details](docs/benchmarks.md)
+
+#### Linux — 構成ごとに100万ファイル
+
+GitHub-hosted Ubuntu 24.04 / ext4、AMD EPYC 9V74（4 vCPU・15.6 GiB RAM）で、各構成に256 Bの通常ファイルを1,000,000個作成しました。warm cache、ディスク上の割当バイト、各ツール8回の交互実行の中央値です。Linux の見出しは **最大3.25倍高速**（wideの実測値は3.256倍）であり、Linuxに限る表現です。
+
+| 構成 | HyperDU | GNU `du` | du / HyperDU |
+|---|---:|---:|---:|
+| flat | 2327.49 ms | 2763.52 ms | 1.187倍 |
+| wide | 745.96 ms | 2428.80 ms | 3.256倍 |
+| deep | 764.67 ms | 2434.28 ms | 3.183倍 |
+
+#### Windows — 100万ファイルと1万ファイル診断
+
+Windows 11 / NTFS / NVMe、AMD Ryzen 9 3900X（12 cores / 24 threads・128 GiB RAM）、warm cache、apparent-size の論理バイトで測定しました。100万ファイルの flat は HyperDU 単独を8回測定した中央値が589.91 msです。GNU `du` 8.32（Git for Windows / MSYS）はwarmupで600秒に達して測定前にタイムアウトしました。受理済みの100万ファイルGNU `du`基準値・速度比はなく、wide/deepの100万ファイルは未実行です。
+
+1万ファイルの比較診断は各ツール2回の中央値です。以下の倍率はこの小規模診断に限り、100万ファイル全体の速度主張には使えません。
+
+| 構成 | HyperDU | GNU `du` 8.32 (MSYS) | du / HyperDU |
+|---|---:|---:|---:|
+| flat | 32.98 ms | 704.17 ms | 21.35倍 |
+| wide | 27.46 ms | 712.33 ms | 25.94倍 |
+| deep | 32.32 ms | 836.73 ms | 25.89倍 |
 
 ### Why it is fast
 
@@ -255,7 +277,7 @@ performance path を変更する PR では、通常の test に加えて [Benchm
 ## Known limitations
 
 - ベータ版です。CLI option、MCP tool schema、output format は変更される可能性があります。
-- 公開用 benchmark は再計測中です。性能値を更新する前に benchmark gate を通します。
+- 公開用 benchmark は上記のLinux実測値とWindows実測値を掲載しています。OS、集計方法、ファイル数、試行回数が異なるため、Linuxの見出しやWindowsの診断倍率を未測定条件へ広げません。
 - macOS の性能・互換性検証は完了していません。
 - network filesystem や HDD では I/O latency が支配的になり、並列化による差が小さくなる場合があります。
 - symbolic link は既定では追跡しません。`--follow-links` 利用時は cycle に注意してください。

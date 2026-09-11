@@ -54,7 +54,29 @@ HyperDU 的核心目标是 **高速磁盘使用量分析**。
 
 ### HyperDU 与 du 比较
 
-正在准备最新版AWS EC2测量。只发布与GNU du直接一致的目录字节总量：物理分配量、不追踪符号链接、硬链接去重、单一filesystem、输出全部目录行。旧WSL2测量需要外部统计补正，已撤回，不再作为速度比较依据。 [Details](docs/zh-CN/benchmarks.md)
+这里按环境列出已完成的 Linux 与 Windows 实测结果及其条件。所有成功的目录行都与独立 oracle 一致。速度比为 GNU `du` 用时除以 HyperDU 用时。测量源码快照：`2645689515ab2e608a78b7492637e55179e4739a`。 [GitHub Actions 运行记录](https://github.com/automationjp/HyperDiskUsage/actions/runs/34550503086) · [benchmarks.json](https://automationjp.github.io/HyperDiskUsage/benchmarks.json) · [网站性能结果](https://automationjp.github.io/HyperDiskUsage/zh-CN/#performance) · [Details](docs/zh-CN/benchmarks.md)
+
+#### Linux — 每种结构100万文件
+
+测试运行于 GitHub-hosted Ubuntu 24.04 / ext4，机器为 AMD EPYC 9V74（4 vCPU、15.6 GiB RAM）；每种结构包含1,000,000个256 B普通文件。结果为热缓存、磁盘分配大小、每个工具交替运行8次的中位数。Linux 的标题结果是 **最高3.25倍更快**（宽目录结构为3.256倍），只适用于 Linux。
+
+| 结构 | HyperDU | GNU `du` | du / HyperDU |
+|---|---:|---:|---:|
+| flat | 2327.49 ms | 2763.52 ms | 1.187倍 |
+| wide | 745.96 ms | 2428.80 ms | 3.256倍 |
+| deep | 764.67 ms | 2434.28 ms | 3.183倍 |
+
+#### Windows — 100万文件结果与1万文件诊断
+
+测试运行于 Windows 11 / NTFS / NVMe，机器为 AMD Ryzen 9 3900X（12核心 / 24线程、128 GiB RAM）；使用热缓存和 apparent-size 逻辑字节。100万文件平铺结构中，HyperDU 单独运行8次的中位数为589.91 ms。GNU `du` 8.32（Git for Windows / MSYS）在预热阶段达到600秒限制，尚未开始正式运行就超时。没有可接受的100万文件 GNU `du` 基准值或速度比；横向和深层的100万文件工作负载未运行。
+
+1万文件比较诊断使用每个工具运行2次的中位数。下面的倍率仅适用于这一小规模诊断，不能作为一般性的100万文件速度声明。
+
+| 结构 | HyperDU | GNU `du` 8.32 (MSYS) | du / HyperDU |
+|---|---:|---:|---:|
+| flat | 32.98 ms | 704.17 ms | 21.35倍 |
+| wide | 27.46 ms | 712.33 ms | 25.94倍 |
+| deep | 32.32 ms | 836.73 ms | 25.89倍 |
 
 ### Why it is fast
 
@@ -259,7 +281,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 ## 已知限制
 
 - 当前为 beta 版本。CLI 选项、MCP 工具 schema 和输出格式可能变化。
-- 公开 benchmark 正在重新测量。更新性能数据前必须通过 benchmark gate。
+- 公开 benchmark 已包含上面的 Linux 与 Windows 实测结果。系统、统计方式、文件数量和运行次数不同，因此 Linux 标题结果和 Windows 诊断倍率不能推广到未测条件。
 - macOS 的性能与兼容性验证尚未完成。
 - 在网络文件系统或 HDD 上，I/O 延迟可能占主导地位，从而减小并行化带来的收益。
 - 默认不跟踪 symbolic link。使用 `--follow-links` 时请注意 cycle。
