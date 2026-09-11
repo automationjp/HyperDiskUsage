@@ -5,7 +5,13 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      product_benchmark:
+        description: 'Run HyperDU versus GNU du on hosted Linux (three million-file trees)'
+        required: false
+        type: boolean
+        default: false
   # Only main is watched on push. A branch with an open PR ran the whole matrix
   # twice per commit -- once for the push, once for the pull_request -- for two
   # identical results.
@@ -37,6 +43,7 @@ env:
 
 jobs:
   test-linux:
+    if: github.event_name != 'workflow_dispatch' || !inputs.product_benchmark
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -99,6 +106,7 @@ jobs:
   # Native enumeration and MFT I/O need Windows. A fresh, owned NTFS VHDX is
   # populated and remounted read-only; parity must use MFT, never its fallback.
   test-windows:
+    if: github.event_name != 'workflow_dispatch' || !inputs.product_benchmark
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -146,6 +154,7 @@ jobs:
   # Exercise both native architectures: cross-checking cannot validate the
   # Darwin packed-attribute ABI, hardlink identity or allocation accounting.
   test-macos:
+    if: github.event_name != 'workflow_dispatch' || !inputs.product_benchmark
     strategy:
       fail-fast: false
       matrix:
@@ -220,3 +229,168 @@ jobs:
         run: sccache --show-stats
 
   # Note: artifact packaging is handled in release.yml on tags. CI only builds and tests.
+
+  # Product comparison runs alone on the public hosted runner; ordinary CI is unchanged.
+  benchmark-du:
+    if: github.event_name == 'workflow_dispatch' && inputs.product_benchmark
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      # Restore the shipped release profile instead of the faster CI-only profile.
+      CARGO_PROFILE_RELEASE_LTO: "thin"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
+      CARGO_PROFILE_RELEASE_DEBUG: "true"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: mozilla-actions/sccache-action@fd02668681acd5f960e1372061bee5e3e987195c # v0.0.11
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          cache-targets: "false"
+      - name: Validate comparison contract and GNU du accounting
+        run: |
+          python3 -m unittest discover -s scripts/bench -p "test_*.py"
+          cargo test --locked -p hyperdu --test du_parity_linux
+      - name: Build the portable production release
+        run: cargo build --locked --release -p hyperdu
+      - name: Compare HyperDU with GNU du on three million-file trees
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import platform
+          import shutil
+          import subprocess
+          import sys
+          import time
+
+          sys.path.insert(0, "scripts/bench")
+          from remeasure import make_tree
+
+          workspace = Path.cwd().resolve()
+          task_root = Path(os.environ["RUNNER_TEMP"]) / "hyperdu-product-benchmark"
+          task_root.mkdir(exist_ok=False)
+          records = task_root / "records"
+          records.mkdir()
+          binaries = task_root / "bin"
+          binaries.mkdir()
+          corpora = task_root / "corpora"
+          corpora.mkdir()
+
+          def command(*args):
+              return subprocess.check_output(args, text=True).strip()
+
+          def sha(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def save(name, value):
+              path = records / name
+              with path.open("x", encoding="utf-8") as stream:
+                  json.dump(value, stream, indent=2)
+                  stream.write("\n")
+              return path
+
+          head = command("git", "rev-parse", "HEAD")
+          if head != os.environ["GITHUB_SHA"] or command("git", "status", "--porcelain"):
+              raise RuntimeError("Benchmark requires the exact clean workflow commit")
+          tracked = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
+          snapshot = save("source-snapshot.json", {
+              "head": head,
+              "tree": command("git", "rev-parse", "HEAD^{tree}"),
+              "cargo_lock_sha256": sha(workspace / "Cargo.lock"),
+              "files": {name: sha(workspace / name) for name in tracked if name},
+          })
+          binary = binaries / "hyperdu"
+          shutil.copy2(workspace / "target/release/hyperdu", binary)
+          build = save("build.json", {
+              "head": head,
+              "binary_sha256": sha(binary),
+              "source_snapshot_sha256": sha(snapshot),
+              "build_command": "cargo build --locked --release -p hyperdu",
+              "rustc_version": command("rustc", "-Vv"),
+              "profile": {"opt_level": 3, "lto": "thin", "codegen_units": 1,
+                          "debug": True, "strip": True, "panic": "abort", "incremental": False},
+              "features": "default",
+              "rustflags": os.environ.get("RUSTFLAGS", ""),
+              "cargo_encoded_rustflags": os.environ.get("CARGO_ENCODED_RUSTFLAGS", ""),
+          })
+          if os.environ.get("RUSTFLAGS") or os.environ.get("CARGO_ENCODED_RUSTFLAGS"):
+              raise RuntimeError("Portable benchmark must not inherit custom compiler flags")
+          du = Path("/usr/bin/du")
+          du_record = save("du.json", {
+              "binary_sha256": sha(du),
+              "version": command(str(du), "--version").splitlines()[0],
+              "package": command("dpkg-query", "-W", "coreutils"),
+          })
+          environment = {
+              "provider": "GitHub Actions", "head": head,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "job": os.environ["GITHUB_JOB"],
+              "run_url": ("https://github.com/" + os.environ["GITHUB_REPOSITORY"]
+                          + "/actions/runs/" + os.environ["GITHUB_RUN_ID"]),
+              "runner_environment": os.environ["RUNNER_ENVIRONMENT"],
+              "runner_os": os.environ["RUNNER_OS"],
+              "runner_arch": os.environ["RUNNER_ARCH"],
+              "image_os": os.environ.get("ImageOS"),
+              "image_version": os.environ.get("ImageVersion"),
+              "kernel": platform.platform(),
+              "cpu": command("lscpu", "--json"),
+              "memory": Path("/proc/meminfo").read_text(),
+              "filesystem": command("findmnt", "--json", "--target", str(corpora)),
+              "block_devices": command("lsblk", "--json", "--output", "NAME,TYPE,SIZE,ROTA,MODEL"),
+              "cpu_count": os.cpu_count(),
+              "comparison_settings": "default balanced I/O, automatic threads/filesystem selection",
+              "cache": "warm after full parity scan; no cache reset",
+          }
+          github_record = save("github.json", environment)
+          summaries = []
+          for shape in ("flat", "wide", "deep"):
+              available = os.statvfs(corpora)
+              if available.f_bavail * available.f_frsize < 6 * 1024**3 or available.f_favail < 1_100_000:
+                  raise RuntimeError("Require 6 GiB and 1.1 million free inodes for each owned corpus")
+              print(f"Generating {shape}: 1,000,000 files of 256 bytes", flush=True)
+              root = make_tree(corpora, shape, 1_000_000, 16, 256)
+              save(f"corpus-{shape}.json", {
+                  "shape": shape, "files": 1_000_000, "file_size": 256, "depth": 16,
+                  "root": str(root), "generator": "scripts/bench/remeasure.py:make_tree",
+              })
+              os.sync()
+              result_path = records / f"{shape}.json"
+              args = [sys.executable, "scripts/bench/du_same_conditions.py",
+                      "--environment", "github-actions", "--github-record", str(github_record),
+                      "--binary", str(binary), "--root", str(root), "--scope", "directory",
+                      "--output", str(result_path), "--build-record", str(build),
+                      "--source-snapshot", str(snapshot), "--expected-head", head,
+                      "--du", str(du), "--du-record", str(du_record),
+                      "--phase", "measurement", "--runs", "8", "--timeout", "300"]
+              save(f"command-{shape}.json", args)
+              started = time.monotonic()
+              with (records / f"{shape}.log").open("x", encoding="utf-8") as log:
+                  subprocess.run(args, stdout=log, stderr=subprocess.STDOUT, check=True)
+              result = json.loads(result_path.read_text())
+              if not result.get("complete"):
+                  raise RuntimeError(f"Incomplete measurement: {shape}")
+              summaries.append({"shape": shape, "result": result_path.name,
+                                "sha256": sha(result_path), "elapsed_seconds": time.monotonic() - started})
+              print(f"Accepted {shape}: {result.get('median_ms')}", flush=True)
+              resolved = root.resolve(strict=True)
+              if root.is_symlink() or resolved.parent != corpora.resolve() or not resolved.name.startswith(f"hyperdu-{shape}-"):
+                  raise RuntimeError("Refuse cleanup outside the owned corpus")
+              shutil.rmtree(resolved)
+          save("complete.json", {"complete": True, "head": head, "results": summaries})
+          PY
+      - name: Retain all measurements and provenance, including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hyperdu-gnu-du-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hyperdu-product-benchmark/records/
+          if-no-files-found: warn
+          retention-days: 90

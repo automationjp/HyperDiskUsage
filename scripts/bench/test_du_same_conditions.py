@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -68,6 +69,105 @@ class AccountingGateTests(unittest.TestCase):
         self.assertNotIn("RUST_LOG", env)
 
 
+class GithubEnvironmentGateTests(unittest.TestCase):
+    def setUp(self):
+        self.environment = {
+            "GITHUB_ACTIONS": "true",
+            "RUNNER_ENVIRONMENT": "github-hosted",
+            "RUNNER_OS": "Linux",
+            "RUNNER_ARCH": "X64",
+            "GITHUB_SHA": "abc123",
+            "GITHUB_REPOSITORY": "automationjp/HyperDiskUsage",
+            "GITHUB_RUN_ID": "12345",
+            "GITHUB_RUN_ATTEMPT": "2",
+            "GITHUB_JOB": "product-benchmark",
+        }
+        self.record = {
+            "provider": "GitHub Actions",
+            "head": "abc123",
+            "repository": "automationjp/HyperDiskUsage",
+            "run_id": "12345",
+            "run_attempt": "2",
+            "job": "product-benchmark",
+            "run_url": "https://github.com/automationjp/HyperDiskUsage/actions/runs/12345",
+        }
+
+    def validate(self, environment=None, record=None, **observed):
+        return bench.validate_github_actions_environment(
+            environment or self.environment,
+            record or self.record,
+            "abc123",
+            kernel_release=observed.get("kernel_release", "6.8.0-1018-azure"),
+            kernel_version=observed.get("kernel_version", "#1 SMP"),
+            dmi_vendor=observed.get("dmi_vendor", "Microsoft Corporation"),
+        )
+
+    def test_valid_github_record_captures_observed_runner_metadata(self):
+        result = self.validate()
+        self.assertIsNot(result, self.record)
+        self.assertEqual(result["provider"], "GitHub Actions")
+        self.assertEqual(result["observed_dmi_vendor"], "Microsoft Corporation")
+        self.assertEqual(result["observed_kernel_release"], "6.8.0-1018-azure")
+        self.assertEqual(result["observed_kernel_version"], "#1 SMP")
+
+    def test_wsl_kernel_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "WSL"):
+            self.validate(kernel_release="5.15.153.1-microsoft-standard-WSL2")
+
+    def test_local_and_self_hosted_runners_are_rejected(self):
+        local = dict(self.environment)
+        local.pop("GITHUB_ACTIONS")
+        with self.assertRaisesRegex(ValueError, "GITHUB_ACTIONS"):
+            self.validate(environment=local)
+
+        self_hosted = dict(self.environment, RUNNER_ENVIRONMENT="self-hosted")
+        with self.assertRaisesRegex(ValueError, "RUNNER_ENVIRONMENT"):
+            self.validate(environment=self_hosted)
+
+    def test_head_and_run_provenance_mismatches_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "head"):
+            self.validate(record=dict(self.record, head="wrong-head"))
+        with self.assertRaisesRegex(ValueError, "run_id"):
+            self.validate(record=dict(self.record, run_id="99999"))
+
+
+class ArgumentValidationTests(unittest.TestCase):
+    def test_environment_record_arguments_are_conditional(self):
+        common = [
+            "--binary",
+            "binary",
+            "--root",
+            "root",
+            "--scope",
+            "directory",
+            "--output",
+            "output",
+            "--build-record",
+            "build",
+            "--du-record",
+            "du",
+            "--source-snapshot",
+            "snapshot",
+            "--expected-head",
+            "head",
+        ]
+        with patch.object(
+            sys,
+            "argv",
+            ["bench", *common, "--environment", "aws"],
+        ), self.assertRaises(SystemExit) as aws_error:
+            bench.main()
+        self.assertEqual(aws_error.exception.code, 2)
+
+        with patch.object(
+            sys,
+            "argv",
+            ["bench", *common, "--environment", "github-actions"],
+        ), self.assertRaises(SystemExit) as github_error:
+            bench.main()
+        self.assertEqual(github_error.exception.code, 2)
+
+
 @unittest.skipUnless(sys.platform == "linux", "The benchmark transaction is Linux-only")
 class MeasurementTransactionTests(unittest.TestCase):
     def setUp(self):
@@ -96,6 +196,26 @@ class MeasurementTransactionTests(unittest.TestCase):
             "version": self.version,
             "package": "test coreutils",
         }
+        self.github_environment = {
+            "GITHUB_ACTIONS": "true",
+            "RUNNER_ENVIRONMENT": "github-hosted",
+            "RUNNER_OS": "Linux",
+            "RUNNER_ARCH": "X64",
+            "GITHUB_SHA": "test-head",
+            "GITHUB_REPOSITORY": "automationjp/HyperDiskUsage",
+            "GITHUB_RUN_ID": "12345",
+            "GITHUB_RUN_ATTEMPT": "1",
+            "GITHUB_JOB": "benchmark",
+        }
+        self.github_record = {
+            "provider": "GitHub Actions",
+            "head": "test-head",
+            "repository": "automationjp/HyperDiskUsage",
+            "run_id": "12345",
+            "run_attempt": "1",
+            "job": "benchmark",
+            "run_url": "https://github.com/automationjp/HyperDiskUsage/actions/runs/12345",
+        }
         self.output = self.base / "result.json"
         self.argv = [
             "bench",
@@ -122,11 +242,32 @@ class MeasurementTransactionTests(unittest.TestCase):
         ]
         self.calls = []
 
-    def execute(self, *, mismatch=False, mutate=False, timeout=False, warning=False):
+    def execute(
+        self,
+        *,
+        mismatch=False,
+        mutate=False,
+        timeout=False,
+        warning=False,
+        environment="aws",
+        source_mismatch=False,
+    ):
+        argv = list(self.argv)
+        if environment == "github-actions":
+            record_flag = argv.index("--aws-record")
+            argv[record_flag] = "--github-record"
+            argv[record_flag + 1] = str(self.base / "github.json")
+            argv[record_flag:record_flag] = ["--environment", "github-actions"]
+        build = dict(self.build)
+        if source_mismatch:
+            build["source_snapshot_sha256"] = "bad"
         for name, record in [
-            ("build", self.build),
+            ("build", build),
             ("du", self.du_record),
-            ("aws", {"provider": "AWS"}),
+            (
+                "aws" if environment == "aws" else "github",
+                {"provider": "AWS"} if environment == "aws" else self.github_record,
+            ),
         ]:
             (self.base / f"{name}.json").write_text(
                 json.dumps(record), encoding="utf-8"
@@ -135,7 +276,11 @@ class MeasurementTransactionTests(unittest.TestCase):
 
         def read(path, *args, **kwargs):
             if str(path) == "/sys/devices/virtual/dmi/id/sys_vendor":
-                return "Amazon EC2"
+                return (
+                    "Amazon EC2"
+                    if environment == "aws"
+                    else "Microsoft Corporation"
+                )
             return original_read(path, *args, **kwargs)
 
         def run(command, env, limit):
@@ -155,15 +300,22 @@ class MeasurementTransactionTests(unittest.TestCase):
             )
 
         with (
-            patch.object(sys, "argv", self.argv),
+            patch.object(sys, "argv", argv),
             patch.object(bench.platform, "system", return_value="Linux"),
             patch.object(bench.platform, "machine", return_value="x86_64"),
+            patch.object(bench.platform, "release", return_value="6.8.0-1018-azure"),
+            patch.object(bench.platform, "version", return_value="#1 SMP"),
             patch.object(Path, "read_text", read),
             patch.object(bench, "run", side_effect=run),
             patch.object(
                 bench,
                 "fingerprint",
                 side_effect=["before", "after" if mutate else "before"],
+            ),
+            patch.dict(
+                os.environ,
+                self.github_environment if environment == "github-actions" else {},
+                clear=False,
             ),
         ):
             return bench.main()
@@ -255,6 +407,30 @@ class MeasurementTransactionTests(unittest.TestCase):
         self.assertFalse(receipt["complete"])
         self.assertEqual(len(receipt["samples"]), 16)
         self.assertNotIn("median_ms", receipt)
+
+    def test_github_mode_receipt_keeps_runner_record_and_no_ec2_label(self):
+        self.assertEqual(self.execute(environment="github-actions"), 0)
+        receipt = json.loads(self.output.read_text())
+        self.assertTrue(receipt["complete"])
+        self.assertEqual(receipt["environment"], "github-actions")
+        self.assertEqual(receipt["github_record"], {
+            **self.github_record,
+            "observed_dmi_vendor": "Microsoft Corporation",
+            "observed_kernel_release": "6.8.0-1018-azure",
+            "observed_kernel_version": "#1 SMP",
+        })
+        self.assertNotIn("aws_record", receipt)
+        self.assertNotIn("ec2_vendor", receipt)
+
+    def test_github_source_proof_mismatch_fails_before_measurement(self):
+        self.assertEqual(
+            self.execute(environment="github-actions", source_mismatch=True),
+            1,
+        )
+        receipt = json.loads(self.output.read_text())
+        self.assertFalse(receipt["complete"])
+        self.assertEqual(receipt["failed_stage"], "preflight")
+        self.assertEqual(self.calls, [])
 
     def test_build_mismatch_is_saved_during_preflight(self):
         self.build["head"] = "stale-head"
