@@ -74,7 +74,7 @@ HyperDU 允许其他 worker 窃取尚未处理的 work，即使处理集中在�
 
 ## 性能声明状态
 
-正在准备AWS EC2上的最新版测量，要求每个目录总量与GNU du直接一致。旧WSL2比较需要统计补正，已撤回，不再作为速度依据。参见[测量条件与状态](benchmarks.md)。
+当前Linux benchmark使用GitHub Actions Ubuntu 24.04/ext4，1M个256 B普通文件分为三种结构，每个工具交替warm运行8次（共48个raw sample），所有目录行的物理分配字节直接一致。GNU du / HyperDU中位数倍率为平铺1.187x、宽目录3.256x、深目录3.183x；保守的3.25x标题值仅适用于Linux。Windows 11补充测量使用本地NTFS/NVMe和`--apparent-size`；由于GNU du在600秒warmup中超时，1M flat只有HyperDU单独运行的589.91 ms中位数，没有受理的1M比较或倍率。单独的10K倍率仅为诊断结果。旧WSL2速度不作为当前证据。参见[benchmark结果与方法](benchmarks.md)。
 
 ## 发布速度声明前
 
@@ -91,4 +91,4 @@ HyperDU 允许其他 worker 窃取尚未处理的 work，即使处理集中在�
 - [ ] 保留不利结果
 - [ ] 以便之后重新验证的形式保存 raw result
 
-具体的重新测量步骤和结果填写栏请参见 [Benchmark plan](benchmarks.md)。
+具体的测量条件和来源链接请参见 [benchmark结果与方法](benchmarks.md)。

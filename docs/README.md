@@ -24,7 +24,7 @@ Linuxはネイティブビルドツール、Linux GUIはX11/Waylandの開発ラ�
 
 ## 性能の読み方
 
-OS固有の列挙と並列処理の設計は[性能設計](performance.md)を参照してください。現在はAWS EC2で、GNU `du` と同じ集計条件・直接一致する出力による再計測を準備中です。旧WSL2比較の倍率は現行速度の根拠に使用しません。[比較条件と取得状況](benchmarks.md)を確認してください。
+OS固有の列挙と並列処理の設計は[性能設計](performance.md)を参照してください。現行のLinux結果は、GitHub ActionsのUbuntu 24.04/ext4で、256 Bの通常ファイル100万個を3形状に配置し、各ツールを交互に8回warm計測したものです（全48 raw sample）。全ディレクトリ行の割当バイト数が直接一致し、GNU `du` / HyperDU の速度比は平坦1.187x、wide 3.256x、deep 3.183xでした。保守的な見出し値3.25xはLinuxだけに適用します。Windows 11の補足結果と制限、およびAWSの未実行runbookは[比較条件と取得状況](benchmarks.md)に記載しています。旧WSL2比較の倍率は現行速度の根拠に使用しません。
 
 ## 現行文書と過去の記録
 

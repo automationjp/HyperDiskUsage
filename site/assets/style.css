@@ -196,10 +196,10 @@ code,.mono {
 }
 
 .brand-mark {
-  width:23px;
-  height:23px;
+  width:40px;
+  height:40px;
   display:block;
-  flex:0 0 23px;
+  flex:0 0 40px;
   object-fit:contain;
   margin-right:3px;
 }
@@ -515,7 +515,7 @@ html[lang=en] .hero h1 {
   padding:23px 24px;
 }
 
-.bench-panel:only-child {
+.bench-panel:first-child {
   grid-column:1/-1;
 }
 

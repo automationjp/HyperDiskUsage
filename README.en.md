@@ -54,7 +54,29 @@ Rather than simply rewriting `du` in Rust, it optimizes the hot path for OS-spec
 
 ### HyperDU compared with du
 
-A fresh AWS EC2 benchmark is being prepared. Only results with directly matching GNU du directory totals will be published: allocated bytes, no symlink following, hardlink deduplication, one filesystem and all directory rows. The previous WSL2 timings required an accounting adjustment and have been withdrawn as evidence of comparative speed. [Details](docs/en/benchmarks.md)
+The measured Linux and Windows results are reported with the conditions for each environment. Every successful directory row matched the independent oracle. Speed ratio is GNU `du` time divided by HyperDU time. Measured source snapshot: `2645689515ab2e608a78b7492637e55179e4739a`. [GitHub Actions run](https://github.com/automationjp/HyperDiskUsage/actions/runs/34550503086) · [benchmarks.json](https://automationjp.github.io/HyperDiskUsage/benchmarks.json) · [site performance results](https://automationjp.github.io/HyperDiskUsage/en/#performance) · [Details](docs/en/benchmarks.md)
+
+#### Linux — 1M files per shape
+
+On GitHub-hosted Ubuntu 24.04 / ext4 with an AMD EPYC 9V74 (4 vCPU, 15.6 GiB RAM), each shape contained 1,000,000 regular 256-byte files. These are warm-cache medians using allocated bytes and eight alternating runs per tool. The Linux headline is **up to 3.25× faster** (3.256× for the wide shape) and applies to Linux only.
+
+| Shape | HyperDU | GNU `du` | du / HyperDU |
+|---|---:|---:|---:|
+| flat | 2327.49 ms | 2763.52 ms | 1.187× |
+| wide | 745.96 ms | 2428.80 ms | 3.256× |
+| deep | 764.67 ms | 2434.28 ms | 3.183× |
+
+#### Windows — 1M result and 10K diagnostic
+
+Measurements used Windows 11 / NTFS / NVMe on an AMD Ryzen 9 3900X (12 cores / 24 threads, 128 GiB RAM), with a warm cache and apparent-size logical bytes. For the flat 1M tree, standalone HyperDU measured a median of 589.91 ms over eight runs. GNU `du` 8.32 (Git for Windows / MSYS) timed out during warmup at 600 seconds before a measured run. There is no accepted 1M GNU `du` baseline or ratio; wide and deep 1M workloads were not run.
+
+The 10K comparison diagnostic uses medians of two runs per tool. These ratios apply only to this small diagnostic and are not general 1M-file speed claims.
+
+| Shape | HyperDU | GNU `du` 8.32 (MSYS) | du / HyperDU |
+|---|---:|---:|---:|
+| flat | 32.98 ms | 704.17 ms | 21.35× |
+| wide | 27.46 ms | 712.33 ms | 25.94× |
+| deep | 32.32 ms | 836.73 ms | 25.89× |
 
 ### Why it is fast
 
@@ -259,7 +281,7 @@ For pull requests that change a performance path, check the correctness gate and
 ## Known limitations
 
 - This is a beta release. CLI options, MCP tool schemas, and output formats may change.
-- Public benchmarks are being remeasured. The benchmark gate must pass before performance figures are updated.
+- Public benchmarks include the Linux and Windows measurements above. OS, accounting method, file count, and run count differ, so the Linux headline and Windows diagnostic ratios do not extend to unmeasured conditions.
 - macOS performance and compatibility validation is not complete.
 - On network filesystems or HDDs, I/O latency can dominate and reduce the gains from parallelism.
 - Symbolic links are not followed by default. Take care with cycles when using `--follow-links`.

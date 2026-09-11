@@ -24,7 +24,7 @@ for commands and verification boundaries.
 
 ## Read performance results
 
-See [performance design](performance.md) for native enumeration and parallel traversal. Fresh AWS EC2 measurements will compare directly equal directory totals with GNU du. Older WSL2 ratios are not current speed evidence. See the [comparison protocol and status](benchmarks.md).
+See [performance design](performance.md) for native enumeration and parallel traversal. The current Linux result is from GitHub Actions Ubuntu 24.04/ext4: 1M regular 256 B files in three shapes, eight alternating warm runs per tool and 48 raw samples, with direct allocated-byte parity for every directory row. GNU du / HyperDU speed ratios are 1.187x flat, 3.256x wide and 3.183x deep; the conservative 3.25x headline is Linux only. Windows 11 supplemental results and the unexecuted AWS runbook are documented in the [comparison results and method](benchmarks.md). WSL2 timings are not current speed evidence.
 
 ## Current documentation and historical records
 

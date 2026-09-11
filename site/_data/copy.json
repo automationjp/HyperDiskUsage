@@ -14,8 +14,8 @@
     "status": "v0.5.0-beta.3 · 高速化開発版 · MIT",
     "terminal_label": "操作イメージ",
     "terminal_caption": "大きなフォルダを見つけ、整理する場所を見極める。",
-    "measured": "100万ファイルで、最大3.25倍。",
-    "bench_intro": "GNU du と同じフォルダを、同じ使用容量の計算方法で走査。横に広いフォルダでは HyperDU が最大3.25倍の速さを記録しました。GitHub Actions 上で各ツールを交互に8回ずつ実行し、全ディレクトリの表示バイト数が一致した結果です。",
+    "measured": "Linux・100万ファイルで、最大3.25倍。",
+    "bench_intro": "Linux は GitHub Actions 上で GNU du と各8回比較。Windows ローカルでも、100万ファイルの HyperDU 単独計測と1万ファイルの比較診断を実施しました。結果と未完了の条件を、測定環境ごとに掲載しています。",
     "all": "すべて",
     "dataset": "データセット",
     "files": "ファイル",
@@ -23,7 +23,7 @@
     "ratio": "速度比",
     "timing": "処理時間 · 短いほど高速",
     "method": "全試行と測定条件を見る",
-    "bench_note": "warm cache での中央値です。速度比は GNU du の時間 ÷ HyperDU の時間で、1未満の条件では HyperDU の方が遅いことを示します。3種類すべての結果を掲載しています。Linux の合成データでの測定であり、別 OS・cold cache・ディスク全体で同じ倍率になるとは限りません。",
+    "bench_note": "すべて warm cache での中央値です。速度比は GNU du の時間 ÷ HyperDU の時間。Linux はディスク上の使用量、Windows は論理サイズを比較しています。OS・集計方法・ファイル数・試行回数が異なるため、環境をまたいで倍率を比較したり、未測定の条件へ当てはめたりはできません。",
     "engine_title": "速さは、走査の中に。",
     "engine_intro": "OS に合った読み取り方と並列処理で、多数のファイルを効率よく集計。いつもの作業場所から、容量の内訳をすばやく調べられます。",
     "platforms": [
@@ -84,12 +84,14 @@
       {
         "title": "Performance",
         "text": "高速化の設計とトレードオフ",
-        "path": "docs/performance.md"
+        "path": "docs/performance.md",
+        "revision": "main"
       },
       {
         "title": "Benchmarks",
         "text": "環境、raw data、測定の限界",
-        "path": "docs/benchmarks.md"
+        "path": "docs/benchmarks.md",
+        "revision": "main"
       },
       {
         "title": "Architecture",
@@ -99,7 +101,8 @@
       {
         "title": "Documentation",
         "text": "使い方・開発・配布のドキュメント",
-        "path": "docs/README.md"
+        "path": "docs/README.md",
+        "revision": "main"
       }
     ],
     "footer": "ディスクの容量を、何が使っているか。すばやく把握する。",
@@ -107,7 +110,9 @@
     "doc_prefix": "docs/",
     "plugin_path": "plugin/README.md",
     "published": "Cargo 公開版を見る",
-    "run": "GitHub で実行記録を見る"
+    "run": "Linux の GitHub 実行結果",
+    "no_comparison": "比較不成立",
+    "baseline_timeout": "600秒でタイムアウト"
   },
   "en": {
     "skip": "Skip to content",
@@ -124,8 +129,8 @@
     "status": "v0.5.0-beta.3 · Acceleration development build · MIT",
     "terminal_label": "Usage illustration",
     "terminal_caption": "Find the largest folders. Decide where to tidy up.",
-    "measured": "One million files. Up to 3.25× faster.",
-    "bench_intro": "HyperDU and GNU du scan the same folders with the same disk-allocation accounting. HyperDU was up to 3.25× faster on the wide tree. Each tool ran eight times in alternating order on GitHub Actions, with identical byte totals for every directory.",
+    "measured": "Up to 3.25× faster on 1M Linux files.",
+    "bench_intro": "Linux was compared with GNU du in eight runs per tool on GitHub Actions. Local Windows measurements add a 1M-file HyperDU-only result and a 10K-file comparison diagnostic. Completed results and unfinished comparisons are shown by environment.",
     "all": "All results",
     "dataset": "Dataset",
     "files": "Files",
@@ -133,7 +138,7 @@
     "ratio": "Speed ratio",
     "timing": "Elapsed time · shorter is faster",
     "method": "See every run and the method",
-    "bench_note": "Warm-cache medians. The ratio is GNU du time divided by HyperDU time; below 1 means HyperDU was slower. All three workloads are shown. These synthetic Linux results do not predict the same ratio on other operating systems, cold caches, or whole disks.",
+    "bench_note": "All values are warm-cache medians. Speed ratio is GNU du time divided by HyperDU time. Linux uses allocated size; Windows uses logical size. OS, accounting, file counts and run counts differ, so ratios cannot be compared across environments or extended to unmeasured conditions.",
     "engine_title": "Fast, from the filesystem up.",
     "engine_intro": "Platform-aware reads and parallel processing handle large file collections efficiently, so you can find what is using space from the tools you already use.",
     "platforms": [
@@ -194,12 +199,14 @@
       {
         "title": "Performance",
         "text": "Optimization design and tradeoffs",
-        "path": "docs/en/performance.md"
+        "path": "docs/en/performance.md",
+        "revision": "main"
       },
       {
         "title": "Benchmarks",
         "text": "Environment, raw data, and limitations",
-        "path": "docs/en/benchmarks.md"
+        "path": "docs/en/benchmarks.md",
+        "revision": "main"
       },
       {
         "title": "Architecture",
@@ -209,7 +216,8 @@
       {
         "title": "Documentation",
         "text": "Usage, development, and distribution",
-        "path": "docs/en/README.md"
+        "path": "docs/en/README.md",
+        "revision": "main"
       }
     ],
     "footer": "See what is using your disk space. Quickly.",
@@ -217,7 +225,9 @@
     "doc_prefix": "docs/en/",
     "plugin_path": "plugin/README.en.md",
     "published": "Published crates on Cargo",
-    "run": "View the GitHub workflow run"
+    "run": "Linux GitHub workflow run",
+    "no_comparison": "No comparison",
+    "baseline_timeout": "Timed out at 600 s"
   },
   "zh-CN": {
     "skip": "跳转到正文",
@@ -234,8 +244,8 @@
     "status": "v0.5.0-beta.3 · 加速功能开发版 · MIT",
     "terminal_label": "操作示意",
     "terminal_caption": "找出最大的目录，再决定从哪里开始整理。",
-    "measured": "100万个文件，速度最高达3.25倍。",
-    "bench_intro": "HyperDU 与 GNU du 扫描同一批目录，采用相同的磁盘占用计算方式。在宽目录树上，HyperDU 的速度最高为 GNU du 的3.25倍。两个工具在 GitHub Actions 上交替运行各8次，每个目录的字节总数均完全一致。",
+    "measured": "Linux 100万文件，速度最高达3.25倍。",
+    "bench_intro": "Linux 在 GitHub Actions 上与 GNU du 进行了每个工具8次运行的比较。Windows 本地还完成了100万文件的 HyperDU 单独测量和1万文件的比较诊断。按环境展示已完成的结果与尚未完成的比较。",
     "all": "全部结果",
     "dataset": "数据集",
     "files": "文件数",
@@ -243,7 +253,7 @@
     "ratio": "速度比",
     "timing": "耗时 · 越短越快",
     "method": "查看全部试验与测量条件",
-    "bench_note": "表中为热缓存下的中位数。速度比为 GNU du 耗时除以 HyperDU 耗时，小于1表示该条件下 HyperDU 更慢。三种结构的结果全部列出。这些 Linux 合成数据的结果不代表其他操作系统、冷缓存或整块磁盘上的相同提升。",
+    "bench_note": "所有数值均为热缓存中位数。速度比为 GNU du 用时除以 HyperDU 用时。Linux 使用磁盘占用大小，Windows 使用逻辑大小。系统、统计方式、文件数量和运行次数不同，不能跨环境比较倍率或推广至未测条件。",
     "engine_title": "从文件系统开始提速。",
     "engine_intro": "结合适合各操作系统的读取方式与并行处理，高效汇总大量文件。在熟悉的工作环境中，快速了解空间去向。",
     "platforms": [
@@ -304,12 +314,14 @@
       {
         "title": "性能设计",
         "text": "优化设计与取舍",
-        "path": "docs/zh-CN/performance.md"
+        "path": "docs/zh-CN/performance.md",
+        "revision": "main"
       },
       {
         "title": "基准测试",
         "text": "环境、原始数据及测量限制",
-        "path": "docs/zh-CN/benchmarks.md"
+        "path": "docs/zh-CN/benchmarks.md",
+        "revision": "main"
       },
       {
         "title": "架构",
@@ -319,7 +331,8 @@
       {
         "title": "文档中心",
         "text": "使用、开发与分发文档",
-        "path": "docs/zh-CN/README.md"
+        "path": "docs/zh-CN/README.md",
+        "revision": "main"
       }
     ],
     "footer": "快速了解磁盘空间的去向。",
@@ -327,6 +340,8 @@
     "doc_prefix": "docs/zh-CN/",
     "plugin_path": "plugin/README.zh-CN.md",
     "published": "查看 Cargo 已发布版本",
-    "run": "查看 GitHub 运行记录"
+    "run": "Linux GitHub 运行记录",
+    "no_comparison": "无法比较",
+    "baseline_timeout": "600秒超时"
   }
 }

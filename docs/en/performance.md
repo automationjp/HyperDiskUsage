@@ -74,7 +74,7 @@ For this reason, the README does not use a single ratio as the performance basis
 
 ## Performance claim status
 
-Fresh AWS EC2 measurements will require direct GNU du parity for every directory total. The older WSL2 comparison required accounting corrections and is withdrawn as speed evidence. See the [measurement protocol and status](benchmarks.md).
+The current Linux benchmark used GitHub Actions Ubuntu 24.04/ext4 with 1M regular 256 B files in three shapes, eight alternating warm runs per tool (48 raw samples), and direct allocated-byte parity for every directory row. Median GNU du / HyperDU ratios were 1.187x flat, 3.256x wide and 3.183x deep; the conservative 3.25x headline is Linux only. Windows 11 supplemental measurements used local NTFS/NVMe and `--apparent-size`; the 1M flat HyperDU-only median was 589.91 ms because GNU du timed out during its 600-second warmup, so there is no accepted 1M comparison or ratio. The separate 10K ratios are diagnostics only. WSL2 timings are not current speed evidence. See the [benchmark results and method](benchmarks.md).
 
 ## Before publishing a speed claim
 
@@ -91,4 +91,4 @@ Before putting performance values in the README or website, satisfy at least the
 - [ ] Keep unfavorable results
 - [ ] Store raw results in a form that can be rechecked later
 
-See the [Benchmark plan](benchmarks.md) for the concrete remeasurement procedure and result-entry fields.
+See the [benchmark results and method](benchmarks.md) for the concrete measurement conditions and provenance links.

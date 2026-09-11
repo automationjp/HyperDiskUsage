@@ -1,24 +1,41 @@
 # HyperDU 与 du 比较
 
-正在准备最新版AWS EC2测量。只发布与GNU du直接一致的目录字节总量：物理分配量、不追踪符号链接、硬链接去重、单一filesystem、输出全部目录行。旧WSL2测量需要外部统计补正，已撤回，不再作为速度比较依据。
+成功的测量与独立oracle一致，已完成的比较也与GNU `du`直接一致。不进行外部字节补正，旧WSL2速度不作为当前证据。测量源码为`2645689515ab2e608a78b7492637e55179e4739a`；详细hash、全部raw sample和corpus fingerprint见[公开测定结果JSON](https://automationjp.github.io/HyperDiskUsage/benchmarks.json)。
 
-## 验收条件
+## Linux结果（GitHub Actions）
 
-在AWS EC2 Linux x86_64上从最新源码snapshot构建release。记录源码／二进制hash、GNU du版本、取得时间、实例／CPU／RAM／EBS／filesystem／kernel。两工具采用相同不变数据、权限、统计与输出条件，不允许Python等外部字节补正。
+GitHub托管运行环境为Ubuntu 24.04/ext4，flat、wide、deep三种结构各包含1,000,000个256 B普通文件。每个工具交替warm运行8次，共48个raw sample。计时包含进程启动和目录输出，所有目录行的物理分配字节均直接一致。
+
+Linux中位数（HyperDU / GNU `du`；GNU `du` / HyperDU倍率）为Flat 2327.49 / 2763.52 ms（1.187x）、Wide 745.96 / 2428.80 ms（3.256x）、Deep 764.67 / 2434.28 ms（3.183x）。
+
+保守的标题值为3.25x（wide，仅Linux）。[GitHub Actions Linux运行](https://github.com/automationjp/HyperDiskUsage/actions/runs/34550503086)包含对应的源码、构建、corpus和parity证据。
+
+### Linux command
 
 ```bash
 hyperdu --compat gnu-strict --block-size 1 --one-file-system ROOT
 du -x --block-size=1 ROOT
 ```
 
-初次检查和每次计时均要求所有目录行及字节值直接一致。错误、不一致或数据变化使测量无效。性能设置先在独立pilot中选择，再固定设置交替预热运行8次，记录包含启动与输出的中位数、全部样本及不利结果。不得用概算或逻辑大小替代物理分配量。
+两个工具都输出全部目录行；只在比较时规范行顺序，不调整总量或字节值。
 
-Linux的filesystem挂载根与目录使用同一枚举引擎，没有Linux MFT快速路径。可选择专用EBS挂载根及代表目录，排除正在变化的操作系统根。最终结果将完整列出性能参数。
+## Windows补充结果（本地）
 
-## 当前状态
+本地环境为Windows 11、NTFS/NVMe、Ryzen 9 3900X（12 cores／24 threads、128 GiB）。GNU `du`来自Git for Windows MSYS，版本为GNU coreutils 8.32。两工具都使用`--apparent-size`进行逻辑字节统计，并采用warm计时。
 
-本地Linux回归测试已复现差异并验证修正后与GNU du直接一致；这仅是正确性测试，不是AWS性能测量。AWS目标与有效认证尚待确定，暂时没有最新版AWS速度结果。
+1M flat仅对HyperDU单独运行8次，中位数为589.91 ms。GNU `du`在warmup阶段达到600秒timeout，因此没有受理的1M比较或1M倍率；wide／deep的1M测试未运行。
 
-[Reproducible benchmark runner](../../scripts/bench/du_same_conditions.py)
+另一个10K诊断包含三种结构、每个工具交替运行2次，保留12个measured sample和6个warmup。所有目录行一致，但这些倍率仅适用于本次小规模诊断，不能作为一般1M标题值。
 
-[AWS runbook and provenance records](../benchmarks/aws-protocol.md)
+10K诊断中位数（HyperDU / GNU `du`；GNU `du` / HyperDU倍率）为Flat 32.98 / 704.17 ms（21.35x）、Wide 27.46 / 712.33 ms（25.94x）、Deep 32.32 / 836.73 ms（25.89x）。
+
+### Windows command
+
+```powershell
+hyperdu --compat gnu-strict --apparent-size --block-size 1 --one-file-system --io-profile balanced ROOT
+du -x --apparent-size --block-size=1 ROOT
+```
+
+AWS runbook仅作为未执行计划保留，不构成当前结果或速度值。见[AWS runbook（未执行计划）](../benchmarks/aws-protocol.md)。
+
+[可复现的Linux benchmark runner](../../scripts/bench/du_same_conditions.py)
