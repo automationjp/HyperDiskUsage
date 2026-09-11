@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "date": "2026-09-11",
   "timezone": "UTC",
   "commit": "2645689515ab2e608a78b7492637e55179e4739a",
@@ -9,16 +9,16 @@
   "comparison": "HyperDU versus GNU coreutils du",
   "workflow_run": "https://github.com/automationjp/HyperDiskUsage/actions/runs/34550503086",
   "method": "https://github.com/automationjp/HyperDiskUsage/blob/2645689515ab2e608a78b7492637e55179e4739a/scripts/bench/du_same_conditions.py",
-  "documentation": "https://github.com/automationjp/HyperDiskUsage/blob/2645689515ab2e608a78b7492637e55179e4739a/docs/benchmarks.md",
+  "documentation": "https://github.com/automationjp/HyperDiskUsage/blob/main/docs/benchmarks.md",
   "headline_ratio": 3.25,
   "headline_shape": "wide",
   "limitations": [
-    "GitHub hosted Linux X64; Ubuntu 24.04 runner image; shared virtual machine.",
-    "Warm cache after a full parity scan; process startup and all directory output included.",
-    "Three synthetic directory trees of 1,000,000 regular files each; 256 bytes per file.",
-    "Each tool runs eight times in alternating order. All workloads and all 48 samples are retained, including slower cases.",
-    "No claim about Windows/macOS, cold cache, whole disks, or other storage devices.",
-    "Environment records validate provenance consistency, not cryptographic attestation."
+    "Linux: GitHub-hosted Ubuntu 24.04/ext4, allocated bytes, 1M files per shape, eight alternating runs per tool, all 48 samples retained.",
+    "Windows: local Windows 11/NTFS, native HyperDU and Git for Windows GNU du 8.32 through MSYS; apparent-size logical bytes.",
+    "Windows 1M flat: eight HyperDU-only runs; GNU du timed out after600seconds in warmup. No accepted 1M comparison or speed ratio; wide/deep 1M workloads were not run.",
+    "Windows 10K: three shapes, two alternating runs per tool, all 12 measured samples retained; diagnostic ratios are not general speedup claims.",
+    "Warm cache, synthetic regular files of256bytes; timings include process startup and directory output. Conditions differ across platforms.",
+    "No cold-cache, whole-disk or unmeasured-device speed claims. Record hashes preserve provenance consistency, not cryptographic attestation."
   ],
   "filters": [],
   "platforms": [
@@ -31,9 +31,9 @@
       "candidate": "HyperDU",
       "baseline": "GNU du",
       "condition": {
-        "ja": "Ubuntu 24.04 · 各100万ファイル · 256 B / ファイル · 各ツール8回の中央値",
-        "en": "Ubuntu 24.04 · 1M files per tree · 256 B per file · median of 8 runs per tool",
-        "zh-CN": "Ubuntu 24.04 · 每种结构100万文件 · 每文件256 B · 每个工具8次运行的中位数"
+        "ja": "Ubuntu 24.04 · 各100万ファイル · 256 B / ファイル · 各ツール8回の中央値 · ディスク上の使用量",
+        "en": "Ubuntu 24.04 · 1M files per tree · 256 B per file · median of 8 runs per tool · allocated size",
+        "zh-CN": "Ubuntu 24.04 · 每种结构100万文件 · 每文件256 B · 每个工具8次运行的中位数 · 磁盘占用大小"
       },
       "provenance": {
         "complete": true,
@@ -545,7 +545,488 @@
           "source_record_sha256": "dca0d66c0aa33942e0f4f9025508e316f42f959699005e59e7b28429685ea1ab",
           "finished_at": "2026-09-11T01:40:53.871281+00:00"
         }
+      ],
+      "kind": "comparison",
+      "accounting": "allocated-size",
+      "show_comparison": true,
+      "runs_per_tool": {
+        "hyperdu": 8,
+        "du": 8
+      }
+    },
+    {
+      "id": "windows-million",
+      "group": "windows",
+      "kind": "standalone",
+      "title": "HyperDU / 1M files",
+      "subtitle": "Local Windows / standalone",
+      "machine": "AMD Ryzen 9 3900X · 12 cores / 24 threads · 128 GiB RAM · NTFS / NVMe",
+      "candidate": "HyperDU",
+      "baseline": "GNU du (MSYS)",
+      "show_comparison": false,
+      "accounting": "apparent-size",
+      "runs_per_tool": {
+        "hyperdu": 8,
+        "du": 0
+      },
+      "condition": {
+        "ja": "Windows 11 · 100万ファイル · 256 B / ファイル · 論理サイズ · HyperDU 単独8回の中央値",
+        "en": "Windows 11 · 1M files · 256 B per file · logical size · median of 8 HyperDU-only runs",
+        "zh-CN": "Windows 11 · 100万文件 · 每文件256 B · 逻辑大小 · HyperDU 单独运行8次的中位数"
+      },
+      "note": {
+        "ja": "GNU du は準備走査で600秒の制限に達しました。本計測は0回で、100万ファイルの比較は未完了です。横に広い構成と深い階層の100万件測定は未実行です。",
+        "en": "GNU du timed out after 600 seconds during warmup, before any measured run. The 1M-file comparison is incomplete; wide and deep 1M-file workloads were not run.",
+        "zh-CN": "GNU du 在预热扫描中达到600秒限制，正式测量为0次。100万文件比较尚未完成；横向和深层的100万文件测试未运行。"
+      },
+      "provenance": {
+        "provider": "local Windows",
+        "source": "2645689515ab2e608a78b7492637e55179e4739a",
+        "build": {
+          "head": "2645689515ab2e608a78b7492637e55179e4739a",
+          "tree": "83dd0978e454d5ce4bc5b0c37d3c69a18a50e657",
+          "binary_sha256": "a6a8084fb37efdda4b96498454eb7c4252ee03e991eb21a559f95523ce8fc9d2",
+          "source_snapshot_sha256": "f61edf3169c3ffaaeae4dc129accfe2bb99f069c306df57f9c44a6bc8874efbb",
+          "cargo_lock_sha256": "4fdb76dec33728e1aba3879a7a11b68962e23521a70018d1eb26ac986df7db47",
+          "profile": {
+            "opt-level": 3,
+            "lto": "thin",
+            "codegen-units": 1,
+            "panic": "abort",
+            "strip": true,
+            "debug": true,
+            "incremental": false
+          },
+          "features": "default",
+          "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-pc-windows-msvc\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+          "build_command": "cargo build --locked --release -p hyperdu"
+        },
+        "environment_record_sha256": "9ec6db92995608d354ce3674c857c27692f2181085c8bcd5df163faeae98e04e",
+        "du_version": "GNU coreutils 8.32 / Git for Windows / MSYS",
+        "tool_hashes": {
+          "hyperdu.exe": "a6a8084fb37efdda4b96498454eb7c4252ee03e991eb21a559f95523ce8fc9d2",
+          "du.exe": "dc22867da6d50648fd627c549edc906d97fdecf2f7956b2f3e05fe619976b07e",
+          "msys-2.0.dll": "b41bfda735cd7686ab4c2b56b4cc6a6fc6c33992b1739626be94d7ae1e8eed0b"
+        },
+        "cache": "warm",
+        "accounting": "apparent-size",
+        "thread_selection": "automatic (32 threads)",
+        "io_profile": "balanced",
+        "scan": "directory scan",
+        "flags": {
+          "hyperdu": [
+            "--compat",
+            "gnu-strict",
+            "--apparent-size",
+            "--block-size",
+            "1",
+            "--one-file-system",
+            "--io-profile",
+            "balanced"
+          ],
+          "du": [
+            "-x",
+            "--apparent-size",
+            "--block-size=1"
+          ]
+        },
+        "complete": true,
+        "comparison_complete": false,
+        "original_record_sha256": "2893e6d7ee6e16fc63e0c0d873c55f544380098f2d1119a17e31009aeef71eb2",
+        "helper_sha256": "fdda8128425db3579d766b0426ce85a6ec47b562a4d93cef3c37a558581e1b1c"
+      },
+      "baseline_outcome": {
+        "status": "timeout",
+        "phase": "warmup",
+        "timeout_seconds": 600,
+        "accepted_measurement_samples": 0,
+        "source_record": "flat.json",
+        "source_record_sha256": "5aa9a6305113894419a22e7292d05c4a8c3228f9d6cdd8be55c057b4f4b1d6fb"
+      },
+      "rows": [
+        {
+          "label": {
+            "ja": "平坦なフォルダ",
+            "en": "Flat directory",
+            "zh-CN": "平铺目录"
+          },
+          "shape": "flat",
+          "files": "1,000,000",
+          "file_count": 1000000,
+          "bytes_per_file": 256,
+          "hyperdu_ms": 589.91,
+          "baseline_ms": null,
+          "ratio": null,
+          "ratio_exact": null,
+          "median_ms_exact": {
+            "hyperdu": 589.9123500057613,
+            "du": null
+          },
+          "hyperdu_width": null,
+          "baseline_width": null,
+          "baseline_status": "timeout",
+          "all_directory_parity": "HyperDU versus independent oracle: PASS",
+          "directory_count": 1,
+          "dataset_fingerprint": "00c847e3598d1bc8a6ae5eebeebd28e95a1a4e93aed729b0b830fb9b6c847030",
+          "source_record": "loop34-windows-hyperdu-million-flat.json",
+          "source_record_sha256": "2893e6d7ee6e16fc63e0c0d873c55f544380098f2d1119a17e31009aeef71eb2",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 623.2966999959899,
+              "cpu_seconds": 0.796875,
+              "stdout_sha256": "f6b19729ada31a75b02297781e1079e89c243761af3014a4d65e2202738e5382",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 592.8841000131797,
+              "cpu_seconds": 0.84375,
+              "stdout_sha256": "f6b19729ada31a75b02297781e1079e89c243761af3014a4d65e2202738e5382",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 2,
+              "tool": "hyperdu",
+              "elapsed_ms": 586.9405999983428,
+              "cpu_seconds": 0.859375,
+              "stdout_sha256": "f6b19729ada31a75b02297781e1079e89c243761af3014a4d65e2202738e5382",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 3,
+              "tool": "hyperdu",
+              "elapsed_ms": 575.6218999886187,
+              "cpu_seconds": 0.59375,
+              "stdout_sha256": "f6b19729ada31a75b02297781e1079e89c243761af3014a4d65e2202738e5382",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 4,
+              "tool": "hyperdu",
+              "elapsed_ms": 559.8822000029031,
+              "cpu_seconds": 0.75,
+              "stdout_sha256": "f6b19729ada31a75b02297781e1079e89c243761af3014a4d65e2202738e5382",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 5,
+              "tool": "hyperdu",
+              "elapsed_ms": 595.3983000072185,
+              "cpu_seconds": 0.84375,
+              "stdout_sha256": "f6b19729ada31a75b02297781e1079e89c243761af3014a4d65e2202738e5382",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 6,
+              "tool": "hyperdu",
+              "elapsed_ms": 540.3315000003204,
+              "cpu_seconds": 0.65625,
+              "stdout_sha256": "f6b19729ada31a75b02297781e1079e89c243761af3014a4d65e2202738e5382",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 7,
+              "tool": "hyperdu",
+              "elapsed_ms": 593.337900005281,
+              "cpu_seconds": 0.640625,
+              "stdout_sha256": "f6b19729ada31a75b02297781e1079e89c243761af3014a4d65e2202738e5382",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "windows-diagnostic",
+      "group": "windows",
+      "kind": "diagnostic",
+      "title": "HyperDU vs GNU du (MSYS)",
+      "subtitle": "Local Windows / 10K-file diagnostic",
+      "machine": "AMD Ryzen 9 3900X · 12 cores / 24 threads · 128 GiB RAM · NTFS / NVMe",
+      "candidate": "HyperDU",
+      "baseline": "GNU du (MSYS)",
+      "show_comparison": true,
+      "accounting": "apparent-size",
+      "runs_per_tool": {
+        "hyperdu": 2,
+        "du": 2
+      },
+      "condition": {
+        "ja": "Windows 11 · 各1万ファイル · 256 B / ファイル · 論理サイズ · 各ツール2回の中央値",
+        "en": "Windows 11 · 10K files per tree · 256 B per file · logical size · median of 2 runs per tool",
+        "zh-CN": "Windows 11 · 每种结构1万文件 · 每文件256 B · 逻辑大小 · 每个工具2次运行的中位数"
+      },
+      "note": {
+        "ja": "両ツールで全ディレクトリの集計値が一致しました。倍率は1万ファイル・各2回の小規模診断に限られ、100万ファイルや Linux の比較へは適用できません。",
+        "en": "All directory totals matched between tools. These ratios apply only to this 10K-file, two-run diagnostic, not to 1M-file workloads or the Linux comparison.",
+        "zh-CN": "两个工具的全部目录汇总值一致。倍率仅适用于本次1万文件、各2次运行的小规模诊断，不能用于100万文件或 Linux 比较。"
+      },
+      "provenance": {
+        "provider": "local Windows",
+        "source": "2645689515ab2e608a78b7492637e55179e4739a",
+        "build": {
+          "head": "2645689515ab2e608a78b7492637e55179e4739a",
+          "tree": "83dd0978e454d5ce4bc5b0c37d3c69a18a50e657",
+          "binary_sha256": "a6a8084fb37efdda4b96498454eb7c4252ee03e991eb21a559f95523ce8fc9d2",
+          "source_snapshot_sha256": "f61edf3169c3ffaaeae4dc129accfe2bb99f069c306df57f9c44a6bc8874efbb",
+          "cargo_lock_sha256": "4fdb76dec33728e1aba3879a7a11b68962e23521a70018d1eb26ac986df7db47",
+          "profile": {
+            "opt-level": 3,
+            "lto": "thin",
+            "codegen-units": 1,
+            "panic": "abort",
+            "strip": true,
+            "debug": true,
+            "incremental": false
+          },
+          "features": "default",
+          "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-pc-windows-msvc\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+          "build_command": "cargo build --locked --release -p hyperdu"
+        },
+        "environment_record_sha256": "9ec6db92995608d354ce3674c857c27692f2181085c8bcd5df163faeae98e04e",
+        "du_version": "GNU coreutils 8.32 / Git for Windows / MSYS",
+        "tool_hashes": {
+          "hyperdu.exe": "a6a8084fb37efdda4b96498454eb7c4252ee03e991eb21a559f95523ce8fc9d2",
+          "du.exe": "dc22867da6d50648fd627c549edc906d97fdecf2f7956b2f3e05fe619976b07e",
+          "msys-2.0.dll": "b41bfda735cd7686ab4c2b56b4cc6a6fc6c33992b1739626be94d7ae1e8eed0b"
+        },
+        "cache": "warm",
+        "accounting": "apparent-size",
+        "thread_selection": "automatic (32 threads)",
+        "io_profile": "balanced",
+        "scan": "directory scan",
+        "flags": {
+          "hyperdu": [
+            "--compat",
+            "gnu-strict",
+            "--apparent-size",
+            "--block-size",
+            "1",
+            "--one-file-system",
+            "--io-profile",
+            "balanced"
+          ],
+          "du": [
+            "-x",
+            "--apparent-size",
+            "--block-size=1"
+          ]
+        },
+        "complete": true,
+        "comparison_complete": true,
+        "completed_manifest_sha256": "a8f0ca51b250af67bf84551a78d950997d0fd43afdea6f2e076ee3906aea1a95",
+        "helper_sha256": "26089c02f8a1b0e616a647d26733126f563a00436f49c1c66c564e9226d821e5"
+      },
+      "rows": [
+        {
+          "label": {
+            "ja": "平坦なフォルダ",
+            "en": "Flat directory",
+            "zh-CN": "平铺目录"
+          },
+          "shape": "flat",
+          "files": "10,000",
+          "file_count": 10000,
+          "bytes_per_file": 256,
+          "hyperdu_ms": 32.98,
+          "baseline_ms": 704.17,
+          "ratio": 21.35,
+          "ratio_exact": 21.35036505097013,
+          "median_ms_exact": {
+            "hyperdu": 32.98160000122152,
+            "du": 704.1691999911563
+          },
+          "hyperdu_width": 4.684,
+          "baseline_width": 100.0,
+          "baseline_status": "completed",
+          "all_directory_parity": "PASS",
+          "directory_count": 1,
+          "dataset_fingerprint": "e515b2ae912ead44c34e38c1a632a141a57f1ffe2d0a17ef419acfb357afe248",
+          "source_record": "flat.json",
+          "source_record_sha256": "02738a9ea70d204ef4175fe2261c4a1b1c6ad961e9fa78fafe3e07ba50c1ddbb",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 25.410599992028438,
+              "cpu_seconds": 0.109375,
+              "stdout_sha256": "9ca66b33e7f30dbd21495360bc88749f5bb1a651a0ea2c6ca281a0ae43ed47ce",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 0,
+              "tool": "du",
+              "elapsed_ms": 705.3274999925634,
+              "cpu_seconds": 0.703125,
+              "stdout_sha256": "9ca66b33e7f30dbd21495360bc88749f5bb1a651a0ea2c6ca281a0ae43ed47ce",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 1,
+              "tool": "du",
+              "elapsed_ms": 703.0108999897493,
+              "cpu_seconds": 0.6875,
+              "stdout_sha256": "9ca66b33e7f30dbd21495360bc88749f5bb1a651a0ea2c6ca281a0ae43ed47ce",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 40.55260001041461,
+              "cpu_seconds": 0.015625,
+              "stdout_sha256": "9ca66b33e7f30dbd21495360bc88749f5bb1a651a0ea2c6ca281a0ae43ed47ce",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "label": {
+            "ja": "横に広いフォルダ",
+            "en": "Wide directory tree",
+            "zh-CN": "宽目录树"
+          },
+          "shape": "wide",
+          "files": "10,000",
+          "file_count": 10000,
+          "bytes_per_file": 256,
+          "hyperdu_ms": 27.46,
+          "baseline_ms": 712.33,
+          "ratio": 25.94,
+          "ratio_exact": 25.93785820394013,
+          "median_ms_exact": {
+            "hyperdu": 27.46300000580959,
+            "du": 712.3314000054961
+          },
+          "hyperdu_width": 3.855,
+          "baseline_width": 100.0,
+          "baseline_status": "completed",
+          "all_directory_parity": "PASS",
+          "directory_count": 80,
+          "dataset_fingerprint": "7e8c88a153ff90a44e29503556236da1fb1c5ce73675499e1d5245aa8f4badb1",
+          "source_record": "wide.json",
+          "source_record_sha256": "9d6ffdc57ccd42bbad857bafc96bbbbfa20a0cfc4a2ba128f50b4d315ccb650a",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 30.077100003836676,
+              "cpu_seconds": 0.046875,
+              "stdout_sha256": "a06d11fc14a9fb9b67a5246cf64bb2a399db2d19a20babb63816770ea4189aa4",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 0,
+              "tool": "du",
+              "elapsed_ms": 719.5055000047432,
+              "cpu_seconds": 0.71875,
+              "stdout_sha256": "6ad3511ced25e635b69102d41db4619f391a8198c61e14eff142567a9093fe0b",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 1,
+              "tool": "du",
+              "elapsed_ms": 705.157300006249,
+              "cpu_seconds": 0.6875,
+              "stdout_sha256": "6ad3511ced25e635b69102d41db4619f391a8198c61e14eff142567a9093fe0b",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 24.848900007782504,
+              "cpu_seconds": 0.15625,
+              "stdout_sha256": "a06d11fc14a9fb9b67a5246cf64bb2a399db2d19a20babb63816770ea4189aa4",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            }
+          ]
+        },
+        {
+          "label": {
+            "ja": "深い階層のフォルダ",
+            "en": "Deep directory tree",
+            "zh-CN": "深目录树"
+          },
+          "shape": "deep",
+          "files": "10,000",
+          "file_count": 10000,
+          "bytes_per_file": 256,
+          "hyperdu_ms": 32.32,
+          "baseline_ms": 836.73,
+          "ratio": 25.89,
+          "ratio_exact": 25.892606598802516,
+          "median_ms_exact": {
+            "hyperdu": 32.31529999902705,
+            "du": 836.7273499970906
+          },
+          "hyperdu_width": 3.862,
+          "baseline_width": 100.0,
+          "baseline_status": "completed",
+          "all_directory_parity": "PASS",
+          "directory_count": 119,
+          "dataset_fingerprint": "65451e8705f942f3be56822ef7b5ef843ca809682d4d70275134ed1f5ebc393b",
+          "source_record": "deep.json",
+          "source_record_sha256": "7ecda55d89d5c92c8b0d5a4c2d0ec213942f0b33f26ec79e7cbfa5540ef8ccd1",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 30.50989999610465,
+              "cpu_seconds": 0.015625,
+              "stdout_sha256": "d9a590205a2e88aeac75164d46d08e43c5ebc9f425f5d9db70ad5e400333b911",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 0,
+              "tool": "du",
+              "elapsed_ms": 849.9254999915138,
+              "cpu_seconds": 0.796875,
+              "stdout_sha256": "1b9527599e538f6b0ec30860664218d1ae8d3fbd31602f28e8c625bcce5d9741",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 1,
+              "tool": "du",
+              "elapsed_ms": 823.5292000026675,
+              "cpu_seconds": 0.828125,
+              "stdout_sha256": "1b9527599e538f6b0ec30860664218d1ae8d3fbd31602f28e8c625bcce5d9741",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 34.120700001949444,
+              "cpu_seconds": 0.015625,
+              "stdout_sha256": "d9a590205a2e88aeac75164d46d08e43c5ebc9f425f5d9db70ad5e400333b911",
+              "direct_directory_parity": true,
+              "exit_code": 0
+            }
+          ]
+        }
       ]
     }
-  ]
+  ],
+  "headline_platform": "linux",
+  "method_scope": "The pinned method URL describes the Linux comparison; Windows flags and records are included under each Windows provenance entry."
 }
