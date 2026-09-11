@@ -14,35 +14,35 @@
     "status": "v0.5.0-beta.3 · 高速化開発版 · MIT",
     "terminal_label": "操作イメージ",
     "terminal_caption": "大きなフォルダを見つけ、整理する場所を見極める。",
-    "measured": "同じ条件で確かめる、速さ。",
-    "bench_intro": "同じ実行ファイルと同じファイル集合で、比較する高速経路だけを切り替えます。各方式を交互に4回ずつ実行し、全ディレクトリの論理サイズ・使用領域・ファイル数が一致した warm 計測の中央値です。",
+    "measured": "100万ファイルで、最大3.25倍。",
+    "bench_intro": "GNU du と同じフォルダを、同じ使用容量の計算方法で走査。横に広いフォルダでは HyperDU が最大3.25倍の速さを記録しました。GitHub Actions 上で各ツールを交互に8回ずつ実行し、全ディレクトリの表示バイト数が一致した結果です。",
     "all": "すべて",
     "dataset": "データセット",
     "files": "ファイル",
     "baseline": "比較対象",
-    "ratio": "時間比",
+    "ratio": "速度比",
     "timing": "処理時間 · 短いほど高速",
-    "method": "全試行・照合結果・測定条件を見る",
-    "bench_note": "Windows / Linux は共有PCの NVMe、macOS は GitHub Actions で測定。ファイル数とビルド設定は環境ごとに異なります。時間比は通常経路 ÷ 比較経路で、1未満は遅い結果です。他ツール・OS間の比較や、cold cache・HDD・ネットワークの性能は示しません。",
+    "method": "全試行と測定条件を見る",
+    "bench_note": "warm cache での中央値です。速度比は GNU du の時間 ÷ HyperDU の時間で、1未満の条件では HyperDU の方が遅いことを示します。3種類すべての結果を掲載しています。Linux の合成データでの測定であり、別 OS・cold cache・ディスク全体で同じ倍率になるとは限りません。",
     "engine_title": "速さは、走査の中に。",
-    "engine_intro": "逐ファイルの追加呼び出しを減らし、空いたワーカーへ仕事を渡す。OS ごとの列挙を活かす、一つのスキャンエンジン。",
+    "engine_intro": "OS に合った読み取り方と並列処理で、多数のファイルを効率よく集計。いつもの作業場所から、容量の内訳をすばやく調べられます。",
     "platforms": [
       {
         "name": "Windows",
-        "api": "NtQueryDirectoryFile",
-        "text": "名前・サイズ・使用領域・ファイル ID をまとめて取得。ファイルごとの追加問い合わせを減らします。",
+        "api": "Native scan",
+        "text": "Windows のメタデータをまとめて取得し、大きなフォルダを効率よく走査します。",
         "tag": "NTFS · native CI"
       },
       {
         "name": "Linux",
-        "api": "getdents64 + statx",
-        "text": "ディレクトリ情報をまとめて読み、メタデータを並列に集計。io_uring や XFS 向けの高速経路は、対応環境で明示的に有効にできます。",
-        "tag": "ext4 / XFS · 任意機能"
+        "api": "Parallel scan",
+        "text": "複数のフォルダを並列に処理し、Linux のファイルシステムから容量の内訳を集計します。",
+        "tag": "CLI · GNU du comparison"
       },
       {
         "name": "macOS",
-        "api": "getattrlistbulk",
-        "text": "名前・サイズ・ファイル ID をまとめて取得。CLI は GitHub Actions の ARM64 / Intel 環境で動作を検証しています。",
+        "api": "Native scan",
+        "text": "macOS の標準機能を活かしてメタデータを収集。CLI は ARM64 と Intel の両方で動作を検証しています。",
         "tag": "CLI · ARM64 / Intel CI"
       }
     ],
@@ -78,7 +78,7 @@
     "copy_failed": "選択してコピーしてください",
     "release": "リリースを見る",
     "setup": "環境別セットアップ",
-    "install_note": "Rust 1.88+ と OS ごとのビルドツールが必要です。io_uring は追加のビルド設定で有効にする任意機能です。",
+    "install_note": "Rust 1.88+ と OS ごとのビルドツールが必要です。環境別の導入手順はセットアップガイドを参照してください。",
     "docs_title": "さらに深く知る。",
     "doc_links": [
       {
@@ -106,7 +106,8 @@
     "back_top": "ページの先頭へ",
     "doc_prefix": "docs/",
     "plugin_path": "plugin/README.md",
-    "published": "Cargo 公開版を見る"
+    "published": "Cargo 公開版を見る",
+    "run": "GitHub で実行記録を見る"
   },
   "en": {
     "skip": "Skip to content",
@@ -123,35 +124,35 @@
     "status": "v0.5.0-beta.3 · Acceleration development build · MIT",
     "terminal_label": "Usage illustration",
     "terminal_caption": "Find the largest folders. Decide where to tidy up.",
-    "measured": "Speed, measured on the same workload.",
-    "bench_intro": "The same executable and file set, changing only the selected fast path. Medians from four alternating warm runs per mode. Every directory's logical size, allocated space, and file count must match.",
+    "measured": "One million files. Up to 3.25× faster.",
+    "bench_intro": "HyperDU and GNU du scan the same folders with the same disk-allocation accounting. HyperDU was up to 3.25× faster on the wide tree. Each tool ran eight times in alternating order on GitHub Actions, with identical byte totals for every directory.",
     "all": "All results",
     "dataset": "Dataset",
     "files": "Files",
     "baseline": "Baseline",
-    "ratio": "Time ratio",
+    "ratio": "Speed ratio",
     "timing": "Elapsed time · shorter is faster",
-    "method": "Read every sample, parity check, and condition",
-    "bench_note": "Windows and Linux share a PC with NVMe; macOS runs on GitHub Actions. File counts and build profiles differ by environment. The time ratio is fallback ÷ selected path; below 1 means slower. These results do not compare tools or operating systems, or cover cold cache, HDDs, or network filesystems.",
+    "method": "See every run and the method",
+    "bench_note": "Warm-cache medians. The ratio is GNU du time divided by HyperDU time; below 1 means HyperDU was slower. All three workloads are shown. These synthetic Linux results do not predict the same ratio on other operating systems, cold caches, or whole disks.",
     "engine_title": "Fast, from the filesystem up.",
-    "engine_intro": "Fewer per-file calls. More work for idle workers. One scanner that uses native paths on each operating system.",
+    "engine_intro": "Platform-aware reads and parallel processing handle large file collections efficiently, so you can find what is using space from the tools you already use.",
     "platforms": [
       {
         "name": "Windows",
-        "api": "NtQueryDirectoryFile",
-        "text": "Collect names, sizes, allocations, and file IDs together, reducing extra per-file queries.",
+        "api": "Native scan",
+        "text": "Reads Windows metadata in batches to scan large folders efficiently.",
         "tag": "NTFS · native CI"
       },
       {
         "name": "Linux",
-        "api": "getdents64 + statx",
-        "text": "Read directory entries in bulk and aggregate metadata in parallel. Optional io_uring and XFS paths can be enabled on supported systems.",
-        "tag": "ext4 / XFS · optional"
+        "api": "Parallel scan",
+        "text": "Processes folders in parallel to summarize space used on Linux filesystems.",
+        "tag": "CLI · GNU du comparison"
       },
       {
         "name": "macOS",
-        "api": "getattrlistbulk",
-        "text": "Collect names, sizes, and file IDs in bulk. Native CLI tests run on both ARM64 and Intel GitHub Actions runners.",
+        "api": "Native scan",
+        "text": "Uses native macOS metadata reads. The CLI is tested on both ARM64 and Intel.",
         "tag": "CLI · ARM64 / Intel CI"
       }
     ],
@@ -187,7 +188,7 @@
     "copy_failed": "Select the command to copy it",
     "release": "View releases",
     "setup": "Platform setup guide",
-    "install_note": "Requires Rust 1.88+ and your platform's build tools. Optional io_uring support needs an additional build feature.",
+    "install_note": "Requires Rust 1.88+ and platform build tools. See the setup guide for instructions for your environment.",
     "docs_title": "Go a little deeper.",
     "doc_links": [
       {
@@ -215,7 +216,8 @@
     "back_top": "Back to top",
     "doc_prefix": "docs/en/",
     "plugin_path": "plugin/README.en.md",
-    "published": "Published crates on Cargo"
+    "published": "Published crates on Cargo",
+    "run": "View the GitHub workflow run"
   },
   "zh-CN": {
     "skip": "跳转到正文",
@@ -232,35 +234,35 @@
     "status": "v0.5.0-beta.3 · 加速功能开发版 · MIT",
     "terminal_label": "操作示意",
     "terminal_caption": "找出最大的目录，再决定从哪里开始整理。",
-    "measured": "用相同工作负载，验证速度。",
-    "bench_intro": "使用同一个可执行文件和同一组文件，仅切换待比较的快速路径。每种方式交替运行4次，展示热缓存下的耗时中位数。每个目录的逻辑大小、分配空间和文件数都必须一致。",
+    "measured": "100万个文件，速度最高达3.25倍。",
+    "bench_intro": "HyperDU 与 GNU du 扫描同一批目录，采用相同的磁盘占用计算方式。在宽目录树上，HyperDU 的速度最高为 GNU du 的3.25倍。两个工具在 GitHub Actions 上交替运行各8次，每个目录的字节总数均完全一致。",
     "all": "全部结果",
     "dataset": "数据集",
     "files": "文件数",
     "baseline": "对比工具",
-    "ratio": "时间比",
+    "ratio": "速度比",
     "timing": "耗时 · 越短越快",
-    "method": "查看全部样本、校验结果和测量条件",
-    "bench_note": "Windows 和 Linux 在同一台配有 NVMe 的电脑上测量，macOS 使用 GitHub Actions。各环境的文件数和构建配置不同。时间比为常规路径 ÷ 对比路径，小于1表示更慢。这些结果不用于比较不同工具或操作系统，也不覆盖冷缓存、HDD 或网络文件系统。",
+    "method": "查看全部试验与测量条件",
+    "bench_note": "表中为热缓存下的中位数。速度比为 GNU du 耗时除以 HyperDU 耗时，小于1表示该条件下 HyperDU 更慢。三种结构的结果全部列出。这些 Linux 合成数据的结果不代表其他操作系统、冷缓存或整块磁盘上的相同提升。",
     "engine_title": "从文件系统开始提速。",
-    "engine_intro": "减少逐文件调用，让空闲线程接手任务。一个扫描器，利用各操作系统的原生路径。",
+    "engine_intro": "结合适合各操作系统的读取方式与并行处理，高效汇总大量文件。在熟悉的工作环境中，快速了解空间去向。",
     "platforms": [
       {
         "name": "Windows",
-        "api": "NtQueryDirectoryFile",
-        "text": "批量获取名称、大小、分配空间和文件 ID，减少逐文件查询。",
+        "api": "Native scan",
+        "text": "批量读取 Windows 元数据，高效扫描大型目录。",
         "tag": "NTFS · native CI"
       },
       {
         "name": "Linux",
-        "api": "getdents64 + statx",
-        "text": "批量读取目录信息并并行汇总元数据。可在支持的环境中手动启用 io_uring 或 XFS 快速路径。",
-        "tag": "ext4 / XFS · 可选功能"
+        "api": "Parallel scan",
+        "text": "并行处理多个目录，汇总 Linux 文件系统的空间占用。",
+        "tag": "CLI · GNU du comparison"
       },
       {
         "name": "macOS",
-        "api": "getattrlistbulk",
-        "text": "批量获取名称、大小和文件 ID。CLI 已在 GitHub Actions 的 ARM64 和 Intel 环境中验证。",
+        "api": "Native scan",
+        "text": "使用 macOS 原生功能读取元数据，CLI 已在 ARM64 和 Intel 上验证。",
         "tag": "CLI · ARM64 / Intel CI"
       }
     ],
@@ -296,7 +298,7 @@
     "copy_failed": "请选择命令并复制",
     "release": "查看发布版本",
     "setup": "按平台配置环境",
-    "install_note": "需要 Rust 1.88+ 和对应平台的构建工具。可选的 io_uring 支持需要额外启用构建功能。",
+    "install_note": "需要 Rust 1.88+ 及相应操作系统的构建工具。请参阅环境设置指南。",
     "docs_title": "进一步了解 HyperDU。",
     "doc_links": [
       {
@@ -324,6 +326,7 @@
     "back_top": "返回顶部",
     "doc_prefix": "docs/zh-CN/",
     "plugin_path": "plugin/README.zh-CN.md",
-    "published": "查看 Cargo 已发布版本"
+    "published": "查看 Cargo 已发布版本",
+    "run": "查看 GitHub 运行记录"
   }
 }

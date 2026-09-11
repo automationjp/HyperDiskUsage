@@ -14,13 +14,14 @@
 <meta property="og:description" content="{{ page.description | escape }}">
 <meta property="og:type" content="website">
 <meta property="og:url" content="{{ page.url | absolute_url }}">
+<link rel="icon" type="image/x-icon" href="{{ '/assets/hyperdu.ico' | relative_url }}">
 <link rel="stylesheet" href="{{ '/assets/style.css' | relative_url }}">
 <script src="{{ '/assets/site.js' | relative_url }}" defer></script>
 </head>
 <body id="top">
 <a class="skip-link" href="#main">{{ t.skip }}</a>
 <header class="site-head wrap">
-  <a class="brand" href="{{ page.home_path | relative_url }}" aria-label="HyperDU"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>HyperDU<span class="beta">BETA</span></a>
+  <a class="brand" href="{{ page.home_path | relative_url }}" aria-label="HyperDU"><img class="brand-mark" src="{{ '/assets/hyperdu.ico' | relative_url }}" width="23" height="23" alt="">HyperDU<span class="beta">BETA</span></a>
   <nav class="main-nav" aria-label="{{ t.docs }}">
     <a href="#performance">{{ t.performance }}</a><a href="#engine">{{ t.engine }}</a><a href="#agents">{{ t.agents }}</a><a href="#docs">{{ t.docs }}</a>
   </nav>
