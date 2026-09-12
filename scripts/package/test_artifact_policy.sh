@@ -15,15 +15,25 @@ done < <(sed -n "s/^[[:space:]]*--required '\([^']*\)'.*/\1/p" "$root/.github/wo
 [[ ${#required[@]} -gt 0 ]] || { echo 'No required artifact policy found' >&2; exit 1; }
 cli_deb=hyperdu_0.5.0-beta.2_amd64.deb
 gui_deb=hyperdu-gui_0.5.0-beta.2_amd64.deb
+cli_msi=hyperdu-windows-x86_64-generic.msi
+gui_msi=hyperdu-gui-windows-x86_64-generic.msi
+# The windows job's --required globs are read from the same workflow file, so
+# the fixture has to satisfy them too. Both MSIs are checked below the same way
+# the DEBs are: v0.5.0-beta.2 shipped without either and the job stayed green.
 touch "$fixture/dist/hyperdu-linux-x86_64-generic.zip" \
       "$fixture/dist/hyperdu-gui-linux-x86_64-generic.zip" \
-      "$fixture/dist/$cli_deb" "$fixture/dist/$gui_deb"
+      "$fixture/dist/$cli_deb" "$fixture/dist/$gui_deb" \
+      "$fixture/dist/hyperdu-windows-x86_64-generic.zip" \
+      "$fixture/dist/hyperdu-gui-windows-x86_64-generic.zip" \
+      "$fixture/dist/hyperdu-windows-x86_64-generic.exe" \
+      "$fixture/dist/hyperdu-gui-windows-x86_64-generic.exe" \
+      "$fixture/dist/$cli_msi" "$fixture/dist/$gui_msi"
 run_report() {
     GITHUB_STEP_SUMMARY= bash "$fixture/scripts/package/report_artifacts.sh" \
         "${required[@]}" > "$fixture/result.log" 2>&1
 }
 run_report || { cat "$fixture/result.log"; exit 1; }
-for missing in "$cli_deb" "$gui_deb"; do
+for missing in "$cli_deb" "$gui_deb" "$cli_msi" "$gui_msi"; do
     rm -- "$fixture/dist/$missing"
     if run_report; then
         echo "Artifact policy accepted missing $missing" >&2
@@ -32,7 +42,7 @@ for missing in "$cli_deb" "$gui_deb"; do
     touch "$fixture/dist/$missing"
 done
 run_report || { cat "$fixture/result.log"; exit 1; }
-echo 'PASS: both DEB packages are independently required'
+echo 'PASS: both DEB packages and both MSI installers are independently required'
 
 # Run the actual release case arm with a failing local packager. A verification
 # rejection must remain visible in logs without failing the other formats.

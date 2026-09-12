@@ -127,8 +127,26 @@ jobs:
       - name: Install packagers
         shell: powershell
         run: |
-          cargo install cargo-wix
+          cargo install cargo-wix@0.3.9 --locked
           choco install gh -y
+      - name: Verify WiX Toolset 3.x (cargo-wix 0.3.9 drives candle.exe/light.exe)
+        shell: pwsh
+        run: |
+          # windows-latest = Windows Server 2025 (runner-images 20260907): WiX
+          # Toolset 3.14.1.8722 is preinstalled via chocolatey, $env:WIX is set
+          # and %WIX%\bin is on PATH (the runner-images repository installs it in its
+          # Install-Wix build step and asserts it in a Wix Pester test). cargo-wix 0.3.9 is WiX 3
+          # only; the dotnet `wix` tool (v4+) is not a substitute -- upstream v4
+          # support (PR #295) was merged 2026-03 and has no crates.io release.
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            Write-Host '::warning::WiX 3 is missing from the image; installing wixtoolset via chocolatey'
+            choco install wixtoolset -y --no-progress
+            $wix = [Environment]::GetEnvironmentVariable('WIX', 'Machine')
+            if (-not $wix) { throw 'chocolatey wixtoolset did not set the WIX variable' }
+            Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $wix 'bin')
+            $env:PATH = "$(Join-Path $wix 'bin');$env:PATH"
+          }
+          Get-Command candle.exe, light.exe | Format-Table Name, Version, Source -AutoSize
       - name: Lint (fmt + clippy)
         shell: bash
         run: bash scripts/lint/run.sh
@@ -136,6 +154,18 @@ jobs:
         shell: powershell
         run: |
           pwsh -File scripts/package/release.ps1
+      # Same gate the linux job has. Both MSIs are required: v0.5.0-beta.2
+      # shipped without them and nothing said so.
+      - name: Report packaged artifacts
+        shell: bash
+        run: |
+          bash scripts/package/report_artifacts.sh \
+            --required 'hyperdu-windows-x86_64-generic.zip' \
+            --required 'hyperdu-gui-windows-x86_64-generic.zip' \
+            --required 'hyperdu-windows-x86_64-generic.exe' \
+            --required 'hyperdu-gui-windows-x86_64-generic.exe' \
+            --required 'hyperdu-windows-x86_64-generic.msi' \
+            --required 'hyperdu-gui-windows-x86_64-generic.msi'
       - name: Generate Scoop & winget manifests
         shell: powershell
         run: |
@@ -206,6 +236,12 @@ jobs:
         with:
           draft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+          # Merged-PR list plus "Full Changelog" link. v0.5.0-beta.2 shipped
+          # with an empty body. A hand-written summary is added afterwards by
+          # reading this body back (`gh release view --json body`), prepending
+          # the summary and writing the result with `gh release edit
+          # --notes-file`; that flag replaces the body, it does not append.
+          generate_release_notes: true
           fail_on_unmatched_files: true
           files: release-assets/*
       - name: Publish the complete draft
