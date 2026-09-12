@@ -19,6 +19,15 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/automationjp/HyperDiskUsage"
 homepage = "https://github.com/automationjp/HyperDiskUsage#readme"
+# `cargo wix init` / `cargo wix print` refuse to generate a WiX source without
+# this field, and neither `--manufacturer` nor `--owner` substitutes for it --
+# both are applied after the manifest is read, so the read fails first. The MSI
+# build itself (`cargo wix`) does not read it; the field stays so the checked-in
+# wix/main.wxs can be regenerated. The value matches the winget publisher in
+# scripts/package/winget.ps1 so the two Windows package managers name the same
+# entity. Only the two crates that ship an MSI opt in (hyperdu and hyperdu-gui);
+# hyperdu-core deliberately does not inherit it.
+authors = ["automationjp"]
 
 [workspace.dependencies]
 # The `version` here must match `workspace.package.version`: cargo publish
