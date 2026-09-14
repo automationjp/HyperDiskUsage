@@ -197,7 +197,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                 }
 
                 if is_dir {
-                    let within_depth = opt.max_depth == 0 || depth < opt.max_depth;
+                    let within_depth = opt.prune_depth == 0 || depth < opt.prune_depth;
                     // These checks have to run before the directory is queued:
                     // once it is queued another worker may already be inside it.
                     if within_depth && !skip_directory(opt, &child) {

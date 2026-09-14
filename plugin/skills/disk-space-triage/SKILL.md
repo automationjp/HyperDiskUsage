@@ -79,7 +79,8 @@ Useful flags:
 
 | Flag | Use it when |
 |---|---|
-| `--max-depth N` | The tree is huge and you only need the top levels |
+| `--max-depth N` | The listing is too long to read. Shortens the output only; every printed total still covers the whole subtree |
+| `--prune-depth N` | The scan itself is too slow and a rough shape will do. Stops the walk, so sizes come back smaller than the real usage — never quote them as totals |
 | `--json PATH` | You want to compute on the result instead of reading it |
 | `--csv PATH` | You want to sum a subset with `awk` |
 
@@ -87,8 +88,10 @@ Useful flags:
 it over parsing the human-readable table, which is formatted for people and
 will change.
 
-Scanning a full 930 GB disk with 4 million files takes roughly 47 seconds. Use
-`--max-depth` if you need an answer sooner.
+Scanning a full 930 GB disk with 4 million files takes roughly 47 seconds. That
+is usually worth waiting for. `--prune-depth` cuts it short, but it cuts the
+sizes with it: at depth 2 a 894 GB volume reports 74 GB. If you use it, say the
+numbers are partial — do not hand them over as an answer to "how big is it".
 
 Check `hyperdu --help` before inventing a flag. Guessing at one costs a full
 scan to discover it does not exist.

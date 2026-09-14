@@ -6,7 +6,8 @@ pub struct FilterConfig {
     pub exclude_contains: Vec<String>,
     pub exclude_regex: Vec<String>,
     pub exclude_glob: Vec<String>,
-    pub max_depth: Option<u32>,
+    /// See [`Options::prune_depth`]: this cuts the walk, and with it the totals.
+    pub prune_depth: Option<u32>,
     pub min_file_size: Option<u64>,
 }
 
@@ -47,7 +48,7 @@ pub struct OptionsBuilder {
     pub exclude_contains: Option<Vec<String>>,
     pub exclude_regex: Option<Vec<String>>,
     pub exclude_glob: Option<Vec<String>>,
-    pub max_depth: Option<u32>,
+    pub prune_depth: Option<u32>,
     pub min_file_size: Option<u64>,
     pub follow_links: Option<bool>,
     pub threads: Option<usize>,
@@ -91,12 +92,19 @@ impl OptionsBuilder {
         if !cfg.exclude_glob.is_empty() {
             self.exclude_glob = Some(cfg.exclude_glob);
         }
-        self.max_depth = cfg.max_depth.or(self.max_depth);
+        self.prune_depth = cfg.prune_depth.or(self.prune_depth);
         self.min_file_size = cfg.min_file_size.or(self.min_file_size);
         self
     }
-    pub fn max_depth(mut self, v: u32) -> Self {
-        self.max_depth = Some(v);
+    /// Cut the walk at `v` levels below the root (`0` = unlimited).
+    ///
+    /// Named `prune_depth`, not `max_depth`, because it removes subtrees from
+    /// the *totals* as well as from the walk. There is deliberately no
+    /// `max_depth` alias: the old name meant this, callers now reasonably
+    /// expect du's report-only semantics, and a silently-working alias would
+    /// hand them truncated totals under the reading they came in with.
+    pub fn prune_depth(mut self, v: u32) -> Self {
+        self.prune_depth = Some(v);
         self
     }
     pub fn min_file_size(mut self, v: u64) -> Self {
@@ -172,8 +180,8 @@ impl OptionsBuilder {
     pub fn build(self) -> Options {
         // Start from default to inherit tuned env defaults
         let mut opt = Options::default();
-        if let Some(v) = self.max_depth {
-            opt.max_depth = v;
+        if let Some(v) = self.prune_depth {
+            opt.prune_depth = v;
         }
         if let Some(v) = self.min_file_size {
             opt.min_file_size = v;

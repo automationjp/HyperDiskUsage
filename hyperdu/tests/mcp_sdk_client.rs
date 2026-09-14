@@ -57,7 +57,7 @@ impl Sdk {
     }
     async fn scan(&self, path: &Path) -> anyhow::Result<RequestHandle<RoleClient>> {
         let params = CallToolRequestParams::new("scan_path").with_arguments(
-            json!({"path":path.display().to_string(),"top_n":1,"max_depth":0})
+            json!({"path":path.display().to_string(),"top_n":1,"prune_depth":0})
                 .as_object()
                 .unwrap()
                 .clone(),
@@ -143,7 +143,7 @@ async fn sdk_rejected_arguments_do_not_break_the_next_scan() -> anyhow::Result<(
     let dir = fixture(1, 7);
     let sdk = Sdk::start().await?;
     let bad = CallToolRequestParams::new("scan_path").with_arguments(
-        json!({"path":dir.path().display().to_string(),"max_depth":"not-a-number"})
+        json!({"path":dir.path().display().to_string(),"prune_depth":"not-a-number"})
             .as_object()
             .unwrap()
             .clone(),

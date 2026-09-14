@@ -176,7 +176,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                     // Directory identity and self size are read from its open
                     // descriptor when the queued job accepts the directory.
                     if is_dir_hint {
-                        if opt.max_depth == 0 || depth < opt.max_depth {
+                        if opt.prune_depth == 0 || depth < opt.prune_depth {
                             ctx.enqueue_dir(dir.join(OsStr::from_bytes(name_slice)), depth + 1);
                         }
                     } else {
@@ -187,7 +187,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                         let name = unsafe { std::ffi::CStr::from_ptr(name_ptr) };
                         match strict::metadata(fd, name, opt.follow_links) {
                             Ok(metadata) if metadata.is_dir() => {
-                                if opt.max_depth == 0 || depth < opt.max_depth {
+                                if opt.prune_depth == 0 || depth < opt.prune_depth {
                                     ctx.enqueue_dir(
                                         dir.join(OsStr::from_bytes(name_slice)),
                                         depth + 1,
@@ -226,7 +226,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                     }
                 }
             } else if is_dir_hint {
-                if opt.max_depth == 0 || depth < opt.max_depth {
+                if opt.prune_depth == 0 || depth < opt.prune_depth {
                     // No per-child `statx` here. The filesystem-boundary and
                     // cycle checks happen when the child is opened, which is
                     // both cheaper (one `fstat` on a descriptor we need anyway)
@@ -348,7 +348,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                         let mode = stx.stx_mode as u32;
                         let ftype = mode & libc::S_IFMT;
                         if ftype == libc::S_IFDIR {
-                            if opt.max_depth == 0 || depth < opt.max_depth {
+                            if opt.prune_depth == 0 || depth < opt.prune_depth {
                                 use std::ffi::OsStr;
                                 // Boundary and cycle checks happen when this
                                 // directory is opened, as in the DT_DIR branch.
@@ -384,7 +384,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                         let child_path = dir.join(OsStr::from_bytes(name_slice));
                         if let Ok(md) = std::fs::symlink_metadata(&child_path) {
                             if md.file_type().is_dir() {
-                                if opt.max_depth == 0 || depth < opt.max_depth {
+                                if opt.prune_depth == 0 || depth < opt.prune_depth {
                                     ctx.enqueue_dir(child_path, depth + 1);
                                 }
                             } else if md.file_type().is_file() {
@@ -403,7 +403,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                     let child_path = dir.join(OsStr::from_bytes(name_slice));
                     if let Ok(md) = std::fs::symlink_metadata(&child_path) {
                         if md.file_type().is_dir() {
-                            if opt.max_depth == 0 || depth < opt.max_depth {
+                            if opt.prune_depth == 0 || depth < opt.prune_depth {
                                 ctx.enqueue_dir(child_path, depth + 1);
                             }
                         } else if md.file_type().is_file() {

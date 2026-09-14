@@ -222,9 +222,9 @@ ui.add(egui::TextEdit::singleline(&mut self.root_input).desired_width(430.0).hin
                         ui.label("最小ファイルサイズ");
 ui.add(egui::TextEdit::singleline(&mut self.params.min_size).desired_width(100.0));
 ui.weak("例: 10 MiB");
-                        ui.label("深さ上限");
-ui.add(egui::DragValue::new(&mut self.params.max_depth).range(0..=u32::MAX));
-ui.weak("0 = 無制限");
+                        ui.label("走査を打ち切る深さ");
+ui.add(egui::DragValue::new(&mut self.params.prune_depth).range(0..=u32::MAX));
+ui.weak("0 = 無制限。1以上にすると、その下は集計されず合計が小さく出ます");
                     });
                     ui.label("除外パターン (1行に1つ。空欄 = 除外なし)");
                     ui.columns(3,|columns|{

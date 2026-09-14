@@ -129,9 +129,7 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
         return None;
     }
 
-    let prefix = format!("{}:\\", drive.to_ascii_uppercase());
-    let map =
-        mft_aggregate::to_stat_map(&entries, &prefix, opt.count_hardlinks, opt.compute_physical);
+    let map = mft_stat_map(root, &entries, opt);
 
     if opt.cancel.load(std::sync::atomic::Ordering::Relaxed) {
         return None;
@@ -340,6 +338,18 @@ pub fn mft_backend_applies(_root: &std::path::Path, _opt: &crate::Options) -> bo
     false
 }
 
+#[cfg(target_env = "msvc")]
+fn mft_stat_map(
+    root: &std::path::Path,
+    entries: &[mft_reader::Entry],
+    opt: &crate::Options,
+) -> StatMap {
+    // Keep the operand's prefix (including verbatim disk roots) so root lookup
+    // and display-depth checks use the same paths as enumeration does.
+    let prefix = root.to_string_lossy();
+    mft_aggregate::to_stat_map(entries, &prefix, opt.count_hardlinks, opt.compute_physical)
+}
+
 /// Drive letter to read the MFT of, or `None` when the backend does not apply.
 ///
 /// The single place the preconditions live: asked for, a volume root, and
@@ -357,7 +367,7 @@ fn mft_drive(root: &std::path::Path, opt: &crate::Options) -> Option<char> {
         || opt.exclude_regex_set.is_some()
         || opt.exclude_glob_set.is_some()
         || !opt.exclude_contains_w.is_empty()
-        || opt.max_depth != 0
+        || opt.prune_depth != 0
         || opt.min_file_size != 0
         || opt.follow_links
         || opt.count_hardlinks
@@ -474,6 +484,63 @@ fn nt_enabled() -> bool {
             .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
             .unwrap_or(true)
     })
+}
+
+#[cfg(all(test, target_env = "msvc"))]
+mod mft_root_identity_tests {
+    use std::path::Path;
+
+    use super::*;
+
+    fn entry(record: u64, parent: u64, name: &str, directory: bool) -> mft_reader::Entry {
+        mft_reader::Entry {
+            record,
+            parent,
+            name: name.into(),
+            is_directory: directory,
+            sizes: mft::DataSizes {
+                real_size: 500_000,
+                allocated_size: 503_808,
+            },
+            hard_link_count: 1,
+            data_flags: 0,
+            size_source: mft_reader::SizeSource::default(),
+        }
+    }
+
+    #[test]
+    fn deep_totals_keep_operand_prefix_for_lookup_and_display_depth() {
+        // Exercise the production aggregation boundary without opening a volume.
+        let entries = [
+            entry(16, mft::ROOT_RECORD, "a", true),
+            entry(17, 16, "b", true),
+            entry(18, 17, "deep.bin", false),
+        ];
+        for operand in [r"C:\", r"c:\", "C:/", r"\\?\C:\", r"\\?\F:\"] {
+            let root = Path::new(operand);
+            assert!(volume_root_letter(root).is_some());
+            let opt = crate::Options::default();
+            let map = crate::rollup::rollup_child_to_parent(mft_stat_map(root, &entries, &opt));
+            for path in [root.to_path_buf(), root.join("a"), root.join(r"a\b")] {
+                let stat = map.get(&path).unwrap_or_else(|| panic!("missing {path:?}"));
+                assert_eq!(
+                    (stat.files, stat.logical, stat.physical),
+                    (1, 500_000, 503_808)
+                );
+            }
+            let mut depths: Vec<_> = map
+                .keys()
+                .map(|path| {
+                    path.strip_prefix(root)
+                        .expect("operand prefix")
+                        .components()
+                        .count()
+                })
+                .collect();
+            depths.sort_unstable();
+            assert_eq!(depths, [0, 1, 2], "{operand}");
+        }
+    }
 }
 
 #[cfg(test)]

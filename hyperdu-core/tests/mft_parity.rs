@@ -286,7 +286,7 @@ fn the_mft_backend_declines_unsupported_options() {
             ..plain.clone()
         },
         Options {
-            max_depth: 1,
+            prune_depth: 1,
             ..plain.clone()
         },
         Options {

@@ -38,7 +38,9 @@ fn removed_backend_options_are_rejected() {
             .output()
             .unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(2), "{option:?}: {output:?}");
+        // 1, not clap's 2: a usage error is a usage error whichever argument
+        // caused it, and a bad --max-depth value already exited 1.
+        assert_eq!(output.status.code(), Some(1), "{option:?}: {output:?}");
         assert!(
             stderr.contains("unexpected argument"),
             "{option:?}: {stderr}"
@@ -125,7 +127,7 @@ fn platform_and_build_options_are_rejected_or_run_on_a_small_fixture() {
         } else {
             let name = args[0].split('=').next().unwrap();
             let stderr = String::from_utf8_lossy(&output.stderr);
-            assert_eq!(output.status.code(), Some(2), "{args:?}: {output:?}");
+            assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
             assert!(
                 stderr.contains("unexpected argument") && stderr.contains(name),
                 "{stderr}"

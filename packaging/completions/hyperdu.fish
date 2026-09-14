@@ -6,7 +6,8 @@ end
 complete -c hyperdu -l top -d 'Show top N entries' -r
 complete -c hyperdu -l exclude -d 'Exclude substrings' -r
 complete -c hyperdu -l exclude-from -d 'Exclude from file' -r
-complete -c hyperdu -l max-depth -d 'Max depth' -r
+complete -c hyperdu -s d -l max-depth -d 'Print at most N levels below each operand (0 = operand only; omit for unlimited)' -r
+complete -c hyperdu -l prune-depth -d 'Stop the scan N levels down (truncates totals)' -r
 complete -c hyperdu -l min-file-size -d 'Min file size' -r
 complete -c hyperdu -l follow-links -d 'Follow symlinks'
 complete -c hyperdu -l one-file-system -d 'Do not cross FS'

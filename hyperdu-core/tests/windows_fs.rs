@@ -109,7 +109,7 @@ fn name_filter_excludes_subdir_but_not_root() {
 }
 
 #[test]
-fn min_size_and_max_depth() {
+fn min_size_and_prune_depth() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("r");
     build_tree(&root);
@@ -119,7 +119,7 @@ fn min_size_and_max_depth() {
     assert_eq!(stat_of(&map, &root).files, 2);
 
     let mut opt = quiet_opts();
-    opt.max_depth = 1; // root(0) + sub(1); deep(2) not entered
+    opt.prune_depth = 1; // root(0) + sub(1); deep(2) not entered
     let map = scan_directory(&root, &opt).unwrap();
     assert_eq!(stat_of(&map, &root).files, 3);
     assert!(!map.contains_key(&root.join("sub").join("deep")));
@@ -317,6 +317,39 @@ fn forward_slash_root_keeps_input_spelling_in_keys() {
     let map = scan_directory(&slashed, &quiet_opts()).unwrap();
     assert_eq!(stat_of(&map, &slashed).files, 4);
     assert_eq!(stat_of(&map, &slashed.join("sub")).files, 2);
+
+    // The lookups above cannot catch a separator mistake: PathBuf's Eq and Hash
+    // normalise separators on Windows, so `r/sub` and `r\sub` are one key. Only
+    // the rendered string shows what a child row would actually print, and
+    // `<tmp>/r\sub` under a /-spelled operand is the mixed-path surprise this
+    // is guarding against.
+    let child = map
+        .keys()
+        .find(|k| k.file_name().is_some_and(|n| n == "sub"))
+        .expect("sub key");
+    assert_eq!(
+        child.to_string_lossy(),
+        format!("{}/sub", slashed.to_string_lossy()),
+        "a child of a /-spelled operand must keep /"
+    );
+}
+
+/// The mirror of the above: the rule is "follow the parent", not "always /".
+#[test]
+fn backslash_root_keeps_backslashes_in_child_keys() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("r");
+    build_tree(&root);
+    let map = scan_directory(&root, &quiet_opts()).unwrap();
+
+    let child = map
+        .keys()
+        .find(|k| k.file_name().is_some_and(|n| n == "sub"))
+        .expect("sub key");
+    assert_eq!(
+        child.to_string_lossy(),
+        format!("{}\\sub", root.to_string_lossy()),
+    );
 }
 
 #[test]
