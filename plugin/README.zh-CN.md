@@ -3,7 +3,7 @@
 [日本語](README.md) · [English](README.en.md) · **简体中文**
 
 一次安装即可使用 CLI 和 MCP 服务器。发布的 crate 和可执行命令均名为 `hyperdu`，
-MCP 服务器通过 `hyperdu mcp` 启动。0.5.0-beta.4 将取代独立的 `hyperdu-mcp` 可执行文件。
+MCP 服务器通过 `hyperdu mcp` 启动。0.5.0-beta.5 将取代独立的 `hyperdu-mcp` 可执行文件。
 
 ## 从当前源码安装
 
@@ -13,7 +13,7 @@ hyperdu --help
 hyperdu mcp --help
 ```
 
-需要 Rust 1.88+。发布后可使用 `cargo install hyperdu --version 0.5.0-beta.4`。
+需要 Rust 1.88+。发布后可使用 `cargo install hyperdu --version 0.5.0-beta.5`。
 安装脚本优先使用当前源码；找不到源码时从 GitHub 安装。
 
 ```sh

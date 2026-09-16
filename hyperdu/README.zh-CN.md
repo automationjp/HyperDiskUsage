@@ -12,7 +12,7 @@
 ## 安装
 
 ```bash
-cargo install hyperdu --version 0.5.0-beta.4
+cargo install hyperdu --version 0.5.0-beta.5
 ```
 
 crate 和可执行命令均名为 `hyperdu`。一次安装包含 CLI 和 MCP；只有运行 `hyperdu mcp` 时

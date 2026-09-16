@@ -19,10 +19,10 @@
 
 CLI引数の既定値・出力条件・対応OSは [CLIパラメータリファレンス](docs/cli-reference.md) を参照してください。`--time` 系引数は既定で有効な `time-format` featureが必要です。
 
-> **0.5.0-beta.4 は公開準備中です。** このブランチでは `cargo install --locked --path hyperdu` で導入できます。下記の crates.io コマンドと新しい名前の配布物は、リリース公開後に利用できます。
+> **0.5.0-beta.5 は公開準備中です。** このブランチでは `cargo install --locked --path hyperdu` で導入できます。下記の crates.io コマンドと新しい名前の配布物は、リリース公開後に利用できます。
 
 ```bash
-cargo install hyperdu --version 0.5.0-beta.4
+cargo install hyperdu --version 0.5.0-beta.5
 hyperdu . --top 20
 ```
 
@@ -143,7 +143,7 @@ MCP server は次の 3 ツールを公開します。
 **削除ツールは意図的に提供していません。** エージェントが人間の確認なしにデータを破壊する経路を作らないためです。
 
 ```bash
-cargo install hyperdu --version 0.5.0-beta.4
+cargo install hyperdu --version 0.5.0-beta.5
 claude mcp add --transport stdio hyperdu -- hyperdu mcp
 # Codex:
 codex mcp add hyperdu -- hyperdu mcp
@@ -165,7 +165,7 @@ Agent Skill / Plugin は [plugin/README.md](plugin/README.md) を参照してく
 両モードの走査・集計は `hyperdu-core` が担当します。詳細は[GUIのREADME](hyperdu-gui/README.md)を参照してください。
 
 ```bash
-cargo install hyperdu-gui --version 0.5.0-beta.4
+cargo install hyperdu-gui --version 0.5.0-beta.5
 hyperdu-gui
 ```
 
@@ -177,10 +177,10 @@ hyperdu-gui
 
 ```bash
 # CLI + MCP (Rust 1.88+)
-cargo install hyperdu --version 0.5.0-beta.4
+cargo install hyperdu --version 0.5.0-beta.5
 
 # GUI (Rust 1.75+)
-cargo install hyperdu-gui --version 0.5.0-beta.4
+cargo install hyperdu-gui --version 0.5.0-beta.5
 
 # MCP を使うときだけ起動
 hyperdu mcp
@@ -192,10 +192,10 @@ hyperdu mcp
 
 | Platform | CLI | GUI |
 |---|---|---|
-| Windows x86_64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-windows-x86_64-generic.zip) / [exe](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-windows-x86_64-generic.exe) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-gui-windows-x86_64-generic.zip) |
-| Linux x86_64 (glibc) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-linux-x86_64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-gui-linux-x86_64-generic.zip) |
-| Linux x86_64 (musl) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-linux-x86_64-musl-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-gui-linux-x86_64-musl-generic.zip) |
-| Linux aarch64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-linux-aarch64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-gui-linux-aarch64-generic.zip) |
+| Windows x86_64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-windows-x86_64-generic.zip) / [exe](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-windows-x86_64-generic.exe) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-gui-windows-x86_64-generic.zip) |
+| Linux x86_64 (glibc) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-linux-x86_64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-gui-linux-x86_64-generic.zip) |
+| Linux x86_64 (musl) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-linux-x86_64-musl-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-gui-linux-x86_64-musl-generic.zip) |
+| Linux aarch64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-linux-aarch64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-gui-linux-aarch64-generic.zip) |
 
 Debian / Ubuntu 向け `.deb` も同じ release にあります。
 

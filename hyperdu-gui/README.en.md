@@ -10,7 +10,7 @@ The labels, status messages, and settings in the GUI are Japanese. At startup it
 
 ## Release status
 
-`0.5.0-beta.4` is being prepared for publication. Installing a specific version from the crate registry will be available after publication. For now, install the source checkout from the repository root.
+`0.5.0-beta.5` is being prepared for publication. Installing a specific version from the crate registry will be available after publication. For now, install the source checkout from the repository root.
 
 ## Install and run
 

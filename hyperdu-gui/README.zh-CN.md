@@ -10,7 +10,7 @@ GUI 中的标签、状态消息和设置项均为日语。启动时会搜索操�
 
 ## 发布状态
 
-`0.5.0-beta.4` 正在准备发布。发布后才能从 crate registry 安装指定版本。目前请从仓库 root 安装 source checkout。
+`0.5.0-beta.5` 正在准备发布。发布后才能从 crate registry 安装指定版本。目前请从仓库 root 安装 source checkout。
 
 ## 安装与启动
 
