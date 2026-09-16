@@ -57,24 +57,28 @@ Icon=hyperdu
 Categories=Utility;System;
 DESK
 
-# Try to generate a proper 64x64 PNG icon. Prefer ImageMagick if available.
-icon_path=""
-if command -v convert >/dev/null 2>&1; then
-  convert -size 64x64 canvas:#4a90d9 "$appdir/hyperdu.png" && icon_path="$appdir/hyperdu.png"
-elif command -v magick >/dev/null 2>&1; then
-  magick -size 64x64 canvas:#4a90d9 "$appdir/hyperdu.png" && icon_path="$appdir/hyperdu.png"
-else
-  # No ImageMagick; drop Icon= from desktop file to avoid hard failure inside linuxdeploy
-  sed -i '/^Icon=/d' "$appdir/usr/share/applications/hyperdu-gui.desktop" || true
+# The GUI's own window icon doubles as the AppImage icon, so there is nothing to
+# generate. What was here before drew a blank 64x64 square with ImageMagick and,
+# when ImageMagick was absent, deleted Icon= from the desktop file "to avoid a
+# hard failure inside linuxdeploy". That is backwards: linuxdeploy *requires*
+# Icon= and aborts with "Icon entry missing in desktop file" without it. GitHub's
+# ubuntu runners have no ImageMagick, so every release took the deleting branch
+# and no AppImage has ever been produced.
+#
+# The filename matters. linuxdeploy compares the icon file's stem against the
+# Icon= value, so a 256x256 asset named hyperdu-256.png has to arrive as
+# hyperdu.png to match `Icon=hyperdu` above.
+icon_src="$root_dir/hyperdu-gui/assets/hyperdu-256.png"
+icon_path="$appdir/hyperdu.png"
+if [[ ! -f "$icon_src" ]]; then
+  echo "error: GUI icon missing at $icon_src" >&2
+  exit 1
 fi
+cp "$icon_src" "$icon_path"
 
 ld_cmd=("$LINUXDEPLOY" --appdir "$appdir" --executable "$appdir/usr/bin/hyperdu-gui" --output appimage)
-if [[ -f "$appdir/usr/share/applications/hyperdu-gui.desktop" ]]; then
-  ld_cmd+=(--desktop-file "$appdir/usr/share/applications/hyperdu-gui.desktop")
-fi
-if [[ -n "$icon_path" && -f "$icon_path" ]]; then
-  ld_cmd+=(--icon-file "$icon_path")
-fi
+ld_cmd+=(--desktop-file "$appdir/usr/share/applications/hyperdu-gui.desktop")
+ld_cmd+=(--icon-file "$icon_path")
 
 "${ld_cmd[@]}" >> "$dist_dir/linuxdeploy.log" 2>&1 || {
   echo "warn: linuxdeploy failed; AppImage skipped (see dist/linuxdeploy.log)";
