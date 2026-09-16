@@ -615,7 +615,7 @@ if [[ -n "$url_base" ]]; then
   # Scoop manifest (EXE/MSI)
   if [[ -f "$dist_dir/scoop/hyperdu.json" ]]; then
     exe=$(ls -1 "$dist_dir"/hyperdu-windows-*.exe 2>/dev/null | head -n1 || true)
-    msi=$(ls -1 "$dist_dir"/hyperdu-setup.msi 2>/dev/null | head -n1 || true)
+    msi=$(ls -1 "$dist_dir"/hyperdu-windows-*.msi 2>/dev/null | head -n1 || true)
     asset="${exe:-$msi}"
     if [[ -n "$asset" && -f "$asset" ]]; then
       sum=$(sha256_of "$asset"); url="$url_base/$(basename "$asset")"
@@ -625,7 +625,7 @@ if [[ -n "$url_base" ]]; then
   # winget manifest
   if [[ -f "$dist_dir/winget/manifest.yaml" ]]; then
     exe=$(ls -1 "$dist_dir"/hyperdu-windows-*.exe 2>/dev/null | head -n1 || true)
-    msi=$(ls -1 "$dist_dir"/hyperdu-setup.msi 2>/dev/null | head -n1 || true)
+    msi=$(ls -1 "$dist_dir"/hyperdu-windows-*.msi 2>/dev/null | head -n1 || true)
     asset="${exe:-$msi}"
     if [[ -n "$asset" && -f "$asset" ]]; then
       sum=$(sha256_of "$asset"); url="$url_base/$(basename "$asset")"

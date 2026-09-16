@@ -17,3 +17,4 @@
 *.zip binary
 *.exe binary
 *.msi binary
+*.ico binary

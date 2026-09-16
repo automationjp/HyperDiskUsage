@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 description = "Hyper-fast GUI disk usage analyzer (Windows/Linux)."
 license.workspace = true
+# Inherited only here and in hyperdu: cargo-wix needs it to build the MSI.
+authors.workspace = true
 rust-version = "1.75"
 repository.workspace = true
 homepage.workspace = true
@@ -37,6 +39,15 @@ color-eyre = { version = "0.6", optional = true }
 
 [dev-dependencies]
 tempfile = "3.10"
+
+# Windows executable icon, see build.rs. Cargo matches a target-specific
+# build-dependency against the *host*, not the target being built, so a Linux
+# cross-build to x86_64-pc-windows-gnu never pulls this crate and build.rs
+# compiles to a no-op there. `toml` is off: the [package.metadata.winresource]
+# table it would read is unused, and toml 1.x declares rust-version 1.85,
+# above the floor this crate advertises.
+[target.'cfg(windows)'.build-dependencies]
+winresource = { version = "0.1.31", default-features = false }
 
 # Debian packaging (cargo-deb)
 [package.metadata.deb]
