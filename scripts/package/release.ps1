@@ -1,5 +1,6 @@
 Param(
   [switch]$SkipGui,
+  [switch]$SkipMsi,
   [ValidateSet('generic','native')]
   [string]$CpuFlavor = 'generic',
   [switch]$Help,
@@ -11,14 +12,15 @@ $ErrorActionPreference = 'Stop'
 
 function Show-Help {
   @'
-Usage: scripts/package/release.ps1 [-SkipGui] [-CpuFlavor generic|native] [-Help]
+Usage: scripts/package/release.ps1 [-SkipGui] [-SkipMsi] [-CpuFlavor generic|native] [-Help]
 
 Builds release binaries (CLI/GUI) for the current host and packages them into dist/*.zip
-along with README.md. Also drops plain .exe copies on Windows hosts. If cargo-wix
-is available, attempts MSI generation.
+along with README.md. Also drops plain .exe copies on Windows hosts and builds the
+MSI installers with cargo-wix + WiX Toolset 3.x (required unless -SkipMsi).
 
 Options:
   -SkipGui         Skip building/packaging hyperdu-gui.
+  -SkipMsi         Skip the MSI installers (local runs without WiX Toolset 3.x).
   -CpuFlavor       generic (portable) or native (use -C target-cpu=native).
   -Help            Show this help.
 
@@ -141,22 +143,44 @@ if ($guiBin) {
 
 Write-Host "OK -> $Dist"
 
-# Optional: Build MSI installers with cargo-wix if available
-try {
-  if (Get-Command cargo-wix -ErrorAction SilentlyContinue) {
-    Write-Host "==> Building MSI (cargo-wix) for hyperdu"
-    cargo wix -p hyperdu | Out-Host
-    $msiCli = Get-ChildItem -Path (Join-Path $Root 'target/wix') -Filter '*hyperdu*.msi' -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch 'hyperdu-gui' } | Sort-Object LastWriteTime | Select-Object -Last 1
-    if ($msiCli) { Copy-Item $msiCli.FullName (Join-Path $Dist 'hyperdu-setup.msi') -Force }
-    if (-not $SkipGui) {
-      Write-Host "==> Building MSI (cargo-wix) for hyperdu-gui"
-      cargo wix -p hyperdu-gui | Out-Host
-      $msiGui = Get-ChildItem -Path (Join-Path $Root 'target/wix') -Filter '*hyperdu-gui*.msi' -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
-      if ($msiGui) { Copy-Item $msiGui.FullName (Join-Path $Dist 'hyperdu-gui-setup.msi') -Force }
-    }
-  } else {
-    Write-Host "info: cargo-wix not found; skipping MSI generation. Install with: cargo install cargo-wix"
+# MSI installers. Required, not best-effort: v0.5.0-beta.2 (run 34180925269)
+# printed "There are no WXS files to create an installer", copied nothing and
+# stayed green, because cargo-wix is a native command whose exit code never
+# reaches a PowerShell catch block. Fail on every way this can go wrong:
+# tool missing, WiX missing, non-zero exit, no or empty output.
+function Build-Msi([string]$Package, [string]$OutName) {
+  # The member manifest is the INPUT argument on purpose. cargo-wix 0.3.9 runs
+  # light.exe with `-b <directory of INPUT>` and never changes directory, so
+  # `wix\License.rtf` and `assets\hyperdu.ico` in <crate>/wix/main.wxs only
+  # resolve when INPUT is <crate>/Cargo.toml; from the workspace root they
+  # point at a wix/ and assets/ that do not exist. -p is still required:
+  # cargo metadata on a member manifest still lists all workspace members.
+  $manifest = Join-Path $Root "$Package\Cargo.toml"
+  $out = Join-Path $Dist $OutName
+  Write-Host "==> Building MSI (cargo-wix) for $Package -> $OutName"
+  # --no-build: the exe was built above with $RUSTFLAGS; a rebuild by cargo-wix
+  # without them would silently replace a -native binary with a generic one.
+  # -o with a file path is used verbatim; without it the MSI lands in
+  # <cargo target dir>\wix\hyperdu-0.5.0.3-x86_64.msi, which is not under
+  # $Root\target when a target-dir is configured (F:/cargo-target locally).
+  cargo wix -p $Package --no-build --nocapture -o $out $manifest | Out-Host
+  if ($LASTEXITCODE -ne 0) { throw "cargo wix failed for $Package (exit $LASTEXITCODE)" }
+  if (-not (Test-Path $out)) { throw "cargo wix exited 0 but $out was not written" }
+  $bytes = (Get-Item $out).Length
+  if ($bytes -lt 100KB) { throw "$OutName is $bytes bytes; the executable is not inside it" }
+  Write-Host "  msi: $out ($bytes bytes)"
+}
+
+if ($SkipMsi) {
+  Write-Host "info: -SkipMsi given; MSI installers not built"
+} else {
+  if (-not (Get-Command cargo-wix -ErrorAction SilentlyContinue)) {
+    throw 'cargo-wix is not installed; run: cargo install cargo-wix@0.3.9 --locked'
   }
-} catch {
-  Write-Host "warn: MSI generation failed ($_)"
+  if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+    throw 'WiX Toolset 3.x (candle.exe) is not on PATH; cargo-wix 0.3.9 cannot use the dotnet wix tool (v4+)'
+  }
+  # Same stem as the zip/exe beside it: hyperdu-windows-x86_64-generic.msi.
+  Build-Msi 'hyperdu' "hyperdu-$osTag-$arch-$suffix.msi"
+  if (-not $SkipGui) { Build-Msi 'hyperdu-gui' "hyperdu-gui-$osTag-$arch-$suffix.msi" }
 }

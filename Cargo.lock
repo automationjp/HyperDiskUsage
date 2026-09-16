@@ -1734,6 +1734,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "windows 0.62.0",
+ "winresource",
 ]
 
 [[package]]
@@ -1781,6 +1782,7 @@ dependencies = [
  "profiling",
  "rfd",
  "tempfile",
+ "winresource",
 ]
 
 [[package]]
@@ -4879,6 +4881,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "21a0236b59786fed61e2a80582dd500fe61f18b5dca67a4a067d0bc9039339cf"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "winresource"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0986a8b1d586b7d3e4fe3d9ea39fb451ae22869dcea4aa109d287a374d866087"
+dependencies = [
+ "version_check",
 ]
 
 [[package]]

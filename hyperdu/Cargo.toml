@@ -3,6 +3,8 @@ name = "hyperdu"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+# Inherited only here and in hyperdu-gui: cargo-wix needs it to build the MSI.
+authors.workspace = true
 description = "HyperDU CLI and MCP server for disk usage analysis"
 rust-version = "1.88"
 repository.workspace = true
@@ -37,6 +39,15 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "syn
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+
+# Windows executable icon, see build.rs. Cargo matches a target-specific
+# build-dependency against the *host*, not the target being built, so a Linux
+# cross-build to x86_64-pc-windows-gnu never pulls this crate and build.rs
+# compiles to a no-op there. `toml` is off: the [package.metadata.winresource]
+# table it would read is unused, and toml 1.x declares rust-version 1.85,
+# above the floor this crate advertises.
+[target.'cfg(windows)'.build-dependencies]
+winresource = { version = "0.1.31", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2" }
