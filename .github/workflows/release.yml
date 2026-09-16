@@ -42,17 +42,42 @@ jobs:
           cargo install cargo-generate-rpm || true
       - name: Lint (fmt + clippy)
         run: bash scripts/lint/run.sh
+      # scripts/package/verified-appimage-tools.sh takes reviewed local files and
+      # their SHA256, never a download it chose itself. Pinning happens here, in
+      # reviewable workflow text, the same way every action above is pinned to a
+      # commit. Both tags are immutable; `continuous` is not -- linuxdeploy's was
+      # rebuilt on 2026-08-01 -- so a hash pinned against it would rot silently.
+      # AppImageKit is retired upstream (its assets are renamed `obsolete-*`);
+      # AppImage/appimagetool is the successor.
+      - name: Fetch pinned AppImage tools
+        env:
+          LINUXDEPLOY_URL: https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+          LINUXDEPLOY_SHA256: c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
+          APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+        run: |
+          set -euo pipefail
+          dir="$GITHUB_WORKSPACE/.appimage-tools"
+          mkdir -p "$dir"
+          # Fail here rather than let the packaging step treat a bad download as
+          # "tools absent" and warn its way to a release with no AppImage.
+          curl -fsSL --proto '=https' --tlsv1.2 -o "$dir/linuxdeploy" "$LINUXDEPLOY_URL"
+          curl -fsSL --proto '=https' --tlsv1.2 -o "$dir/appimagetool" "$APPIMAGETOOL_URL"
+          printf '%s  %s\n%s  %s\n' \
+            "$LINUXDEPLOY_SHA256" "$dir/linuxdeploy" \
+            "$APPIMAGETOOL_SHA256" "$dir/appimagetool" | sha256sum --check --strict
       - name: Package ZIP/DEB/RPM/AppImage (CLI+GUI)
         # linuxdeploy and appimagetool are themselves AppImages, and an AppImage
         # self-mounts through libfuse2, which the runner image no longer carries.
         # Extracting instead is the supported way out and costs a temp directory.
         env:
           APPIMAGE_EXTRACT_AND_RUN: 1
+          LINUXDEPLOY: ${{ github.workspace }}/.appimage-tools/linuxdeploy
+          LINUXDEPLOY_SHA256: c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
+          APPIMAGETOOL: ${{ github.workspace }}/.appimage-tools/appimagetool
+          APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
         run: |
           # Build Linux targets only here; Windows artifacts are built on the Windows runner to avoid duplicates.
-          #
-          # AppImage is optional. Only independently verified local tools are used;
-          # absent/invalid tools produce a warning and an archived diagnostic log.
           bash scripts/package/release.sh --targets "linux-gnu,linux-musl,linux-aarch64,linux-appimage" \
             --cpu-flavors "generic" --deb --rpm --verbose
       - name: Generate Snap/Flatpak manifests
