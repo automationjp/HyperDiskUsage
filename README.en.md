@@ -19,10 +19,10 @@
 
 See the [CLI parameter reference (Japanese)](docs/cli-reference.md) for defaults, output modes, and platform restrictions. The `--time` options require the `time-format` feature, enabled by default.
 
-> **0.5.0-beta.3 is being prepared for publication.** On this branch, install it with `cargo install --locked --path hyperdu`. The crates.io commands and newly named distribution artifacts below become available after the release is published.
+> **0.5.0-beta.4 is being prepared for publication.** On this branch, install it with `cargo install --locked --path hyperdu`. The crates.io commands and newly named distribution artifacts below become available after the release is published.
 
 ```bash
-cargo install hyperdu --version 0.5.0-beta.3
+cargo install hyperdu --version 0.5.0-beta.4
 hyperdu . --top 20
 ```
 
@@ -145,7 +145,7 @@ The MCP server exposes three tools:
 **There is intentionally no deletion tool.** This avoids giving agents a path to destroy data without human confirmation.
 
 ```bash
-cargo install hyperdu --version 0.5.0-beta.3
+cargo install hyperdu --version 0.5.0-beta.4
 claude mcp add --transport stdio hyperdu -- hyperdu mcp
 # Codex:
 codex mcp add hyperdu -- hyperdu mcp
@@ -168,7 +168,7 @@ It offers Interactive scanning (the default) and Batch scanning with shared core
 - Result export
 
 ```bash
-cargo install hyperdu-gui --version 0.5.0-beta.3
+cargo install hyperdu-gui --version 0.5.0-beta.4
 hyperdu-gui
 ```
 
@@ -180,10 +180,10 @@ hyperdu-gui
 
 ```bash
 # CLI + MCP (Rust 1.88+)
-cargo install hyperdu --version 0.5.0-beta.3
+cargo install hyperdu --version 0.5.0-beta.4
 
 # GUI (Rust 1.75+)
-cargo install hyperdu-gui --version 0.5.0-beta.3
+cargo install hyperdu-gui --version 0.5.0-beta.4
 
 # Start the MCP server only when needed
 hyperdu mcp
@@ -195,10 +195,10 @@ After publication, downloads will be available from [Releases](https://github.co
 
 | Platform | CLI | GUI |
 |---|---|---|
-| Windows x86_64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-windows-x86_64-generic.zip) / [exe](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-windows-x86_64-generic.exe) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-gui-windows-x86_64-generic.zip) |
-| Linux x86_64 (glibc) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-linux-x86_64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-gui-linux-x86_64-generic.zip) |
-| Linux x86_64 (musl) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-linux-x86_64-musl-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-gui-linux-x86_64-musl-generic.zip) |
-| Linux aarch64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-linux-aarch64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.3/hyperdu-gui-linux-aarch64-generic.zip) |
+| Windows x86_64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-windows-x86_64-generic.zip) / [exe](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-windows-x86_64-generic.exe) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-gui-windows-x86_64-generic.zip) |
+| Linux x86_64 (glibc) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-linux-x86_64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-gui-linux-x86_64-generic.zip) |
+| Linux x86_64 (musl) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-linux-x86_64-musl-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-gui-linux-x86_64-musl-generic.zip) |
+| Linux aarch64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-linux-aarch64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.4/hyperdu-gui-linux-aarch64-generic.zip) |
 
 The same release also includes a `.deb` package for Debian / Ubuntu.
 

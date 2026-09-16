@@ -12,7 +12,7 @@ coldとXFSは未測定です。実装の仕組みは[性能設計](../docs/perfo
 ## インストール
 
 ```bash
-cargo install hyperdu --version 0.5.0-beta.3
+cargo install hyperdu --version 0.5.0-beta.4
 ```
 
 クレート名も実行コマンドも `hyperdu`。CLIとMCPを一度に導入し、MCPは `hyperdu mcp` を実行した

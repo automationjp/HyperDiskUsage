@@ -14,7 +14,7 @@ is described in [performance.md](../docs/en/performance.md).
 ## Install
 
 ```bash
-cargo install hyperdu --version 0.5.0-beta.3
+cargo install hyperdu --version 0.5.0-beta.4
 ```
 
 Both the crate and command are `hyperdu`. One installation includes the CLI and
