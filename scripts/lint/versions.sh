@@ -245,6 +245,11 @@ if [ "$fix" -eq 1 ] && [ "${#fixups[@]}" -gt 0 ]; then
         rest="${rest#*:}"
         found="${rest%%:*}"
         want="${rest#*:}"
+        # A trailing '.' only continues the version when something follows it.
+        # Treating every '.' as part of the token left an English sentence that
+        # ends on a version -- "replaced in 1.2.3-beta.4." -- unrewritten while
+        # the Japanese and Chinese lines beside it, which continue past the
+        # literal, were fixed. Two releases shipped that drift.
         if awk -v n="$num" -v old="$found" -v new="$want" '
             NR != n { print; next }
             {
@@ -253,16 +258,21 @@ if [ "$fix" -eq 1 ] && [ "${#fixups[@]}" -gt 0 ]; then
                     before = (p > 1) ? substr(line, p - 1, 1) : ""
                     after_at = p + length(old)
                     after = (after_at <= length(line)) ? substr(line, after_at, 1) : ""
-                    whole = (before !~ /[0-9.~-]/) && (after !~ /[0-9.~-]/)
+                    next_after = (after_at + 1 <= length(line)) ? substr(line, after_at + 1, 1) : ""
+                    continues = (after ~ /[0-9~-]/) || (after == "." && next_after ~ /[0-9A-Za-z]/)
+                    whole = (before !~ /[0-9.~-]/) && !continues
                     out = out substr(line, 1, p - 1) (whole ? new : old)
                     line = substr(line, after_at)
                 }
                 print out line
             }
-        ' "$file" > "$file.tmp"; then
+        ' "$file" > "$file.tmp" && ! cmp -s "$file" "$file.tmp"; then
             mv -f "$file.tmp" "$file"
             echo "  $file:$num  $found -> $want"
         else
+            # An unchanged file means the rewrite silently matched nothing. That
+            # used to print the success line above, which is how the same literal
+            # survived two releases while --fix claimed to have fixed it.
             rm -f "$file.tmp"
             echo "  FAILED to rewrite $file:$num" >&2
             unfixable=1
