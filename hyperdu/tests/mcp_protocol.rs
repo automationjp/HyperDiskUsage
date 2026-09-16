@@ -128,7 +128,7 @@ fn mcp_stdio_handshake_lists_tools_and_scans_a_path() -> TestResult {
                 "arguments": {
                     "path": dir.path().display().to_string(),
                     "top_n": 2,
-                    "max_depth": 0
+                    "prune_depth": 0
                 }
             }
         }),
@@ -180,7 +180,7 @@ fn scan_progress_precedes_result_and_keeps_the_request_token() -> TestResult {
     )?;
     for (id, token) in [(2u64, Some("scan-one")), (3, Some("scan-two")), (4, None)] {
         let mut params = json!({"name":"scan_path", "arguments":{
-            "path":dir.path().display().to_string(),"top_n":1,"max_depth":0
+            "path":dir.path().display().to_string(),"top_n":1,"prune_depth":0
         }});
         if let Some(token) = token {
             params["_meta"] = json!({"progressToken":token});

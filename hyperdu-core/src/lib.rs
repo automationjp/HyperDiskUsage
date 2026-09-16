@@ -224,7 +224,14 @@ impl Stat {
 #[derive(Clone)]
 pub struct Options {
     pub exclude_contains: Vec<String>,
-    pub max_depth: u32,     // 0 = unlimited
+    /// Stop descending past this depth, counting the root as 0. `0` = unlimited.
+    ///
+    /// This prunes the *walk*, so everything below the cut is missing from the
+    /// totals too -- a pruned scan answers "what is in the top N levels", not
+    /// "how big is this tree". Callers that only want to shorten the *report*
+    /// must scan with `prune_depth: 0` and filter the resulting map by depth;
+    /// that is what the CLI's `--max-depth` does, matching GNU du.
+    pub prune_depth: u32,
     pub min_file_size: u64, // bytes
     pub follow_links: bool,
     pub threads: usize,
@@ -306,7 +313,7 @@ impl std::fmt::Debug for Options {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Options")
             .field("exclude_contains", &self.exclude_contains)
-            .field("max_depth", &self.max_depth)
+            .field("prune_depth", &self.prune_depth)
             .field("min_file_size", &self.min_file_size)
             .field("follow_links", &self.follow_links)
             .field("threads", &self.threads)
@@ -324,7 +331,7 @@ impl Default for Options {
             // defaults matched by substring: ".git" also swallowed ".github".
             // Pass --exclude .git,node_modules,target for the previous behaviour.
             exclude_contains: Vec::new(),
-            max_depth: 0,
+            prune_depth: 0,
             min_file_size: 0,
             follow_links: false,
             threads: threads_default,

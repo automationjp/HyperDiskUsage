@@ -140,7 +140,7 @@ fn open_for_sniff(path: &Path) -> std::io::Result<fs::File> {
 pub fn classify_directory(root: &Path, opt: &Options, mode: ClassifyMode) -> TypeStatistics {
     let mut stats = TypeStatistics::default();
     fn walk(dir: &Path, depth: u32, opt: &Options, mode: ClassifyMode, stats: &mut TypeStatistics) {
-        if opt.max_depth > 0 && depth > opt.max_depth {
+        if opt.prune_depth > 0 && depth > opt.prune_depth {
             return;
         }
         let rd = match fs::read_dir(dir) {

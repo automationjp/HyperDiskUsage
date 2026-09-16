@@ -13,8 +13,8 @@ use std::{
     sync::OnceLock,
 };
 
-const SEP: u16 = b'\\' as u16;
-const SLASH: u16 = b'/' as u16;
+pub(super) const SEP: u16 = b'\\' as u16;
+pub(super) const SLASH: u16 = b'/' as u16;
 const COLON: u16 = b':' as u16;
 const VERBATIM: [u16; 4] = [SEP, SEP, b'?' as u16, SEP];
 const VERBATIM_UNC: [u16; 8] = [
@@ -117,14 +117,32 @@ pub(super) struct ChildPathBuilder {
 }
 
 impl ChildPathBuilder {
-    pub fn new(dir: &Path) -> Self {
+    /// `fallback` is the separator to use when the parent contains none of its
+    /// own -- the platform separator for HyperDU's native output, `/` for the
+    /// du-compatible modes.
+    pub fn new(dir: &Path, fallback: u16) -> Self {
         let mut disp: Vec<u16> = dir.as_os_str().encode_wide().collect();
         // `C:` names the drive's current directory, and `Path::join` appends no
         // separator after a bare prefix. Inserting one here would silently
         // retarget every child at the drive root and break the parent chain.
         let bare_prefix = disp.last() == Some(&COLON);
         if !bare_prefix && !matches!(disp.last(), Some(&SEP) | Some(&SLASH)) {
-            disp.push(SEP);
+            // Follow the separator the parent already uses instead of always
+            // appending `\`. Scanning `./root` produced `./root\a\a1` -- a row
+            // that spells itself two ways in one line, which is a surprise
+            // whichever tool the reader came from.
+            //
+            // This changes the map KEYS, not only how they render. That is the
+            // point: every key inside one operand's subtree then uses a single
+            // separator, which is what makes the prefix and strip_prefix work
+            // downstream unambiguous.
+            let sep = disp
+                .iter()
+                .rev()
+                .copied()
+                .find(|&c| c == SEP || c == SLASH)
+                .unwrap_or(fallback);
+            disp.push(sep);
         }
         let mut open = to_wide_for_open(dir);
         open.pop(); // NUL
@@ -204,25 +222,53 @@ mod tests {
         assert_eq!(got, expect);
     }
 
-    #[test]
-    fn drive_relative_children_match_path_join() {
-        // `C:` means "the current directory on C:", not "the root of C:".
-        let dir = Path::new("C:");
-        let mut b = ChildPathBuilder::new(dir);
-        let name: Vec<u16> = "child".encode_utf16().collect();
-        assert_eq!(b.path(&name), dir.join("child"));
-        assert_eq!(b.path(&name), Path::new("C:child"));
-        assert_eq!(b.wide_open(&name), &w("C:child")[..]);
+    /// Asserting on the rendered string, not on `PathBuf` equality: `PathBuf`'s
+    /// `Eq` and `Hash` normalise separators on Windows, so
+    /// `C:/root/x == C:/root\x` is true and a comparison against
+    /// `Path::join` can never observe which separator was appended.
+    fn rendered(dir: &str, name: &str, fallback: u16) -> String {
+        let mut b = ChildPathBuilder::new(Path::new(dir), fallback);
+        let name: Vec<u16> = name.encode_utf16().collect();
+        b.path(&name).to_string_lossy().into_owned()
     }
 
     #[test]
-    fn child_builder_matches_path_join() {
-        let dir = Path::new("C:/root");
-        let mut b = ChildPathBuilder::new(dir);
+    fn drive_relative_children_get_no_separator() {
+        // `C:` means "the current directory on C:", not "the root of C:", and
+        // `Path::join` appends nothing after a bare prefix either.
+        assert_eq!(rendered("C:", "child", SEP), "C:child");
+        assert_eq!(rendered("C:", "child", SLASH), "C:child");
+
+        let mut b = ChildPathBuilder::new(Path::new("C:"), SEP);
         let name: Vec<u16> = "child".encode_utf16().collect();
-        assert_eq!(b.path(&name), dir.join("child"));
-        let other: Vec<u16> = "x".encode_utf16().collect();
-        assert_eq!(b.path(&other), dir.join("x"));
-        assert_eq!(b.wide_open(&other), &w(r"\\?\C:\root\x")[..]);
+        assert_eq!(b.wide_open(&name), &w("C:child")[..]);
+    }
+
+    /// The parent's own spelling wins, whichever fallback is offered.
+    #[test]
+    fn the_appended_separator_follows_the_parent() {
+        assert_eq!(rendered("C:/root", "child", SEP), "C:/root/child");
+        assert_eq!(rendered(r"C:\root", "child", SLASH), r"C:\root\child");
+        // Interior mixing is preserved; only the appended one is decided here.
+        assert_eq!(rendered(r"C:\a/b", "child", SEP), r"C:\a/b/child");
+    }
+
+    /// Only a parent with no separator at all consults the fallback.
+    #[test]
+    fn a_separatorless_parent_uses_the_fallback() {
+        assert_eq!(rendered("root", "child", SLASH), "root/child");
+        assert_eq!(rendered("root", "child", SEP), r"root\child");
+    }
+
+    /// The open form stays verbatim-prefixed and all-backslash regardless: a
+    /// `\\?\` path disables the kernel's own separator normalisation, so a
+    /// forward slash there would not name the same file.
+    #[test]
+    fn the_open_form_is_always_backslashed() {
+        for fallback in [SEP, SLASH] {
+            let mut b = ChildPathBuilder::new(Path::new("C:/root"), fallback);
+            let name: Vec<u16> = "x".encode_utf16().collect();
+            assert_eq!(b.wide_open(&name), &w(r"\\?\C:\root\x")[..]);
+        }
     }
 }

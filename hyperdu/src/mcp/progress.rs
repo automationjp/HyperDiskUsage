@@ -29,13 +29,13 @@ async fn notify(
 
 pub(super) async fn scan(
     root: PathBuf,
-    max_depth: u32,
+    prune_depth: u32,
     context: Option<RequestContext<RoleServer>>,
 ) -> Result<(StatMap, u64), ErrorData> {
     let token = context.as_ref().and_then(|c| c.meta.get_progress_token());
     let (updates, mut latest) = tokio::sync::watch::channel(0u64);
     let mut options = Options {
-        max_depth,
+        prune_depth,
         progress_every: 0,
         ..Options::default()
     };

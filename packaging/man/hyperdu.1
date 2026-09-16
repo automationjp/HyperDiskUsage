@@ -29,8 +29,25 @@ Comma-separated exclude substrings (e.g. .git,node_modules,target).
 .BR --exclude-from=FILE
 Read exclude patterns from file (supports re:, glob:, or substring).
 .TP
-.BR --max-depth=DEPTH
-Limit traversal depth (0 = unlimited).
+.BR \-d ", " --max-depth=N
+Print directories at most N levels below each operand; the operand itself is
+level 0, so
+.B \-d 0
+prints only the operand row, as in GNU
+.BR du .
+Omit the option for unlimited depth \(em there is no value that means
+unlimited. This limits the listing only: the scan always runs to the bottom, so
+every printed total is complete. The value is parsed as GNU
+.B du
+parses it (a leading 0 is octal, 0x is hexadecimal); an invalid value exits 1.
+.TP
+.BR --prune-depth=N
+Stop the scan N levels below each operand. Unlike
+.BR --max-depth ,
+this truncates the totals as well, so the reported sizes come out smaller than
+the real usage and a warning is written to standard error. HyperDU-only;
+.B du
+has no equivalent. Omit for unlimited.
 .TP
 .BR --min-file-size=BYTES
 Ignore files smaller than BYTES.

@@ -57,7 +57,17 @@ pub(super) struct DirState {
 impl DirState {
     pub fn new(dir: &Path, opt: &Options) -> Self {
         Self {
-            paths: ChildPathBuilder::new(dir),
+            // A parent that already shows a separator decides for itself; this
+            // only settles the case where it shows none. du renders `/`, so the
+            // compat modes do too, while HyperDU's own output stays native.
+            paths: ChildPathBuilder::new(
+                dir,
+                if matches!(opt.compat_mode, crate::CompatMode::HyperDU) {
+                    super::path::SEP
+                } else {
+                    super::path::SLASH
+                },
+            ),
             files: 0,
             volume: if !crate::follows_links(opt) {
                 opt.windows_root_volume.as_ref().map_or(0, |volume| {
@@ -161,7 +171,7 @@ fn handle_dir(
     child: Option<PathBuf>,
 ) {
     let opt = ctx.options;
-    if opt.max_depth != 0 && depth >= opt.max_depth {
+    if opt.prune_depth != 0 && depth >= opt.prune_depth {
         return;
     }
     // Resolve followed links for the existing one-filesystem policy. Cycles

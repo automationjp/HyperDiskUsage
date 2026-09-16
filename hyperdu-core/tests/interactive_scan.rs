@@ -60,7 +60,7 @@ fn interactive_matches_batch_for_depth_filters_and_sizes() {
     for depth in [0, 1, 2, 3] {
         for min in [0, 200] {
             let opt = Options {
-                max_depth: depth,
+                prune_depth: depth,
                 min_file_size: min,
                 exclude_contains: vec!["excluded".into()],
                 threads: 2,

@@ -94,7 +94,7 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
         }
 
         if is_dir {
-            if opt.max_depth == 0 || depth < opt.max_depth {
+            if opt.prune_depth == 0 || depth < opt.prune_depth {
                 let child = dir.join(OsStr::from_bytes(name_b));
                 if opt.one_file_system {
                     let mut st_child: libc::stat = unsafe { std::mem::zeroed() };

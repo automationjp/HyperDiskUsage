@@ -144,8 +144,9 @@ const SECONDS_PER_DAY: u64 = 60 * 60 * 24;
 /// does not establish that a directory is unused or safe to delete.
 ///
 /// `max_depth` bounds the search, not the size measurement: a candidate found
-/// at the limit is still measured in full. Zero means unlimited, matching
-/// [`Options::max_depth`].
+/// at the limit is still measured in full. Zero means unlimited, as in
+/// [`Options::prune_depth`] -- but unlike that one, this limit never truncates
+/// a size.
 pub fn find(
     root: &Path,
     min_size_bytes: u64,

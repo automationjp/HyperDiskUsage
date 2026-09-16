@@ -211,7 +211,7 @@ mod tests {
                 }
                 match kind {
                     MockKind::Dir => {
-                        if opt.max_depth == 0 || depth < opt.max_depth {
+                        if opt.prune_depth == 0 || depth < opt.prune_depth {
                             // simple visited set to approximate loop detection
                             let mut v = self.visited.lock().unwrap();
                             if v.insert(child.clone()) {
@@ -231,7 +231,7 @@ mod tests {
                         if !opt.follow_links {
                             continue;
                         }
-                        if opt.max_depth == 0 || depth < opt.max_depth {
+                        if opt.prune_depth == 0 || depth < opt.prune_depth {
                             let mut v = self.visited.lock().unwrap();
                             if v.insert(target.clone()) {
                                 ctx.enqueue_dir(target.clone(), depth + 1);
@@ -350,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn max_depth_limits_grandchildren() {
+    fn prune_depth_limits_grandchildren() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("r");
         let d = root.join("d");
@@ -367,7 +367,7 @@ mod tests {
             )
             .with_dir(&e, vec![("c".into(), MockKind::File(4))]);
         let mut opt = Options::default();
-        opt.max_depth = 1; // allow scanning root (0) and its children (1), not grandchildren
+        opt.prune_depth = 1; // allow scanning root (0) and its children (1), not grandchildren
         let map = crate::scan_directory_with(&root, &opt, std::sync::Arc::new(mock)).unwrap();
         let s_root = map.get(&root).copied().unwrap_or_default();
         assert_eq!(s_root.files, 2); // a + b

@@ -63,7 +63,7 @@ fn min_file_size_filters_small_files() {
 }
 
 #[test]
-fn max_depth_limits_grandchildren() {
+fn prune_depth_limits_grandchildren() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().to_path_buf();
     fs::create_dir_all(root.join("child/grand")).unwrap();
@@ -71,9 +71,9 @@ fn max_depth_limits_grandchildren() {
     write_bytes(&root.join("child/grand/f2"), 20);
 
     // Depth semantics: 0 = unlimited; depth starts at 0 for root.
-    // max_depth=1 scans root (0) and child (1), but not grandchild (2).
+    // prune_depth=1 scans root (0) and child (1), but not grandchild (2).
     let opt = OptionsBuilder::new()
-        .max_depth(1)
+        .prune_depth(1)
         .compute_physical(false)
         .approximate_sizes(true)
         .build();
@@ -81,7 +81,7 @@ fn max_depth_limits_grandchildren() {
     let stat = map.get(&root).cloned().unwrap();
     assert_eq!(
         stat.files, 1,
-        "grandchild content should be excluded at max_depth=1"
+        "grandchild content should be excluded at prune_depth=1"
     );
 }
 

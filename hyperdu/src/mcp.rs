@@ -56,11 +56,16 @@ pub struct ScanParams {
     /// How many of the largest directories to return.
     #[serde(default = "default_top_n")]
     pub top_n: usize,
-    /// Stop descending past this depth. 0 means unlimited. Use a small value
-    /// on a whole volume: a full scan of a 930 GB disk with 4 million files
-    /// takes roughly 47 seconds.
+    /// Stop descending past this depth, counting the scanned path as 0.
+    /// 0 means unlimited.
+    ///
+    /// This trades accuracy for time: every returned size covers only what was
+    /// walked, so a pruned scan under-reports -- at depth 2 a 894 GB volume
+    /// comes back as 74 GB. Leave it at 0 when the answer has to be a real
+    /// total; a full scan of a 930 GB disk with 4 million files takes roughly
+    /// 47 seconds.
     #[serde(default)]
-    pub max_depth: u32,
+    pub prune_depth: u32,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -114,7 +119,9 @@ pub struct ReclaimableParams {
     /// that a build is inactive or make a deletion safe.
     #[serde(default)]
     pub unused_for_days: Option<u64>,
-    /// Stop descending past this depth. 0 means unlimited.
+    /// Stop descending past this depth while looking for candidates. 0 means
+    /// unlimited. Unlike `scan_path`'s `prune_depth`, this bounds only the
+    /// search: a candidate found at the limit is still measured in full.
     #[serde(default)]
     pub max_depth: u32,
 }
@@ -197,8 +204,10 @@ impl HyperDuServer {
     #[tool(
         name = "scan_path",
         description = "Scan a directory tree and return the largest directories inside it, with \
-                       logical size, physical size on disk, and file count. Use max_depth to keep \
-                       a whole-volume scan bounded; a full 930 GB disk takes about 47 seconds."
+                       logical size, physical size on disk, and file count. A full 930 GB disk \
+                       takes about 47 seconds. prune_depth bounds that, but it bounds the sizes \
+                       too -- the returned totals then cover only the walked depth, so leave it \
+                       at 0 whenever the number is meant to be a real total."
     )]
     async fn scan_path(
         &self,
@@ -215,9 +224,9 @@ impl HyperDuServer {
     ) -> Result<Json<ScanOutput>, ErrorData> {
         let root = PathBuf::from(&params.path);
         let top_n = params.top_n.max(1);
-        let max_depth = params.max_depth;
+        let prune_depth = params.prune_depth;
 
-        let (stats, elapsed_ms) = progress::scan(root.clone(), max_depth, context).await?;
+        let (stats, elapsed_ms) = progress::scan(root.clone(), prune_depth, context).await?;
 
         let total_directories = stats.len();
         // Ranked by core so this agrees with the CLI, including the order equal
@@ -335,7 +344,7 @@ impl ServerHandler for HyperDuServer {
         info.instructions = Some(
             "HyperDU exposes disk usage as structured data. To answer \"why is the disk \
              full\", call list_volumes first to find the volume under pressure, then \
-             scan_path on it (with max_depth to stay quick) to see what is large, then \
+             scan_path on it to see what is large, then \
              find_reclaimable to separate what can be rebuilt from what cannot. All three \
              are read-only: nothing here deletes, and deletions should be confirmed with \
              the user before they are run."
@@ -466,7 +475,7 @@ mod tests {
                 ScanParams {
                     path: dir.path().display().to_string(),
                     top_n: 2,
-                    max_depth: 0,
+                    prune_depth: 0,
                 },
                 None,
             )
@@ -491,7 +500,7 @@ mod tests {
                 ScanParams {
                     path: "/hyperdu-nonexistent-scan-probe-71ac".to_owned(),
                     top_n: 5,
-                    max_depth: 0,
+                    prune_depth: 0,
                 },
                 None,
             )
@@ -512,7 +521,7 @@ mod tests {
                 ScanParams {
                     path: dir.path().display().to_string(),
                     top_n: 0,
-                    max_depth: 0,
+                    prune_depth: 0,
                 },
                 None,
             )

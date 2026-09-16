@@ -152,7 +152,10 @@ struct Args {
         value_name = "ROOTS",
         long_help = "スキャン対象のルートディレクトリ（複数指定可）。\n\
         省略時はカレントディレクトリ '.' を使用します。\n\
-        互換モードでは各ルート内の行をパス順に列挙します。\n\
+        互換モードでは du と同じく深さ優先の後順で列挙します。\n\
+        つまり子が親より先に出力され、ルート自身の行が最後になります。\n\
+        兄弟の順序は du では列挙順（ファイルシステム依存）ですが、\n\
+        HyperDU では再現性のためソート順に固定しています。\n\
         HyperDU標準出力モードでも全ルートを走査し、各ルートの集計と合計を表示します。"
     )]
     roots: Vec<PathBuf>,
@@ -185,14 +188,53 @@ struct Args {
     )]
     exclude_from: Vec<PathBuf>,
 
-    /// Maximum depth (0 = unlimited)
+    /// Print directories at most N levels below each operand; 0 prints only the
+    /// operand. Omit for unlimited. Totals are always complete.
+    ///
+    /// Held as the raw string so the value can be parsed the way GNU du parses
+    /// it (see `parse_max_depth`) and rejected with du's diagnostic rather than
+    /// clap's. `allow_hyphen_values` is what lets `-d -1` reach that path
+    /// instead of being read as an unknown flag.
     #[arg(
+        short = 'd',
         long = "max-depth",
-        default_value_t = 0,
-        long_help = "走査の最大深さ。0は無制限。\n\
-    1はルート直下のみ、2はその子まで…といった指定になります。"
+        value_name = "N",
+        allow_hyphen_values = true,
+        // GNU takes the last occurrence silently; clap's default is to reject
+        // the second one. uutils regressed into exactly that error.
+        overrides_with = "max_depth",
+        conflicts_with = "prune_depth",
+        long_help = "出力する深さの上限。ルート（コマンドラインで指定したパス）が 0 です。\n\
+    GNU du の -d / --max-depth と同じ意味で、「どこまで表示するか」だけを決めます。\n\
+    走査は常に最下層まで行うため、表示された各行の合計値は完全なままです。\n\
+    0 はルート行のみ（du の -d 0 = --summarize と同じ）。\n\
+    1 はルート直下まで、2 はその子まで…と続きます。\n\
+    無制限にしたい場合はこのオプション自体を省略してください（du と同じく、\n\
+    「無制限」を表す値はありません）。\n\
+    値は du と同じ規則で解釈します: 先頭 0 は8進、0x は16進、先頭の + と\n\
+    空白は許容、それ以外の余分な文字があれば不正値として終了コード 1 で\n\
+    失敗します。\n\
+    走査自体を浅く打ち切って速度を稼ぎたい場合は --prune-depth を使います。"
     )]
-    max_depth: u32,
+    max_depth: Option<String>,
+
+    /// Stop walking past this depth. Omit for unlimited. Truncates totals.
+    ///
+    /// HyperDU-only; du has no flag that truncates the scan. Deliberately has
+    /// no "0 means unlimited" magic value -- that convention on `--max-depth`
+    /// is what made a pruned scan of a 894 GB volume report 74 GB.
+    #[arg(
+        long = "prune-depth",
+        value_name = "N",
+        long_help = "走査を打ち切る深さ。省略時は無制限。\n\
+    --max-depth と違い、これは走査そのものを止めるため、\n\
+    打ち切った下にあるものは合計値からも消えます。\n\
+    つまり表示される数値は実際の使用量より小さくなります。\n\
+    巨大なボリュームの概形を短時間で掴みたいときだけ使ってください。\n\
+    正しい合計が必要な場合は --max-depth を使います。\n\
+    これは HyperDU 独自のオプションで、du に対応するものはありません。"
+    )]
+    prune_depth: Option<u32>,
 
     /// Minimum file size to include in bytes
     #[arg(
@@ -601,7 +643,23 @@ fn main() -> Result<()> {
         println!();
         return Ok(());
     }
-    let mut args = Args::parse();
+    // Usage errors exit 1, not clap's 2.
+    //
+    // Less about matching du than about the binary agreeing with itself: a bad
+    // `--max-depth` already exits 1 through `exit_invalid_max_depth`, so
+    // leaving clap's 2 in place meant two argument mistakes in the same run
+    // reported two different statuses. `--help` and `--version` are not errors
+    // and keep 0.
+    let mut args = match Args::try_parse() {
+        Ok(args) => args,
+        Err(err) => {
+            let _ = err.print();
+            std::process::exit(match err.kind() {
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion => 0,
+                _ => 1,
+            });
+        }
+    };
     if let Some(command) = args.command.take() {
         return match command {
             index_cli::Command::Index(command) => index_cli::run(command),
@@ -612,6 +670,17 @@ fn main() -> Result<()> {
     if args.bytes {
         args.apparent_size = true;
     }
+    // Resolved once, before any scanning: du rejects a bad depth before it
+    // touches the filesystem, and so should this.
+    //
+    // `None` is unlimited. That is not a default we picked -- du has no token
+    // for "unlimited", only the absence of the flag, so any in-band sentinel
+    // would collide with a value du gives another meaning to. `Some(0)` in
+    // particular is du's `--summarize`: the operand row and nothing else.
+    let max_depth: Option<u64> = args
+        .max_depth
+        .as_deref()
+        .map(|raw| parse_max_depth(raw).unwrap_or_else(|| exit_invalid_max_depth(raw)));
     let cfg = load_config();
 
     let mut exclude_contains: Vec<String> = args
@@ -649,7 +718,7 @@ fn main() -> Result<()> {
         .with_exclude_contains(exclude_contains)
         .with_exclude_regex(exclude_regex)
         .with_exclude_glob(exclude_glob)
-        .max_depth(args.max_depth)
+        .prune_depth(args.prune_depth.unwrap_or(0))
         .min_file_size(args.min_file_size)
         .follow_links(args.follow_links)
         .threads(threads)
@@ -736,6 +805,25 @@ fn main() -> Result<()> {
             CompatArg::PosixStrict => hyperdu_core::CompatMode::PosixStrict,
         };
     }
+    // Whether this run may narrate itself on stderr.
+    //
+    // du writes nothing to stderr on a successful run, and anything piping our
+    // du-shaped output has no reason to expect otherwise. So in the compat
+    // modes the tuning banner, the auto-progress lines and the build-feature
+    // note stay quiet unless explicitly asked for. Warnings that mean the
+    // NUMBERS are not what the caller assumes -- unreadable directories, a
+    // pruned scan, an approximated size -- are not covered by this and still
+    // print.
+    //
+    // Read from `opt.compat_mode`, not `args.compat`: `--perf strict` above
+    // selects a compat mode of its own, so a run with no `--compat` at all can
+    // still be emitting du-format output.
+    //
+    // This gates the PRINTING only. `--no-fs-auto` / `HYPERDU_FS_AUTO=0` would
+    // also silence the banner, but they do it by skipping filesystem detection
+    // altogether, which throws away the tuning the banner is reporting -- a
+    // real scan-speed cost paid for a cosmetic fix.
+    let chatty = matches!(opt.compat_mode, hyperdu_core::CompatMode::HyperDU);
     // Hardlink behavior
     // Keep performance profile's default unless user explicitly passed --count-links
     if let Some(true) = args.count_links {
@@ -796,7 +884,9 @@ fn main() -> Result<()> {
             .store(n, std::sync::atomic::Ordering::Relaxed);
     }
     opt.progress_every = args.progress_every.unwrap_or(8192);
-    let print_progress = args.progress || std::io::stderr().is_terminal();
+    // `--progress` is the explicit ask and always wins; the terminal heuristic
+    // only applies where stderr is ours to narrate.
+    let print_progress = args.progress || (chatty && std::io::stderr().is_terminal());
     let t_start = std::time::Instant::now();
     let last = std::sync::Arc::new(std::sync::Mutex::new((0u64, t_start)));
     let last_cb = last.clone();
@@ -900,15 +990,19 @@ fn main() -> Result<()> {
                     if !rep.changes.is_empty() {
                         meta.push(format!("changes=[{}]", rep.changes.join(",")));
                     }
-                    // Diagnostics go to stderr so du-compatible stdout stays parsable.
-                    eprintln!("fs-auto: {} for '{}'", meta.join(" "), root0.display());
+                    // Detection and tuning ran regardless; only the report is
+                    // withheld, so a compat run keeps the speed and loses the
+                    // narration.
+                    if chatty {
+                        eprintln!("fs-auto: {} for '{}'", meta.join(" "), root0.display());
+                    }
                 }
             }
         }
     }
     #[cfg(not(target_os = "linux"))]
     {
-        if std::env::var("HYPERDU_FS_AUTO").ok().as_deref() != Some("0") {
+        if chatty && std::env::var("HYPERDU_FS_AUTO").ok().as_deref() != Some("0") {
             if let Some(root0) = roots.first() {
                 // Diagnostics go to stderr so du-compatible stdout stays parsable.
                 eprintln!(
@@ -918,6 +1012,17 @@ fn main() -> Result<()> {
             }
         }
     }
+    // Truncated totals are only defensible when the caller cannot miss that
+    // they are truncated. stderr, so du-compatible stdout stays parsable.
+    if opt.prune_depth > 0 {
+        eprintln!(
+            "warning: --prune-depth {d} stops the scan at depth {d}, so the sizes below are \
+             partial and will read smaller than the real usage. Use --max-depth {d} for the \
+             same shortened output with complete totals.",
+            d = opt.prune_depth
+        );
+    }
+
     let mut total_dt = std::time::Duration::from_secs(0);
     let mut exit_code = 0i32;
 
@@ -962,6 +1067,10 @@ fn main() -> Result<()> {
             }
         }
         let dirs_scanned = map.len();
+        // `--max-depth` trims the listing below. `total_stat` and `dirs_scanned`
+        // are already summed and stay whole, which is the point: the `Total:`
+        // line sits right above a `Disk: used=...` read from the filesystem.
+        map.retain(|p, _| within_display_depth(p, &roots, max_depth));
         let v = hyperdu_core::top_by_physical(map, args.top);
 
         println!("Top {} under {} (physical desc):", args.top, root.display());
@@ -1092,7 +1201,7 @@ fn main() -> Result<()> {
         // progress already emitted during scan when enabled
         Ok(())
     } else {
-        // du-like output: blocks<TAB>path sorted alphabetically
+        // du-like output: blocks<TAB>path, children before parents
         let bs = if args.bytes {
             1
         } else if args.kib {
@@ -1114,7 +1223,15 @@ fn main() -> Result<()> {
                 1024 * 1024 * 1024
             }
         } else if let Some(bs) = &args.block_size {
-            parse_block_size_with_si(bs, args.si).unwrap_or(1024)
+            // Falling back to 1024 here printed 1 KiB blocks under a status of
+            // 0, so `--block-size=xzy` was answered with numbers that looked
+            // fine and were in the wrong unit. A typo has to fail, not round
+            // to a plausible default. Zero is rejected for the same reason du
+            // rejects it, and because it reaches a division by zero below.
+            match parse_block_size_with_si(bs, args.si) {
+                Some(0) | None => exit_invalid_block_size(bs),
+                Some(n) => n,
+            }
         } else if std::env::var_os("POSIXLY_CORRECT").is_some()
             || matches!(opt.compat_mode, hyperdu_core::CompatMode::PosixStrict)
         {
@@ -1139,13 +1256,13 @@ fn main() -> Result<()> {
                 let t0 = std::time::Instant::now();
                 let merged = hyperdu_core::auto_parallel_scan(roots.clone(), &opt)?;
                 total_dt += t0.elapsed();
-                for root in roots {
+                for root in &roots {
                     let mut entries: Vec<(PathBuf, hyperdu_core::Stat)> = merged
                         .iter()
-                        .filter(|(p, _)| p.starts_with(&root))
+                        .filter(|(p, _)| p.starts_with(root))
                         .map(|(p, s)| (p.clone(), *s))
                         .collect();
-                    entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                    entries.sort_unstable_by(|a, b| post_order_cmp(&a.0, &b.0));
                     if print_progress {
                         let total_files: u64 = entries.iter().map(|(_, s)| s.files).sum();
                         let now = std::time::Instant::now();
@@ -1164,6 +1281,11 @@ fn main() -> Result<()> {
                     }
                     for (p, s) in entries {
                         if p.as_os_str().is_empty() {
+                            continue;
+                        }
+                        // Hides the row, never the number: `s` came from a
+                        // full-depth walk, exactly as GNU du's -d does.
+                        if !within_display_depth(&p, &roots, max_depth) {
                             continue;
                         }
                         let bytes = if args.apparent_size {
@@ -1192,13 +1314,13 @@ fn main() -> Result<()> {
                 let t0 = std::time::Instant::now();
                 let merged = hyperdu_core::parallel_scan(roots.clone(), &opt)?;
                 total_dt += t0.elapsed();
-                for root in roots {
+                for root in &roots {
                     let mut entries: Vec<(PathBuf, hyperdu_core::Stat)> = merged
                         .iter()
-                        .filter(|(p, _)| p.starts_with(&root))
+                        .filter(|(p, _)| p.starts_with(root))
                         .map(|(p, s)| (p.clone(), *s))
                         .collect();
-                    entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                    entries.sort_unstable_by(|a, b| post_order_cmp(&a.0, &b.0));
                     if print_progress {
                         let total_files: u64 = entries.iter().map(|(_, s)| s.files).sum();
                         let now = std::time::Instant::now();
@@ -1217,6 +1339,11 @@ fn main() -> Result<()> {
                     }
                     for (p, s) in entries {
                         if p.as_os_str().is_empty() {
+                            continue;
+                        }
+                        // Hides the row, never the number: `s` came from a
+                        // full-depth walk, exactly as GNU du's -d does.
+                        if !within_display_depth(&p, &roots, max_depth) {
                             continue;
                         }
                         let bytes = if args.apparent_size {
@@ -1242,23 +1369,23 @@ fn main() -> Result<()> {
         }
         #[cfg(not(feature = "rayon-par"))]
         {
-            if cfg.auto_parallel {
+            if cfg.auto_parallel && chatty {
                 eprintln!(
                     "note: built without 'rayon-par' feature; falling back to sequential scan"
                 );
             }
         }
 
-        for root in roots {
+        for root in &roots {
             let t0 = std::time::Instant::now();
-            match hyperdu_core::scan_directory(&root, &opt) {
+            match hyperdu_core::scan_directory(root, &opt) {
                 Ok(map) => {
                     let mut entries: Vec<(PathBuf, hyperdu_core::Stat)> = map.into_iter().collect();
-                    entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                    entries.sort_unstable_by(|a, b| post_order_cmp(&a.0, &b.0));
                     if print_progress {
                         let total_files = entries
                             .iter()
-                            .find(|(p, _)| p == &root)
+                            .find(|(p, _)| p == root)
                             .map(|(_, s)| s.files)
                             .unwrap_or_else(|| entries.iter().map(|(_, s)| s.files).sum());
                         let now = std::time::Instant::now();
@@ -1277,6 +1404,11 @@ fn main() -> Result<()> {
                     }
                     for (p, s) in entries {
                         if p.as_os_str().is_empty() {
+                            continue;
+                        }
+                        // Hides the row, never the number: `s` came from a
+                        // full-depth walk, exactly as GNU du's -d does.
+                        if !within_display_depth(&p, &roots, max_depth) {
                             continue;
                         }
                         let bytes = if args.apparent_size {
@@ -1330,6 +1462,155 @@ fn parse_block_size(s: &str) -> Option<u64> {
 #[inline(always)]
 fn div_ceil(n: u64, d: u64) -> u64 {
     n.div_ceil(d)
+}
+
+/// Whether `--max-depth` lets this row be printed.
+///
+/// The scan always runs to the bottom, so this only shortens the report --
+/// every row it does print carries a complete total. That is the whole
+/// difference between this and `--prune-depth`, and the reason GNU du can
+/// answer `du -d 1` with the same numbers as `du`.
+///
+/// Depth counts path components below the root, so the root itself is 0.
+/// `None` means unlimited; `Some(0)` displays only the operand, like du's `-d 0`.
+///
+/// A path under several roots (nested roots on one command line) takes the
+/// depth relative to the first containing operand in command-line order.
+fn within_display_depth(path: &Path, roots: &[PathBuf], max_depth: Option<u64>) -> bool {
+    let Some(limit) = max_depth else {
+        return true;
+    };
+    roots
+        .iter()
+        // First operand in command-line order, not the closest one. du walks
+        // operands left to right and skips what it has already counted, so the
+        // leftmost operand containing a path is the one that path is measured
+        // from. Taking the minimum over all roots instead let
+        // `--max-depth 1 root root/a` print `root/a/a1`, which is two levels
+        // below the operand that owns it.
+        .find_map(|root| path.strip_prefix(root).ok())
+        .map(|rel| rel.components().count() as u64)
+        // Not under any operand: not ours to hide.
+        .is_none_or(|depth| depth <= limit)
+}
+
+/// Orders rows the way du lays a tree out: every child before its parent, so
+/// the operand's own row comes last.
+///
+/// That shape is load-bearing -- `du <dir> | tail -1` is how people read a
+/// total off du -- and HyperDU used to invert it by sorting paths ascending,
+/// which puts the operand first.
+///
+/// Siblings stay in sorted order rather than the enumeration order du actually
+/// emits. du's sibling order is whatever the filesystem hands back (hash order
+/// on ext4, a name-ordered B-tree on NTFS), so it is not a behaviour to copy so
+/// much as an artefact to avoid inheriting -- and carrying enumeration order
+/// through a parallel scan would cost the speed HyperDU exists for. Sorted
+/// siblings are deterministic, which readdir order is not.
+///
+/// Compares component by component, never raw bytes: `!` (0x21) and `.` (0x2E)
+/// both sort below `/` (0x2F), so a byte-wise comparison would interleave
+/// `a!.txt` and `a.txt` with the contents of a sibling directory `a`.
+fn post_order_cmp(a: &Path, b: &Path) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let mut ac = a.components();
+    let mut bc = b.components();
+    loop {
+        return match (ac.next(), bc.next()) {
+            (Some(x), Some(y)) => match x.cmp(&y) {
+                Ordering::Equal => continue,
+                differs => differs,
+            },
+            // `a` ran out, so it is an ancestor of `b`: the deeper row prints
+            // first. This single case is the whole difference from the plain
+            // path ordering, which is already component-wise.
+            (None, Some(_)) => Ordering::Greater,
+            (Some(_), None) => Ordering::Less,
+            (None, None) => Ordering::Equal,
+        };
+    }
+}
+
+/// GNU du's grammar for a `-d` value: `xstrtoumax` with base 0.
+///
+/// Deliberately not `str::parse::<u64>()`. du accepts values Rust's parser
+/// rejects and reads others differently -- `-d 010` is depth **8**, not 10 --
+/// so "same parameter, same behaviour" has to start at the parser. `None` means
+/// du would call this an invalid depth.
+fn parse_max_depth(raw: &str) -> Option<u64> {
+    let s = raw.trim_start_matches([' ', '\t', '\n', '\r', '\u{b}', '\u{c}']);
+    let s = s.strip_prefix('+').unwrap_or(s);
+    let (digits, radix) = match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        Some(hex) => (hex, 16),
+        // A lone "0" is decimal zero, not an empty octal literal.
+        None if s.len() > 1 && s.starts_with('0') => (&s[1..], 8),
+        None => (s, 10),
+    };
+    if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
+        return None;
+    }
+    // Overflow past u64::MAX is the only ceiling du has; 8.32 accepts
+    // UINTMAX_MAX itself and treats it as unlimited in practice.
+    u64::from_str_radix(digits, radix).ok()
+}
+
+/// The name this binary was invoked as, which is what GNU prefixes diagnostics
+/// with -- the same du binary installed as `gnudu` says `gnudu: ...`.
+fn program_name() -> String {
+    std::env::args_os()
+        .next()
+        .map(PathBuf::from)
+        .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "hyperdu".to_owned())
+}
+
+/// True when the messages locale is the C/POSIX one, which decides whether du
+/// quotes with U+2018/U+2019 or with ASCII apostrophes.
+fn posix_messages_locale() -> bool {
+    for key in ["LC_ALL", "LC_MESSAGES", "LANG"] {
+        match std::env::var(key) {
+            Ok(v) if v.is_empty() => continue,
+            Ok(v) => return v == "C" || v == "POSIX" || v.starts_with("C."),
+            Err(_) => continue,
+        }
+    }
+    // No locale set at all is the C locale.
+    true
+}
+
+/// du's response to a bad `-d` value, down to the quote characters and the
+/// exit status.
+///
+/// Exit 1, not clap's 2: du reserves nothing for usage errors, and a script
+/// branching on the status has to see what it would see from du. The offending
+/// value takes curly quotes in a UTF-8 locale and ASCII ones under `LC_ALL=C`,
+/// while the quotes around the `--help` hint are always ASCII -- that asymmetry
+/// is GNU's, not a slip.
+fn exit_invalid_max_depth(raw: &str) -> ! {
+    let prog = program_name();
+    let (open, close) = if posix_messages_locale() {
+        ('\'', '\'')
+    } else {
+        ('\u{2018}', '\u{2019}')
+    };
+    eprintln!("{prog}: invalid maximum depth {open}{raw}{close}");
+    eprintln!("Try '{prog} --help' for more information.");
+    std::process::exit(1)
+}
+
+/// du's response to a bad `--block-size`.
+///
+/// Plain ASCII quotes, and no `--help` hint: that is what `du --block-size=xyz`
+/// actually prints on 8.32, and it is not the same shape as the depth error
+/// above. GNU quotes these two messages differently; following one rule for
+/// both would be wrong for one of them.
+fn exit_invalid_block_size(raw: &str) -> ! {
+    eprintln!(
+        "{prog}: invalid --block-size argument '{raw}'",
+        prog = program_name()
+    );
+    std::process::exit(1)
 }
 
 fn parse_block_size_with_si(s: &str, si: bool) -> Option<u64> {
@@ -1418,3 +1699,121 @@ fn format_time(_p: &std::path::Path, _when: TimeKindArg, _style: &str) -> String
 }
 
 // fs detection moved to hyperdu-core::fs_strategy
+
+#[cfg(test)]
+mod display_depth_tests {
+    use super::*;
+
+    fn roots() -> Vec<PathBuf> {
+        vec![PathBuf::from("/r")]
+    }
+
+    /// Absence of the flag, not a value, is how du spells unlimited.
+    #[test]
+    fn none_prints_everything() {
+        assert!(within_display_depth(Path::new("/r/a/b/c"), &roots(), None));
+    }
+
+    /// `du -d 0` is `--summarize`: the operand row and nothing under it.
+    #[test]
+    fn zero_prints_the_operand_row_only() {
+        assert!(within_display_depth(Path::new("/r"), &roots(), Some(0)));
+        assert!(!within_display_depth(Path::new("/r/a"), &roots(), Some(0)));
+    }
+
+    #[test]
+    fn the_operand_is_depth_zero_so_it_always_prints() {
+        assert!(within_display_depth(Path::new("/r"), &roots(), Some(1)));
+    }
+
+    #[test]
+    fn children_print_at_one_and_grandchildren_do_not() {
+        assert!(within_display_depth(Path::new("/r/a"), &roots(), Some(1)));
+        assert!(!within_display_depth(
+            Path::new("/r/a/b"),
+            &roots(),
+            Some(1)
+        ));
+    }
+
+    /// du walks operands left to right and skips what it already counted, so
+    /// the LEFTMOST operand containing a path owns it -- `/r` here, which puts
+    /// `/r/a/b` two levels down and out of a `-d 1` listing.
+    #[test]
+    fn the_leftmost_operand_owns_the_row() {
+        let roots = vec![PathBuf::from("/r"), PathBuf::from("/r/a")];
+        assert!(!within_display_depth(Path::new("/r/a/b"), &roots, Some(1)));
+    }
+
+    /// Reverse the operands and ownership moves with them.
+    #[test]
+    fn naming_the_inner_operand_first_measures_from_it() {
+        let roots = vec![PathBuf::from("/r/a"), PathBuf::from("/r")];
+        assert!(within_display_depth(Path::new("/r/a/b"), &roots, Some(1)));
+    }
+
+    #[test]
+    fn a_path_outside_every_operand_is_left_alone() {
+        assert!(within_display_depth(
+            Path::new("/elsewhere/deep/deeper"),
+            &roots(),
+            Some(1)
+        ));
+    }
+}
+
+#[cfg(test)]
+mod max_depth_parsing_tests {
+    use super::parse_max_depth;
+
+    /// Every expectation here was read off `du (GNU coreutils) 8.32`, not off
+    /// the man page -- the base-0 parse is documented nowhere.
+    #[test]
+    fn leading_zero_is_octal_like_strtoumax() {
+        assert_eq!(parse_max_depth("010"), Some(8));
+        assert_eq!(parse_max_depth("0"), Some(0));
+        assert_eq!(parse_max_depth("08"), None, "8 is not an octal digit");
+    }
+
+    #[test]
+    fn hex_is_accepted() {
+        assert_eq!(parse_max_depth("0x2"), Some(2));
+        assert_eq!(parse_max_depth("0X1f"), Some(31));
+        assert_eq!(parse_max_depth("0x"), None);
+    }
+
+    #[test]
+    fn leading_whitespace_and_plus_are_allowed() {
+        assert_eq!(parse_max_depth(" 4"), Some(4));
+        assert_eq!(parse_max_depth("+5"), Some(5));
+        assert_eq!(parse_max_depth("\t+0x10"), Some(16));
+    }
+
+    #[test]
+    fn trailing_junk_is_rejected() {
+        assert_eq!(parse_max_depth("1 "), None);
+        assert_eq!(parse_max_depth("2abc"), None);
+        assert_eq!(parse_max_depth("1.5"), None);
+        assert_eq!(parse_max_depth("1e3"), None);
+        assert_eq!(parse_max_depth("1K"), None);
+        assert_eq!(parse_max_depth(""), None);
+    }
+
+    #[test]
+    fn negatives_are_rejected() {
+        assert_eq!(parse_max_depth("-1"), None);
+        assert_eq!(parse_max_depth(" -0"), None);
+    }
+
+    /// 8.32 accepts UINTMAX_MAX itself and only errors past it.
+    #[test]
+    fn the_ceiling_is_u64_max() {
+        assert_eq!(parse_max_depth("18446744073709551615"), Some(u64::MAX));
+        assert_eq!(parse_max_depth("18446744073709551616"), None);
+        assert_eq!(
+            parse_max_depth("4294967296"),
+            Some(4_294_967_296),
+            "a value du accepts must not be capped at u32"
+        );
+    }
+}

@@ -62,7 +62,7 @@ pub struct Params {
     pub glob: String,
     pub regex: String,
     pub min_size: String,
-    pub max_depth: u32,
+    pub prune_depth: u32,
     pub follow_links: bool,
     pub count_hardlinks: bool,
     pub one_file_system: bool,
@@ -81,7 +81,7 @@ impl Default for Params {
             glob: String::new(),
             regex: String::new(),
             min_size: "0".into(),
-            max_depth: 0,
+            prune_depth: 0,
             follow_links: false,
             count_hardlinks: false,
             one_file_system: false,
@@ -129,7 +129,7 @@ impl Params {
             exclude_glob: patterns(&self.glob),
             exclude_regex: patterns(&self.regex),
             min_file_size: size(&self.min_size)?,
-            max_depth: self.max_depth,
+            prune_depth: self.prune_depth,
             follow_links: self.follow_links,
             count_hardlinks: self.count_hardlinks,
             one_file_system: self.one_file_system,
@@ -508,7 +508,7 @@ mod tests {
         let p = Params {
             regex: "ignored$".into(),
             threads: 3,
-            max_depth: 2,
+            prune_depth: 2,
             follow_links: true,
             count_hardlinks: true,
             one_file_system: true,
@@ -520,7 +520,7 @@ mod tests {
         let o = p.to_options().unwrap();
         assert_eq!(o.min_file_size, 2097152);
         assert_eq!(o.threads, 3);
-        assert_eq!(o.max_depth, 2);
+        assert_eq!(o.prune_depth, 2);
         assert!(o.follow_links && o.count_hardlinks && o.one_file_system);
         assert!(!o.compute_physical);
         assert_eq!(o.prefetch, Some(false));
@@ -568,7 +568,7 @@ mod tests {
                 let params = Params {
                     mode,
                     min_size: if filtered { "10" } else { "0" }.into(),
-                    max_depth: if filtered { 1 } else { 0 },
+                    prune_depth: if filtered { 1 } else { 0 },
                     regex: if filtered { "ignored$" } else { "" }.into(),
                     follow_links: true,
                     ..Params::default()
