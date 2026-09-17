@@ -1,0 +1,26 @@
+# Final release of a retired crate. Not a workspace member: the empty
+# [workspace] table keeps it out of the parent workspace so a `cargo build` at
+# the repository root never compiles a crate whose only job is to refuse.
+#
+# The version has to exceed the published 0.5.0-beta.2 and matches the release
+# line that retired it.
+[workspace]
+
+[package]
+name = "hyperdu-cli"
+version = "0.5.0-beta.5"
+edition = "2021"
+license = "MIT"
+description = "Deprecated: renamed to `hyperdu`. Install `hyperdu` instead."
+repository = "https://github.com/automationjp/HyperDiskUsage"
+homepage = "https://github.com/automationjp/HyperDiskUsage#readme"
+readme = "README.md"
+keywords = ["deprecated", "renamed", "hyperdu"]
+categories = ["command-line-utilities"]
+
+# `hyperdu-cli`, not `hyperdu`. The retired versions installed a binary called
+# `hyperdu`, so keeping that name here would let `cargo install hyperdu-cli`
+# overwrite a working `hyperdu` with this stub.
+[[bin]]
+name = "hyperdu-cli"
+path = "src/main.rs"

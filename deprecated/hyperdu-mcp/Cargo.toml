@@ -1,0 +1,26 @@
+# Final release of a retired crate. Not a workspace member: the empty
+# [workspace] table keeps it out of the parent workspace so a `cargo build` at
+# the repository root never compiles a crate whose only job is to refuse.
+#
+# The version has to exceed the published 0.5.0-beta.2 and matches the release
+# line that retired it.
+[workspace]
+
+[package]
+name = "hyperdu-mcp"
+version = "0.5.0-beta.5"
+edition = "2021"
+license = "MIT"
+description = "Deprecated: merged into `hyperdu` as the `hyperdu mcp` subcommand."
+repository = "https://github.com/automationjp/HyperDiskUsage"
+homepage = "https://github.com/automationjp/HyperDiskUsage#readme"
+readme = "README.md"
+keywords = ["deprecated", "mcp", "hyperdu"]
+categories = ["command-line-utilities"]
+
+# The retired versions installed a binary called `hyperdu-mcp`, and this one
+# keeps that name on purpose: there is no longer any such command, so replacing
+# it with a stub that names its successor is the useful outcome.
+[[bin]]
+name = "hyperdu-mcp"
+path = "src/main.rs"
