@@ -9,14 +9,18 @@ description: >-
   Fast cross-platform disk usage analyzer. Finds what is filling a disk, and
   which build artifacts may be reclaimable.
 
-# GitHub Pages serves a project site under /<repo>/, so every internal link has
-# to carry that prefix. Getting this wrong is the usual reason a project site
-# renders with no stylesheet.
-url: https://automationjp.github.io
-baseurl: /HyperDiskUsage
+# The custom domain in site/CNAME serves this at the root, so there is no
+# /<repo>/ prefix to carry. `baseurl` has to stay empty for that: a leftover
+# prefix is the usual reason a Pages site renders with no stylesheet, because
+# every `relative_url` in _layouts/default.html would point one level too deep.
+url: https://hyperdu.automation.jp
+baseurl: ""
 
 repository: automationjp/HyperDiskUsage
-published_cli_url: https://crates.io/crates/hyperdu-cli
+# `hyperdu`, not `hyperdu-cli`. The latter is the retired name and now carries
+# nothing but a deprecation notice, so the footer link would send readers to a
+# dead end.
+published_cli_url: https://crates.io/crates/hyperdu
 
 # This unreleased source snapshot is the version described and measured below.
 source_revision: 2645689515ab2e608a78b7492637e55179e4739a
