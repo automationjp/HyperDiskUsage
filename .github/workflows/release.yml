@@ -352,3 +352,45 @@ jobs:
           git commit -m "Add HyperDU $ver"
           git push -u origin $BR
           gh pr create -R "$env:WINGET_REPO" -t "Add HyperDU $ver" -b "Automated manifest" -B master
+
+  # Runs after `publish` because a crates.io upload cannot be taken back: if the
+  # GitHub release itself fails there is nothing to match on the registry yet.
+  crates-io:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        # No continue-on-error, unlike scoop-pr and winget-pr. Those open pull
+        # requests on repositories this project does not own, so a missing secret
+        # is someone else's state. This registry is ours, and skipping it quietly
+        # is exactly what left crates.io on 0.5.0-beta.2 while beta.3 and beta.4
+        # shipped -- for two releases the README told people to run
+        # `cargo install hyperdu` against a crate that did not exist.
+        run: |
+          set -euo pipefail
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo '::error::CARGO_REGISTRY_TOKEN is not set; crates.io was not updated' >&2
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          # Dependency order. `hyperdu` and `hyperdu-gui` carry hyperdu-core as a
+          # path dependency that cargo rewrites to a registry one on publish, so
+          # core has to be in the index before either of them is packaged.
+          for crate in hyperdu-core hyperdu hyperdu-gui; do
+            # Re-tagging re-runs this job and crates.io rejects a duplicate
+            # upload, which would fail the whole release over work already done.
+            if curl -fsS -o /dev/null -H 'User-Agent: hyperdu-release' \
+                 "https://crates.io/api/v1/crates/$crate/$version"; then
+              echo "$crate $version is already on crates.io; skipping"
+              continue
+            fi
+            cargo publish -p "$crate" --locked
+          done
