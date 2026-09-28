@@ -62,7 +62,9 @@ jobs:
           sudo apt-get install -y shellcheck python3-yaml
           shellcheck -S error -x scripts/**/*.sh
       - name: Supply-chain regression tests (offline mocks)
-        run: python3 scripts/package/test_supply_chain.py
+        run: |
+          python3 scripts/package/test_supply_chain.py
+          python3 scripts/package/test_registry.py
       - name: Import sort (nightly strict)
         run: |
           rustup toolchain install nightly -c rustfmt
@@ -71,6 +73,11 @@ jobs:
         run: cargo build --workspace --release
       - name: Test core, CLI and GUI
         run: cargo test -p hyperdu-core -p hyperdu -p hyperdu-gui -- --nocapture
+      - name: Verify registry packages without publishing
+        run: |
+          cargo package --workspace --locked
+          version="$(cargo pkgid -p hyperdu | sed 's/.*[#@]//')"
+          python3 scripts/package/prepare_registry.py --version "$version"
       # A silent drop to 0% would look exactly like the slow CI this replaced.
       - name: sccache stats
         if: always()
@@ -104,4 +111,5 @@ jobs:
         if: always()
         run: sccache --show-stats
 
-  # Note: artifact packaging is handled in release.yml on tags. CI only builds and tests.
+  # Installable binaries are packaged in release.yml on tags. The registry
+  # check above verifies source packages only and never obtains a publish token.
