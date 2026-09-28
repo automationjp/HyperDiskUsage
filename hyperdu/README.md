@@ -2,51 +2,46 @@
 
 **日本語** · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
-OS固有の高速な列挙処理と並列走査を使う、クロスプラットフォームのディスク使用量解析ツールです。
+OS固有のメタデータ取得と並列走査を使うディスク使用量アナライザーです。**CLIと読み取り専用MCPを一つのコマンドに統合**し、GUIやRustアプリと同じ `hyperdu-core` を利用します。
 
-## 性能
+## 公開済みベータ版のインストール
 
-Windows / NTFS と Linux / WSL2 / ext4 の[測定結果と限界](../docs/benchmarks.md)を公開します。
-coldとXFSは未測定です。実装の仕組みは[性能設計](../docs/performance.md)を参照してください。
-
-## インストール
+`0.5.0-beta.5` はcrates.ioとGitHub Releasesで公開済みです。
 
 ```bash
-cargo install hyperdu --version 0.5.0-beta.5
+cargo install hyperdu --locked --version 0.5.0-beta.5
 ```
 
-クレート名も実行コマンドも `hyperdu`。CLIとMCPを一度に導入し、MCPは `hyperdu mcp` を実行した
-場合だけ起動します。Rust 1.88+ が必要です。
+クレート名も実行コマンドも `hyperdu` です。旧名 `hyperdu-cli` ではありません。MCPは `hyperdu mcp` を実行した場合だけ起動します。ソースビルドにはRust 1.88以降とOSのビルドツールが必要です。配布済みバイナリの実行にRustは不要です。[環境別セットアップ](../docs/setup.md)
 
-この版は公開準備中です。現在はリポジトリのルートから
-`cargo install --locked --path hyperdu` で導入してください。上のレジストリ用コマンドは公開後に利用できます。
-配布済みバイナリの実行にRustは不要です。MSVC/SDK・Linuxの依存環境は[セットアップ](../docs/setup.md)を参照してください。
+開発中のcheckoutを使う場合は、リポジトリのルートで `cargo install --locked --path hyperdu` を実行します。これは公開版のインストールとは別の選択肢です。
 
 ## 使い方
-
-引数の既定値・対応OS・進捗と出力先は [CLIパラメータリファレンス](../docs/cli-reference.md) を参照してください。`--time` 系引数は既定で有効な `time-format` featureが必要です。
 
 ```bash
 hyperdu /path --top 20
 hyperdu /path --json out.json
+hyperdu /path --csv out.csv
 hyperdu --compat gnu -k /var/log
 hyperdu mcp
 hyperdu -- mcp
 ```
 
-上から順に、大きいディレクトリの表示、JSON出力、GNU du互換モード、MCPサーバ起動、
-`mcp` という名前のディレクトリの走査です。
+上位ディレクトリ表示、JSON / CSV出力、GNU互換出力、MCP起動、最後は `mcp` という名前のディレクトリの走査です。通常の `--top` は物理サイズで順位付けします。引数の既定値・対応OS・進捗と出力先は [CLIリファレンス](../docs/cli-reference.md) を参照してください。`--time` 系引数には既定で有効な `time-format` featureが必要です。
 
-## 高速走査の仕組み
+## 仕組みと使い分け
 
-- Linux: `getdents64` + `statx`
-- Windows: 割当サイズとファイルIDを含む `NtQueryDirectoryFile` の一括列挙
-- macOS: `getattrlistbulk`
-- ワーカーごとのLIFOキューとwork stealing
-- 条件を満たす場合のNTFS `$MFT` 直接走査
+Windowsは `NtQueryDirectoryFile` で名前・割当サイズ・file IDなどをまとめて取得し、追加のファイルオープンを減らします。Linuxは `getdents64` と `statx` を使い、必要なメタデータ取得を並列に処理します。ワーカーごとのLIFOキューとwork stealingで、偏った木へ仕事を配ります。macOS用の `getattrlistbulk` 実装はありますが、現行CI・Releaseの対象ではありません。
 
-MFTで完全な結果を安全に解析できない場合は、通常のディレクトリ列挙へ戻ります。
-インストール形式・GUI・プラットフォーム状況・制限は[プロジェクトREADME](../README.md)を参照してください。
+`--mft` は条件付きの実験的なWindows NTFS経路です。不完全な必須読み取りや解析では通常列挙へ戻りますが、成功時の完全な集計一致まで保証しません。GNU / POSIX `du` の全オプション互換でもありません。[比較と制限](../README.md)
+
+MCPの `list_volumes`、`scan_path`、`find_reclaimable` は読み取り専用で、削除しません。SkillはCLIだけでも利用できます。[エージェント導入](../plugin/README.md)
+
+## 開発者向け資料
+
+[開発者ガイド](../docs/developer-guide.md) · [性能設計](../docs/performance.md) · [測定結果と限界](../docs/benchmarks.md) · [GUI](../hyperdu-gui/README.md)
+
+ベンチマークの測定コミットと、公開版・現在のHEADは区別してください。
 
 ## ライセンス
 

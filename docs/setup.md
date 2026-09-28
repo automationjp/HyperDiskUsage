@@ -1,16 +1,12 @@
-# Setup and build environment
+# セットアップとビルド環境
 
 **日本語** · [English](en/setup.md) · [简体中文](zh-CN/setup.md)
 
-この文書では、HyperDU を**実行するだけの場合**と、**Rust からコンパイル・開発する場合**を分けて説明します。
+[README](../README.md)は公開版の導入、[開発者ガイド](developer-guide.md)は実装の読み方を説明します。この文書では、実行だけの場合とソースビルドの前提を分けます。
 
-## 1. 実行するだけの場合
+## 1. 実行だけならRustは不要
 
-prebuilt binary / Scoop / `.deb` を利用する場合、**Rust toolchain は不要です**。
-
-### Windows
-
-GitHub Release の Windows x86_64 binary、または Scoop を利用できます。
+[GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases)のWindows / Linux向けバイナリや `.deb`、Scoopを使う場合、Rust toolchainは不要です。Windowsでバイナリを実行するためにVisual Studioを入れる必要もありません。
 
 ```powershell
 scoop bucket add hyperdu https://github.com/automationjp/HyperDiskUsage
@@ -18,41 +14,19 @@ scoop install hyperdu
 hyperdu --version
 ```
 
-直接 binary を取得する場合も、Rust や Visual Studio のインストールは不要です。
+Linuxはx86_64 glibc、x86_64 musl、aarch64 glibcから環境に合う配布物を選びます。GUIにはWindowsのデスクトップセッション、またはLinuxのX11 / Wayland環境が必要です。headless serverではCLIを使います。macOSは現行Release・CIの対象ではなく、GUIも提供対象外です。
 
-### Linux
+## 2. Rustの宣言値と、ビルドできる環境を区別する
 
-配布物には glibc / musl / aarch64 の build があります。使用している環境に合うものを選択してください。
+| クレート | 現行manifestの `rust-version` | 注意点 |
+|---|---:|---|
+| `hyperdu-core` | 1.75 | 宣言値。依存一式を含む最低版CIの保証とは別 |
+| `hyperdu`（CLI + MCP） | 1.88 | MCPを含むため、workspace全体もこれ未満では構築しない |
+| `hyperdu-gui` | 1.75 | **依存条件と矛盾しており、対応保証ではない** |
 
-- x86_64 + glibc: 通常の Ubuntu / Debian / Fedora 系で利用する候補
-- x86_64 + musl: static build を使いたい場合
-- aarch64 + glibc: ARM64 Linux
+GUIが使うegui系の [0.32.0 manifest](https://github.com/emilk/egui/blob/0.32.0/Cargo.toml)はRust 1.85を要求します。したがってGUIをRust 1.75対応として案内することはできません。また、依存全体について1.85や1.88が十分だとここで実証したわけではありません。最低版の宣言と専用CIの整合は残課題です。
 
-`.deb` を使う場合も Rust は不要です。
-
-### GUI runtime
-
-`hyperdu-gui` は desktop graphics stack を必要とします。
-
-- Windows: 通常の desktop session
-- Linux: X11 または Wayland desktop environment
-- macOS: 現在 GUI は release 対象外
-
-## 2. Rust から CLI をビルドする
-
-### Rust version
-
-crate ごとの minimum Rust version は次のとおりです。
-
-| Crate | Minimum Rust |
-|---|---:|
-| `hyperdu-core` | 1.75+ |
-| `hyperdu` (CLI + MCP) | 1.88+ |
-| `hyperdu-gui` | 1.75+ |
-
-**workspace 全体を一度に build/test する場合は CLI の MCP 実装を含むため Rust 1.88+ が必要です。**
-
-開発環境では stable toolchain を推奨します。
+**開発には新しいstable Rustを使用してください。** CIもstableで検証します。
 
 ```bash
 rustup toolchain install stable
@@ -62,199 +36,105 @@ rustc --version
 cargo --version
 ```
 
-### Clone
+## 3. OSごとのソースビルド準備
 
-```bash
-git clone https://github.com/automationjp/HyperDiskUsage.git
-cd HyperDiskUsage
-```
+### Windows
 
-### CLI only
-
-```bash
-cargo build --release -p hyperdu
-```
-
-実行:
-
-```bash
-./target/release/hyperdu --version
-./target/release/hyperdu . --top 20
-```
-
-Windows PowerShell:
-
-```powershell
-.\target\release\hyperdu.exe --version
-.\target\release\hyperdu.exe . --top 20
-```
-
-## 3. OS ごとのコンパイル環境
-
-### Windows — recommended development path
-
-推奨は **MSVC toolchain** です。
-
-必要なもの:
-
-1. Rust stable (`rustup`)
-2. Visual Studio 2022 または Visual Studio Build Tools
-3. C++ build tools / MSVC linker
-4. Windows SDK
-
-Rust target を確認します。
+MSVC toolchainを推奨します。Rustに加えてVisual Studio / Build ToolsのC++ビルドツール、MSVC linker、Windows SDKが必要です。通常の対象は `x86_64-pc-windows-msvc` です。
 
 ```powershell
 rustup show
 rustc -vV
 ```
 
-通常の rustup Windows installer で MSVC target を選択した場合、target は次の形になります。
+MFTの実ボリューム検証は通常のビルドとは別です。NTFSボリュームルート、管理者権限、対応オプションが必要で、条件を満たさない場合は通常列挙に戻ります。実ボリュームのテストを一般のビルド成功と混同しないでください。
 
-```text
-x86_64-pc-windows-msvc
-```
+### Linux
 
-build:
-
-```powershell
-cargo build --release -p hyperdu
-cargo test -p hyperdu-core -p hyperdu
-```
-
-`--mft` の実 volume 検証は通常 build とは別です。NTFS volume root と管理者権限が必要で、条件を満たさない場合 HyperDU は通常の directory enumeration に fallback します。
-
-### Linux — CLI / core
-
-Rust に加えて、native dependency をコンパイルできる基本的な C build environment が必要です。
-
-Ubuntu / Debian 系の例:
+Ubuntu / Debianでは基本のCビルド環境を準備します。
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y build-essential pkg-config
 ```
 
-その後:
+GUIは `egui` / `eframe` / `winit` が使うX11 / Waylandの開発ライブラリも必要です。パッケージ名はディストリビューションによって異なり、native library errorにはその環境の開発パッケージを追加します。
 
-```bash
-cargo build --release -p hyperdu
-cargo test -p hyperdu-core -p hyperdu
-```
-
-release packaging や cross build を行う場合は追加 toolchain が必要です。CI の release workflow では、用途に応じて `musl-tools`、`gcc-aarch64-linux-gnu`、`mingw-w64`、`zip`、`jq`、`rpm` なども使用しています。
-
-### Linux — GUI
-
-CLI/core の build environment に加えて、`egui` / `eframe` / `winit` が利用する **X11 または Wayland の development libraries** が必要です。
-
-ディストリビューションによって package 名が異なるため、GUI build で native library error が出た場合は、その distribution の X11 / Wayland development package を追加してください。
-
-```bash
-cargo build --release -p hyperdu-gui
-cargo run --release -p hyperdu-gui
-```
-
-headless server では GUI より CLI を推奨します。
+配布パッケージやcross buildは通常のCLIビルドとは別で、release workflowでは `musl-tools`、`gcc-aarch64-linux-gnu`、`mingw-w64`、`zip`、`jq`、`rpm` なども使います。
 
 ### macOS
 
-CLI core には `getattrlistbulk` fast path がありますが、現在 macOS CLI は実機 performance / compatibility 未検証です。
+`getattrlistbulk` の実装はありますが、現行CIでは検証していません。CLIの実機性能・互換性は未検証で、GUIはRelease対象外です。
 
-GUI は現在 release target に含めていません。
-
-## 4. MCP server をビルドする
-
-`hyperdu mcp` は `rmcp` の要件により **Rust 1.88+** が必要です。
+## 4. ビルド・起動・開発版のインストール
 
 ```bash
-rustup toolchain install stable
-cargo build --release -p hyperdu
-cargo install --path hyperdu
-hyperdu mcp
+git clone https://github.com/automationjp/HyperDiskUsage.git
+cd HyperDiskUsage
+cargo build --release --locked -p hyperdu
+cargo test --locked -p hyperdu-core -p hyperdu
+./target/release/hyperdu --version
+./target/release/hyperdu . --top 20
 ```
 
-`hyperdu mcp` は通常の対話型 CLI ではなく、**stdio 上で MCP client から接続される server** です。直接起動すると protocol input を待機します。
-
-登録例:
+Windows PowerShellでは実行ファイルを `.\target\release\hyperdu.exe` として起動します。
 
 ```bash
+cargo build --release --locked -p hyperdu-gui
+cargo run --release -p hyperdu-gui
+cargo install --locked --path hyperdu
+```
+
+`--path` はcheckoutからの開発版のインストールです。公開済みCargo版はREADMEの `--version` 指定を使います。
+
+## 5. MCP
+
+`hyperdu` のビルドにMCPは含まれます。追加のサーバークレートは不要です。
+
+```bash
+hyperdu mcp
 claude mcp add --transport stdio hyperdu -- hyperdu mcp
 codex mcp add hyperdu -- hyperdu mcp
 ```
 
-動作確認は利用する MCP client 側から server が起動・接続できることを確認してください。
+`hyperdu mcp` は対話型のコマンドプロンプトではなく、stdioでMCPクライアントのprotocol入力を待つサーバです。接続確認はクライアントから行ってください。[Plugin / Skill / MCP](../plugin/README.md)
 
-## 5. 開発環境の確認
-
-workspace を変更する場合の基本確認です。
+## 6. 開発時の検証
 
 ```bash
-cargo check --workspace
-cargo test --workspace
+cargo check --workspace --locked
+cargo test --workspace --locked
 cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo check --workspace --locked --features hyperdu-core/prof-tracy
+cargo check --workspace --locked --features hyperdu-core/prof-puffin
+cargo test --workspace --locked --features hyperdu-core/rayon-par,hyperdu-core/rayon-inner,hyperdu-core/simd-prefetch
 ```
 
-workspace 全体では Rust 1.88+ を使用してください。
-
-### Optional feature configurations
-
-`profiling` backend は Tracy と Puffin を同時には有効化しません。`--all-features` は有効な検証方法ではありません。
-
-必要な feature は個別に確認します。
+TracyとPuffinは同時に有効化できません。`--all-features` は正しい一括検証方法ではありません。ドキュメントや配布を変更した場合はPyYAMLを導入し、次も確認します。
 
 ```bash
-cargo check --workspace --features hyperdu-core/prof-tracy
-cargo check --workspace --features hyperdu-core/prof-puffin
+python3 scripts/lint/test_docs.py
+python3 scripts/package/test_supply_chain.py
+python3 scripts/package/test_registry.py
 ```
 
-parallel configuration を確認する場合:
+## 7. 性能とインストール結果の確認
+
+性能比較はrelease buildで行います。ローカルCPU専用の最適化を使う場合は条件を記録します。
 
 ```bash
-cargo test --workspace \
-  --features hyperdu-core/rayon-par,hyperdu-core/rayon-inner,hyperdu-core/simd-prefetch
+RUSTFLAGS="-C target-cpu=native" cargo build --release --locked -p hyperdu
 ```
 
-## 6. Performance build
-
-通常の比較では、必ず release build を使います。
-
-```bash
-cargo build --release -p hyperdu
-```
-
-ローカル CPU 専用の比較を行う場合のみ、条件を記録したうえで native optimization を使用します。
-
-```bash
-RUSTFLAGS="-C target-cpu=native" cargo build --release -p hyperdu
-```
-
-`target-cpu=native` の結果を generic prebuilt binary の性能値と混同しないでください。
-
-性能値を公開する場合は [Benchmark plan](benchmarks.md) の環境記録・correctness gate を通します。
-
-## 7. Installation check
-
-セットアップ後は最低限次を確認します。
+この結果をgeneric配布バイナリの性能と混同しないでください。測定前に[ベンチマークの正確性ゲート](benchmarks.md)を通し、OS、ファイルシステム、Rust版、profile、CPU、storage、実行コマンドを記録します。
 
 ```bash
 hyperdu --version
 hyperdu --help
 hyperdu . --top 10
-```
-
-開発 checkout では:
-
-```bash
+# 開発checkoutからhelpを確認
 cargo run -p hyperdu -- --help
 ```
 
-問題が performance path に関係する場合は、OS、filesystem、Rust version、build profile、CPU、storage、実行 command をセットで記録してください。
-
-## Related docs
-
-- [Performance design](performance.md)
-- [Benchmark plan](benchmarks.md)
-- [Architecture](architecture.md)
-- [Documentation index](README.md)
+[性能設計](performance.md) · [ベンチマーク](benchmarks.md) · [アーキテクチャ](architecture.md) · [文書一覧](README.md)

@@ -6,8 +6,8 @@
 
 title: HyperDU
 description: >-
-  Fast cross-platform disk usage analyzer. Finds what is filling a disk, and
-  which build artifacts may be reclaimable.
+  Fast cross-platform disk usage analyzer. Native metadata reads and parallel
+  traversal, shared by the CLI, GUI, and read-only MCP tools.
 
 # The custom domain in site/CNAME serves this at the root, so there is no
 # /<repo>/ prefix to carry. `baseurl` has to stay empty for that: a leftover
@@ -17,13 +17,13 @@ url: https://hyperdu.automation.jp
 baseurl: ""
 
 repository: automationjp/HyperDiskUsage
-# `hyperdu`, not `hyperdu-cli`. The latter is the retired name and now carries
-# nothing but a deprecation notice, so the footer link would send readers to a
-# dead end.
+# `hyperdu`, not `hyperdu-cli`. The latter is the retired name.
 published_cli_url: https://crates.io/crates/hyperdu
 
-# This unreleased source snapshot is the version described and measured below.
-source_revision: 2645689515ab2e608a78b7492637e55179e4739a
+# Live source/documentation links, NOT the installation or measurement version.
+# Installation uses versions below. Historical measurements keep their own
+# commit in _data/benchmarks.json; never relabel them as a newer measurement.
+source_revision: main
 
 # The three language trees. The layout builds its switcher from this list, so
 # adding a language here and a page under `site/<code>/` is all it takes.
@@ -38,14 +38,12 @@ languages:
     label: 简体中文
     path: /zh-CN/
 
-# Version numbers appear in install commands on all pages. Keeping them here
-# means a release updates one place instead of six.
+# Published versions, shared by status labels and installation commands.
+# Update only after the matching release assets and registry versions exist.
 versions:
   cli: 0.5.0-beta.5
   gui: 0.5.0-beta.5
 
-# No theme: the site is one page per language, and a theme's layouts would be
-# more to work around than to use.
 plugins: []
 
 exclude:
