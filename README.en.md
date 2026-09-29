@@ -22,7 +22,7 @@ hyperdu . --top 20
 
 The crate and executable are both **`hyperdu`**, not the retired name `hyperdu-cli`. One installation provides the CLI and the MCP server; the server starts only when you run `hyperdu mcp`.
 
-**Prebuilt Windows / Linux binaries do not require Rust to run.** For source builds, use a recent stable Rust and platform build tools. The CLI declares Rust 1.88. The GUI manifest's 1.75 declaration conflicts with its egui dependencies, so it must not be treated as a verified Rust 1.75 build guarantee.
+**Prebuilt Windows / Linux binaries do not require Rust to run.** For source builds, use a recent stable Rust and platform build tools. Current source declares Rust 1.82 for core, 1.85 for GUI, and 1.88 for CLI, with Linux / Windows CI at each floor. Immutable published beta manifests are not rewritten by this source fix; use a recent stable Rust when installing the published package.
 
 ## What changes compared with a conventional implementation?
 

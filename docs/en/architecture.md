@@ -78,7 +78,7 @@ A parent's sorted index is published after its referenced nodes have been sent. 
 
 Starting a scan immediately sets a working state. A shared counter updates progress and elapsed time independently of the result queue. Incoming events request repainting, with periodic refreshes while scanning. Cancellation reaches the core and index preparation through a shared flag; partial results are not labeled complete. It cannot immediately interrupt synchronous I/O or an individual sort already in progress. Dropping the receiver releases a sender blocked on the queue, and replacing the scan handle isolates old results from the next scan.
 
-Terminal events are handled after preceding updates. Read errors, cancellation, and a disconnected sender without a terminal event are distinguished from successful completion. User-triggered JSON/CSV export copies all rows and sorts them by path. This and some other operations, including model replacement, still run synchronously on the UI thread.
+Terminal events are handled after preceding updates. Read errors, cancellation, and a disconnected sender without a terminal event are distinguished from successful completion. A dedicated export worker now handles the native dialog, row copy, path sorting, and file I/O. The UI hands off an Arc snapshot and polls completion without blocking. A same-directory temporary file preserves the previous destination on failure or cancellation observed before replacement. Other synchronous operations, including model replacement, remain.
 
 Implementation: [GUI transport / index](../../hyperdu-gui/src/scan.rs), [UI ingestion / rendering](../../hyperdu-gui/src/app.rs), and [core modes / events](../../hyperdu-core/src/lib.rs).
 
@@ -191,3 +191,7 @@ It is not an automatic watcher, and the result of `show` is explicitly marked `s
 Historical issue-specific designs, MFT verification records, and the old persistent-index proposal have moved to [old/README.md](../old/README.md).
 
 Use this document and [Performance design](performance.md) as the entry points for understanding the current architecture.
+
+## MFT namespace validation
+
+Current MFT source rejects unexplained parents, cycles, duplicates and overflow instead of returning partial totals. The on-disk name count includes DOS aliases. Cross-folder or unresolved hard-link names fall back to enumeration; no-follow skips symlinks/junctions, while unknown provider reparse tags and missing DATA decline MFT. A read-only controlled NTFS fixture tests exact directory-row parity separately from ambiguous-namespace fallback. This is not a claim of universal parity across live races, ACLs and unsupported layouts, and does not widen existing tolerances.

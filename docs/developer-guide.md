@@ -78,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 GUIでは走査・索引・並び順の準備を専用スレッドへ移し、256ノード単位・容量2メッセージのキューで配送します。UIは1フレーム1024件・3msを目安に取り込みますが、時間制限は協調的で、メモリ確保やモデル破棄まで含む厳密な3ms保証ではありません。全結果の索引は保持するため、全体が一定メモリで動くという意味でもありません。
 
-JSON / CSV export時の全行の複製・ソートなど、UI上の同期処理は残っています。大規模データのUI応答性を評価する際は、走査中だけでなくexport時も確認します。
+JSON / CSV exportは専用ワーカーへ移しました。UIは `Arc` スナップショットを渡すだけで、ダイアログ・複製・ソート・書き込みを実行しません。保存失敗・置き換え前のキャンセルでは旧ファイルを維持します。モデル置換やOSダイアログの即時中断まで保証する変更ではありません。
 
 ## 5. AI連携の境界
 
@@ -99,9 +99,11 @@ Agent SkillはCLIを使った手順であり、MCPサーバを動かさずに利
 | MFTとInteractive | MFT成功時は `BatchFallback(Mft)` と `BatchCompleted` で一括配送を明示。MFT失敗から通常列挙へ戻る動作とは別 |
 | Linux index | `refresh` が保存値を更新し、`show` は保存値を `stale` として読む。自動追従watcherではない |
 | macOS | 実装の存在と検証・配布を区別。現行CIとReleaseはWindows / Linux |
-| 最低Rust版 | manifestの宣言値と依存を含むビルド保証は別。GUIの1.75宣言はeguiの要求と矛盾する |
+| 最低Rust版 | 現行ソースはcore 1.82、GUI 1.85、CLI 1.88。各最低版でlocked default構成の全ターゲットをLinux / Windows CIで確認 |
 
-GUIが使うegui系の [0.32.0のworkspace manifest](https://github.com/emilk/egui/blob/0.32.0/Cargo.toml) は `rust-version = "1.85"` を宣言します。これはGUIが1.75では構築できない根拠ですが、依存一式を含めて「1.85なら必ず構築可能」と証明したものではありません。最低版CIとmanifestの整合は別途解決が必要です。当面は新しいstable Rustを使います。
+現在のmanifestはcore 1.82、GUI 1.85、CLI 1.88に整合させています。`.github/workflows/regression.yml` はこの3版とLinux / Windowsの6条件で `cargo check --locked --all-targets` を実行します。対象はコミット済みlockfileのdefault構成で、未検証のoptional featureや将来の依存更新まで一括保証するものではありません。公開済みベータ版のmanifestは不変です。
+
+現行ソースのMFTは、説明できない親参照・循環・重複・オーバーフローを部分結果にしません。DOS別名を含む名前数を確認し、複数フォルダにまたがるハードリンクや未解決の名前は通常列挙へ戻します。リンク非追従ではsymlink / junctionを除外し、WOF・クラウドなど未知のreparse tagや欠損DATAはMFTを不採用にします。制御した読み取り専用NTFS fixtureで全ディレクトリ行の完全一致と、曖昧な名前空間でのfallbackを別々に検証します。live volumeの変更・ACL・未対応レイアウトまで完全一致を保証するものではなく、既存の許容差を広げる変更でもありません。
 
 ## 7. 変更を検証する
 

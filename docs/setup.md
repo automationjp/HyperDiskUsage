@@ -18,15 +18,13 @@ Linuxはx86_64 glibc、x86_64 musl、aarch64 glibcから環境に合う配布物
 
 ## 2. Rustの宣言値と、ビルドできる環境を区別する
 
-| クレート | 現行manifestの `rust-version` | 注意点 |
-|---|---:|---|
-| `hyperdu-core` | 1.75 | 宣言値。依存一式を含む最低版CIの保証とは別 |
-| `hyperdu`（CLI + MCP） | 1.88 | MCPを含むため、workspace全体もこれ未満では構築しない |
-| `hyperdu-gui` | 1.75 | **依存条件と矛盾しており、対応保証ではない** |
+| クレート | 現行ソースの最低Rust版 |
+|---|---:|
+| `hyperdu-core` | 1.82 |
+| `hyperdu`（CLI + MCP） | 1.88 |
+| `hyperdu-gui` | 1.85 |
 
-GUIが使うegui系の [0.32.0 manifest](https://github.com/emilk/egui/blob/0.32.0/Cargo.toml)はRust 1.85を要求します。したがってGUIをRust 1.75対応として案内することはできません。また、依存全体について1.85や1.88が十分だとここで実証したわけではありません。最低版の宣言と専用CIの整合は残課題です。
-
-**開発には新しいstable Rustを使用してください。** CIもstableで検証します。
+Linux / Windowsの6条件で、各コンパイラを明示して `cargo check --locked --all-targets` を実行します。対象はコミット済みlockfileのdefault構成です。workspace全体はCLIを含むため1.88以上が必要です。公開済みベータ版の古いmanifestは変更されません。公開版の導入・通常開発には新しいstable Rustを使用してください。
 
 ```bash
 rustup toolchain install stable

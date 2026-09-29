@@ -22,7 +22,7 @@ cargo install --locked --path hyperdu-gui
 cargo run --release -p hyperdu-gui
 ```
 
-Use a recent stable Rust for source builds. The manifest's Rust 1.75 declaration conflicts with egui dependencies and is not a verified build guarantee. Linux needs X11 / Wayland development libraries; Windows needs its build environment and a desktop session. macOS is not a current GUI release target. [Setup](../docs/en/setup.md) · [Minimum-version caveat (Japanese)](../docs/developer-guide.md)
+Use a recent stable Rust for source builds. Current GUI source declares Rust 1.85 and checks that floor on Linux / Windows. Published beta manifests remain immutable; install the published package with a recent stable toolchain. Linux needs X11 / Wayland development libraries; Windows needs its build environment and a desktop session. macOS is not a current GUI release target. [Setup](../docs/en/setup.md) · [Minimum-version caveat (Japanese)](../docs/developer-guide.md)
 
 ## Operation and delivery modes
 
@@ -66,7 +66,7 @@ Direct files are shown as a separate total, not a synthetic directory. Rows show
 
 Read errors, cancellation, and scan failures are not successful completion. Completed partial results remain viewable after cancellation, but synchronous I/O is not guaranteed to stop immediately. JSON / CSV export is enabled only after `Finished`, with zero errors and no active scan.
 
-Scanning and index preparation run in the background, but export still clones and sorts all rows synchronously on the UI thread. Include export responsiveness when evaluating large datasets. [Architecture](../docs/en/architecture.md)
+In current source, an export worker handles the native dialog, row copy, sort, and write. The UI hands off a constant-time shared snapshot and stays available for browsing. Failed writes and cancellation observed before replacement preserve the previous destination. New scans and duplicate exports are blocked until completion. Cancellation does not instantly interrupt OS I/O, sorting, or an open dialog. This source change does not update already published binaries. [Architecture](../docs/en/architecture.md)
 
 ## Other entry points
 

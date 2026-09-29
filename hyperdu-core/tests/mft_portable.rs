@@ -7,3 +7,6 @@ pub use hyperdu_core::{Stat, StatMap};
 mod mft;
 #[path = "../src/platform/windows_impl/mft_reader.rs"]
 mod mft_reader;
+
+#[path = "../src/platform/windows_impl/mft_aggregate.rs"]
+mod mft_aggregate;

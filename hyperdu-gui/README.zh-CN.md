@@ -22,7 +22,7 @@ cargo install --locked --path hyperdu-gui
 cargo run --release -p hyperdu-gui
 ```
 
-源码构建请使用较新的 stable Rust。manifest 的 Rust 1.75 声明与 egui 依赖要求冲突，不能视为已验证的构建保证。Linux 需要 X11 / Wayland 开发库，Windows 需要构建环境及桌面会话。macOS 不在当前 GUI Release 范围内。[环境设置](../docs/zh-CN/setup.md) · [最低版本说明（日语）](../docs/developer-guide.md)
+源码构建请使用较新的 stable Rust。当前 GUI 源码声明最低 Rust 1.85，并在 Linux / Windows 检查；已发布 Beta 包的 manifest 不会改变，安装公开包请使用较新的 stable。Linux 需要 X11 / Wayland 开发库，Windows 需要构建环境及桌面会话。macOS 不在当前 GUI Release 范围内。[环境设置](../docs/zh-CN/setup.md) · [最低版本说明（日语）](../docs/developer-guide.md)
 
 ## 操作与结果交付
 
@@ -66,7 +66,7 @@ Windows MFT 扫描需手动启用，要求 NTFS、卷根目录、管理员权限
 
 读取错误、取消和扫描失败不视为成功完成。取消后仍可查看已完成的部分结果，但不能保证立即中断同步 I/O。只有收到 `Finished`、错误数为0且没有活动扫描时，才允许 JSON / CSV 导出。
 
-扫描和索引准备在后台进行，但导出仍在 UI 线程同步复制并排序全部行。评估大规模数据时，也应检查导出响应性。[架构](../docs/zh-CN/architecture.md)
+当前源码在导出工作线程中处理原生对话框、行复制、排序和写入。UI 以常数时间交付共享快照，保存期间仍可浏览。写入失败或替换前观察到取消时保留旧文件；完成前禁止新扫描与重复保存。取消不会立即中断 OS I/O、排序或已打开的对话框。此源码变更不会更新已发布二进制文件。[架构](../docs/zh-CN/architecture.md)
 
 ## 其他入口
 

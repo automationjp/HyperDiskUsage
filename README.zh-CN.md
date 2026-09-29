@@ -22,7 +22,7 @@ hyperdu . --top 20
 
 crate 和可执行文件的名称都是 **`hyperdu`**，不是已废弃的 `hyperdu-cli`。一次安装包含 CLI 和 MCP 服务；只有执行 `hyperdu mcp` 时才启动服务。
 
-**运行 Windows / Linux 预构建二进制文件不需要 Rust。** 源码构建请使用较新的 stable Rust 和对应平台的构建工具。CLI 声明的最低版本为1.88。GUI manifest 中的1.75声明与 egui 依赖要求冲突，因此不能将它视为已验证的 Rust 1.75 构建保证。
+**运行 Windows / Linux 预构建二进制文件不需要 Rust。** 源码构建请使用较新的 stable Rust 和对应平台的构建工具。当前源码声明 core 最低1.82、GUI 最低1.85、CLI 最低1.88，并在 Linux / Windows CI 中逐项检查。此修正不会改写已发布 Beta 包的 manifest；安装公开包时请使用较新的 stable Rust。
 
 ## 与常规实现有什么不同？
 

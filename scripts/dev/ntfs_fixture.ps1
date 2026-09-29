@@ -23,7 +23,7 @@ $letter = @('Z','Y','X','W','V','U','T','S','R') | Where-Object {
 if (-not $letter) { throw 'No unused fixture drive letter.' }
 $root = "${letter}:\"
 $previous = @{}
-foreach ($key in @('HYPERDU_MFT_PARITY_ROOT','HYPERDU_MFT_PARITY_FIXTURE','HYPERDU_MFT_DIAG')) {
+foreach ($key in @('HYPERDU_MFT_PARITY_ROOT','HYPERDU_MFT_PARITY_FIXTURE','HYPERDU_MFT_DIAG','HYPERDU_MFT_NAMESPACE_FIXTURE')) {
     $previous[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
 function Invoke-OwnedDiskPart([string[]]$Commands) {
@@ -70,6 +70,11 @@ try {
         $file = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::None)
         try { $file.SetLength([long]$item[1]); $file.Flush($true) } finally { $file.Dispose() }
     }
+    # The default no-follow view excludes junctions and symbolic links. A raw
+    # MFT result must not add empty phantom directories for these entries.
+    $null = New-Item -ItemType Junction -Path (Join-Path $fixture 'junction') -Target (Join-Path $fixture 'plain')
+    $null = New-Item -ItemType SymbolicLink -Path (Join-Path $fixture 'dir-link') -Target (Join-Path $fixture 'plain')
+    $null = New-Item -ItemType SymbolicLink -Path (Join-Path $fixture 'file-link') -Target (Join-Path $fixture 'plain\file-1.bin')
     # Flush NTFS metadata by detaching, then forbid mutations during comparison.
     Invoke-OwnedDiskPart @("select vdisk file=`"$vhd`"", 'detach vdisk', 'attach vdisk readonly')
     if (-not (Test-Path -LiteralPath $root)) {
@@ -82,6 +87,18 @@ try {
     Write-Host "Testing actual MFT and enumeration on read-only fixture $root"
     & cargo test -p hyperdu-core -p hyperdu -p hyperdu-gui -- --nocapture
     if ($LASTEXITCODE -ne 0) { throw "Core/CLI tests failed ($LASTEXITCODE)." }
+
+    # Independently verify a namespace that the raw reader must decline. Change
+    # only this invocation's image; never touch an existing or physical volume.
+    Invoke-OwnedDiskPart @("select vdisk file=`"$vhd`"", 'detach vdisk', 'attach vdisk')
+    Assert-OwnedVolume
+    & fsutil hardlink create (Join-Path $fixture 'empty\cross-folder.bin') (Join-Path $fixture 'plain\file-0.bin')
+    if ($LASTEXITCODE -ne 0) { throw 'Could not create cross-folder fixture link.' }
+    Invoke-OwnedDiskPart @("select vdisk file=`"$vhd`"", 'detach vdisk', 'attach vdisk readonly')
+    Assert-OwnedVolume
+    $env:HYPERDU_MFT_NAMESPACE_FIXTURE = '1'
+    & cargo test -p hyperdu-core --test mft_namespace_fallback -- --nocapture
+    if ($LASTEXITCODE -ne 0) { throw "Namespace fallback test failed ($LASTEXITCODE)." }
 } finally {
     foreach ($key in $previous.Keys) {
         [Environment]::SetEnvironmentVariable($key, $previous[$key], 'Process')

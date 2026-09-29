@@ -18,15 +18,13 @@ Linux 请根据环境选择 x86_64 glibc、x86_64 musl 或 aarch64 glibc。GUI �
 
 ## 2. 声明的 Rust 版本不等于已验证的构建保证
 
-| Crate | 当前 manifest 的 `rust-version` | 注意事项 |
-|---|---:|---|
-| `hyperdu-core` | 1.75 | 声明值，不是整个依赖图最低版本的证明 |
-| `hyperdu`（CLI + MCP） | 1.88 | 包含 MCP，不应使用低于此版本的编译器构建 workspace |
-| `hyperdu-gui` | 1.75 | **与依赖条件冲突，不能视为支持保证** |
+| Crate | 当前源码最低 Rust |
+|---|---:|
+| `hyperdu-core` | 1.82 |
+| `hyperdu`（CLI + MCP） | 1.88 |
+| `hyperdu-gui` | 1.85 |
 
-GUI 使用的 egui 系列在 [0.32.0 manifest](https://github.com/emilk/egui/blob/0.32.0/Cargo.toml) 中要求 Rust 1.85。因此不能宣传 GUI 支持 Rust 1.75。这也不表示已经证明1.85或1.88足以构建所有解析后的依赖。最低版本声明与专用 CI 的协调仍待完成。
-
-**开发请使用较新的 stable Rust。** 当前 CI 也使用 stable。
+CI 在 Linux / Windows 的6个条件下显式使用各编译器，为已提交 lockfile 的默认配置执行 `cargo check --locked --all-targets`。整个 workspace 包含 CLI，至少需要1.88。已发布 Beta 包的 manifest 不变，安装公开包及通常开发请使用较新的 stable Rust。
 
 ```bash
 rustup toolchain install stable

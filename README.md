@@ -22,7 +22,7 @@ hyperdu . --top 20
 
 クレート名もコマンド名も **`hyperdu`** です。旧名 `hyperdu-cli` ではありません。CLIとMCPサーバを一緒にインストールし、MCPは `hyperdu mcp` を実行したときだけ起動します。
 
-実行だけなら、ReleaseのWindows / Linux向けバイナリを使えます。**配布済みバイナリの実行にRustは不要**です。ソースビルドにはOSのビルドツールと新しいstable Rustを使ってください。CLIの宣言上の最低版は1.88です。GUIのmanifestには1.75とありますが、egui系の依存条件と矛盾するため、Rust 1.75でのビルドを対応保証として案内しません。
+実行だけなら、ReleaseのWindows / Linux向けバイナリを使えます。**配布済みバイナリの実行にRustは不要**です。ソースビルドにはOSのビルドツールと新しいstable Rustを使ってください。現在のソースの最低Rust版はcoreが1.82、GUIが1.85、CLIが1.88です。各版をLinux / Windows CIで確認します。公開済みベータ版に同梱された古いmanifestは書き換わらないため、公開版のソース導入には新しいstable Rustを使用してください。
 
 ## 従来の調べ方と、何が違うのか
 

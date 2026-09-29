@@ -18,15 +18,13 @@ For Linux, select x86_64 glibc, x86_64 musl, or aarch64 glibc to match the envir
 
 ## 2. Declared Rust versions are not verified build guarantees
 
-| Crate | Current manifest `rust-version` | Caveat |
-|---|---:|---|
-| `hyperdu-core` | 1.75 | A declaration, not proof of the entire dependency graph's minimum |
-| `hyperdu` (CLI + MCP) | 1.88 | Includes MCP; do not build the workspace below this version |
-| `hyperdu-gui` | 1.75 | **Conflicts with dependencies and is not a support guarantee** |
+| Crate | Minimum Rust for current source |
+|---|---:|
+| `hyperdu-core` | 1.82 |
+| `hyperdu` (CLI + MCP) | 1.88 |
+| `hyperdu-gui` | 1.85 |
 
-The egui family used by the GUI declares Rust 1.85 in its [0.32.0 manifest](https://github.com/emilk/egui/blob/0.32.0/Cargo.toml). Consequently, Rust 1.75 cannot be advertised as a supported GUI compiler. This does not prove that 1.85 or 1.88 suffices for every resolved dependency. Reconciling minimum-version declarations with dedicated CI remains open.
-
-**Use a recent stable Rust for development.** Current CI also tests stable.
+CI explicitly invokes each compiler on Linux and Windows (six conditions), using `cargo check --locked --all-targets` for the committed lockfile's default configuration. The full workspace requires at least 1.88 because it includes the CLI. Published beta manifests remain immutable. Use a recent stable Rust for published installations and ordinary development.
 
 ```bash
 rustup toolchain install stable

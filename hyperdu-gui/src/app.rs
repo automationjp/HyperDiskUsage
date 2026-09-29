@@ -12,6 +12,8 @@ use egui_extras::TableBuilder;
 use humansize::{format_size, BINARY};
 
 use crate::{fonts, scan};
+
+mod export;
 /// Bound display ingestion by nodes and elapsed time, not subtree message count.
 const NODES_PER_FRAME: usize = 1024;
 const INGEST_MS: u64 = 3;
@@ -35,6 +37,7 @@ pub struct App {
     errors: u64,
     error_details: Vec<String>,
     export_message: String,
+    export_task: Option<export::Task>,
     sort: u8,
     pending: Option<scan::Msg>,
 }
@@ -57,6 +60,7 @@ impl Default for App {
             errors: 0,
             error_details: Vec::new(),
             export_message: String::new(),
+            export_task: None,
             sort: 0,
             pending: None,
         }
@@ -72,7 +76,7 @@ impl App {
         Self::default()
     }
     fn start_scan(&mut self, root: PathBuf, ctx: &egui::Context) {
-        if self.scanning() {
+        if self.scanning() || self.export_task.is_some() {
             return;
         }
         let context = ctx.clone();
@@ -200,7 +204,7 @@ impl App {
                 }
             }
         });
-        ui.add_enabled_ui(!running,|ui|{
+        ui.add_enabled_ui(!running && self.export_task.is_none(),|ui|{
             ui.horizontal_wrapped(|ui|{
                 ui.label("対象フォルダ");
 ui.add(egui::TextEdit::singleline(&mut self.root_input).desired_width(430.0).hint_text("C:\\ またはフォルダのパス"));
@@ -320,50 +324,65 @@ ui.add(egui::DragValue::new(&mut self.params.dir_yield).range(0..=1_000_000));
         ui.horizontal_wrapped(|ui| {
             if ui
                 .add_enabled(
-                    self.complete && !self.scanning(),
+                    self.complete && !self.scanning() && self.export_task.is_none(),
                     egui::Button::new("JSONへ保存"),
                 )
                 .clicked()
             {
-                self.export(false);
+                self.export(false, ui.ctx());
             }
             if ui
                 .add_enabled(
-                    self.complete && !self.scanning(),
+                    self.complete && !self.scanning() && self.export_task.is_none(),
                     egui::Button::new("CSVへ保存"),
                 )
                 .clicked()
             {
-                self.export(true);
+                self.export(true, ui.ctx());
+            }
+            if let Some(task) = &self.export_task {
+                ui.spinner();
+                if ui.button("保存を中止").clicked() {
+                    task.cancel();
+                    self.export_message = "保存を中断中…".into();
+                }
             }
             ui.label(&self.export_message);
         });
     }
-    fn export(&mut self, csv: bool) {
-        let extension = if csv { "csv" } else { "json" };
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter(extension, &[extension])
-            .set_file_name(format!("hyperdu-report.{extension}"))
-            .save_file()
-        {
-            let rows = self.model.rows();
-            let result = std::fs::File::create(&path)
-                .map_err(anyhow::Error::from)
-                .and_then(|file| {
-                    if csv {
-                        hyperdu_core::report::write_csv(file, &rows)
-                    } else {
-                        hyperdu_core::report::write_json(file, &rows)
-                    }
-                });
-            self.export_message = match result {
-                Ok(()) => format!("保存しました: {}", path.display()),
-                Err(e) => format!("保存できません: {e}"),
+    fn export(&mut self, csv: bool, ctx: &egui::Context) {
+        if !self.complete || self.scanning() || self.export_task.is_some() {
+            return;
+        }
+        let format = if csv {
+            export::Format::Csv
+        } else {
+            export::Format::Json
+        };
+        let context = ctx.clone();
+        match export::Task::start(
+            self.model.export_snapshot(),
+            format,
+            std::sync::Arc::new(move || context.request_repaint()),
+        ) {
+            Ok(task) => {
+                self.export_task = Some(task);
+                self.export_message = "保存先を選択・保存中…".into();
+            }
+            Err(error) => self.export_message = format!("保存を開始できません: {error}"),
+        }
+    }
+    fn drain_export(&mut self) {
+        let outcome = self.export_task.as_ref().and_then(export::Task::poll);
+        if let Some(outcome) = outcome {
+            self.export_task = None;
+            self.export_message = match outcome {
+                export::Outcome::Saved(path) => format!("保存しました: {}", path.display()),
+                export::Outcome::Cancelled => "保存を中止しました".into(),
+                export::Outcome::Failed(error) => format!("保存できません: {error}"),
             };
         }
     }
-
-    /// Breadcrumb from the scan root down to the directory on screen.
     fn breadcrumb(&mut self, ui: &mut egui::Ui) {
         let root = self.model.root.clone();
         if root.as_os_str().is_empty() {
@@ -540,6 +559,7 @@ ui.add(egui::DragValue::new(&mut self.params.dir_yield).range(0..=1_000_000));
 impl App {
     fn show_ui(&mut self, ctx: &egui::Context) {
         self.drain(ctx);
+        self.drain_export();
         egui::TopBottomPanel::top("controls").show(ctx, |ui| {
             self.controls(ui);
             self.status(ui);
@@ -570,7 +590,7 @@ impl App {
                 .auto_shrink([false, false])
                 .show(ui, |ui| self.table(ui));
         });
-        if self.scanning() {
+        if self.scanning() || self.export_task.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(REFRESH_MS));
         }
     }
