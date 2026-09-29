@@ -80,7 +80,7 @@ Starting a scan immediately sets a working state. A shared counter updates progr
 
 Terminal events are handled after preceding updates. Read errors, cancellation, and a disconnected sender without a terminal event are distinguished from successful completion. A dedicated export worker now handles the native dialog, row copy, path sorting, and file I/O. The UI hands off an Arc snapshot and polls completion without blocking. A same-directory temporary file preserves the previous destination on failure or cancellation observed before replacement. Other synchronous operations, including model replacement, remain.
 
-Implementation: [GUI transport / index](../../hyperdu-gui/src/scan.rs), [UI ingestion / rendering](../../hyperdu-gui/src/app.rs), and [core modes / events](../../hyperdu-core/src/lib.rs).
+Implementation: [GUI transport / index](../../hyperdu-gui/src/scan.rs), [UI ingestion / rendering](../../hyperdu-gui/src/app.rs), [export worker](../../hyperdu-gui/src/app/export.rs), and [core modes / events](../../hyperdu-core/src/lib.rs).
 
 ## Platform boundary
 
@@ -132,11 +132,11 @@ MFT is an experimental, optional Windows MSVC path. The CLI, GUI, and direct cor
 
 The reader batches sequential MFT records through a raw-byte window whose default limit is 1 MiB. Read-ahead stays inside a physical extent; a record crossing an extent boundary is assembled from the required segments. Fixups are applied to a copied record, so rereads and extension-record lookups cannot mistake already-patched cached bytes for raw data. Failed read-ahead clears the cache and retries the required segment. Incomplete required reads or parsing are not accepted as a result.
 
-Aggregation adds sizes to parent record IDs before constructing directory paths and rolling totals up in the core. Hardlink identities and the handling of missing or cyclic parents retain the existing accounting rules. The read window is bounded, but the reader keeps all entries and aggregate results in memory; this is not a constant-memory scan of the entire MFT.
+Aggregation adds sizes to parent record IDs before constructing directory paths and rolling totals up in the core. Unexplained missing or cyclic parents, duplicate identities or directory paths, and overflow now reject the whole MFT result instead of silently omitting entries. Hardlinks whose visible names span multiple parents also decline the raw path; normal enumeration determines their attribution. The read window is bounded, but the reader keeps all entries and aggregate results in memory; this is not a constant-memory scan of the entire MFT.
 
 The reader checks progress and cancellation before iteration, at intervals of at most 256 records, and at a successful end. Record counts include inactive slots and differ from final file counts or completion percentages. Synchronous extension reads cannot be interrupted immediately. A successful MFT scan requested through Interactive mode emits `BatchFallback(Mft)` and `BatchCompleted` to identify batched delivery. This is distinct from falling back to enumeration after MFT failure.
 
-Eligibility and successful parsing of required records do not prove complete parity with enumeration. Known accounting differences remain, so performance validation must report the path actually used and accounting differences separately.
+Eligibility and successful parsing do not establish universal parity for live volumes, ACL differences, or unsupported layouts. The controlled read-only NTFS fixture verifies exact directory-row equality for supported cases, and separately verifies normal-enumeration fallback for ambiguous hardlinks. Performance validation must still report the path actually used and any accounting differences separately.
 
 Implementation: [shared eligibility](../../hyperdu-core/src/platform/windows_impl/mod.rs), [reader](../../hyperdu-core/src/platform/windows_impl/mft_reader.rs), [raw window](../../hyperdu-core/src/platform/windows_impl/mft_reader/window.rs), and [ID aggregation](../../hyperdu-core/src/platform/windows_impl/mft_aggregate.rs).
 
