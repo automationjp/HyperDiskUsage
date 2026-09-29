@@ -50,8 +50,8 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
-  minimum-rust:
-    name: minimum-rust (${{ matrix.os }}, ${{ matrix.crate }}, ${{ matrix.rust }})
+  candidate-rust:
+    name: candidate-rust (${{ matrix.os }}, ${{ matrix.crate }}, ${{ matrix.rust }})
     strategy:
       fail-fast: false
       matrix:
@@ -69,15 +69,15 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # explicit minimum, not stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # candidate floor, not stable
         with:
           toolchain: ${{ matrix.rust }}
-      - name: Check every target at the minimum compiler without rewriting the lockfile
+      - name: Check every target at the candidate compiler without rewriting the lockfile
         shell: bash
         env:
-          MINIMUM_RUST: ${{ matrix.rust }}
+          CANDIDATE_RUST: ${{ matrix.rust }}
           CRATE: ${{ matrix.crate }}
         run: |
           set -euo pipefail
-          cargo +"$MINIMUM_RUST" check --locked -p "$CRATE" --all-targets
+          cargo +"$CANDIDATE_RUST" check --locked -p "$CRATE" --all-targets
           git diff --exit-code -- Cargo.lock
