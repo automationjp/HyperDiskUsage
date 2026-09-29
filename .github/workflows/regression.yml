@@ -1,0 +1,48 @@
+name: regression
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - name: Record the exact source and resolved dependency requirements
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/commit.txt
+          git archive --format=tar HEAD > evidence/source.tar
+          rustc -vV > evidence/rustc.txt
+          cargo metadata --locked --format-version 1 > evidence/dependencies.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          metadata = json.loads(Path('evidence/dependencies.json').read_text())
+          rows = sorted((p.get('rust_version') or 'unknown', p['name'], p['version'])
+                        for p in metadata['packages'])
+          Path('evidence/rust-requirements.txt').write_text(
+              '\n'.join('\t'.join(row) for row in rows) + '\n')
+          for row in rows:
+              print('\t'.join(row))
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4; migrated with the other action pins
+        if: always()
+        with:
+          name: dependency-evidence
+          path: evidence/
+          retention-days: 3
+          if-no-files-found: error
