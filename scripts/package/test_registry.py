@@ -68,8 +68,10 @@ class FakeRegistry:
         if self.error:
             raise HTTPError(req.full_url, self.error, "test failure", {}, None)
         if req.method == "PUT":
+            # A successful publish has no "ok" field, only optional warnings.
             return contextlib.closing(io.BytesIO(json.dumps(
-                {"errors": [{"detail": "rejected"}]} if self.reject else {"ok": True}
+                {"errors": [{"detail": "rejected"}]} if self.reject else
+                {"warnings": {"invalid_categories": [], "invalid_badges": [], "other": []}}
             ).encode()))
         if "index.crates.io" in req.full_url:
             name = req.full_url.rsplit("/", 1)[-1]

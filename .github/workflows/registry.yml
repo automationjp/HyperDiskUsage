@@ -145,7 +145,7 @@ jobs:
                       print(f"{name} {version}: identical version already published")
                       continue
                   result = json.loads(request(opener, "https://crates.io/api/v1/crates/new", data, token))
-                  if result.get("errors") or result.get("ok") is not True:
+                  if not isinstance(result, dict) or result.get("errors"):
                       raise ValueError("registry rejected publication")
                   indexed(opener, name, version, checksum)
                   print(f"{name} {version}: published and indexed")
