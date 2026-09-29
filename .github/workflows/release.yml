@@ -89,14 +89,17 @@ jobs:
       # this reads it: the zips, deb, rpm and AppImage are already in dist/.
       - name: Drop the build tree before the snap build
         run: rm -rf target
-      - name: Build Snap (CLI) via Snapcraft
-        uses: snapcore/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1
+      # The former action-build wrapper still declares Node 20. Use Canonical's
+      # reviewed shell composite for LXD and invoke the same Snapcraft tool.
+      - name: Set up LXD for Snap
+        id: snap-lxd
+        uses: canonical/setup-lxd@da2ac84e727dc534215fd14cd088b9209d65893b
         with:
-          # The repository root, not snap/. `path` names the project directory,
-          # and pointing it at snap/ made the part's `source: .` resolve there
-          # too, so every release died with "could not find Cargo.toml in
-          # /root/parts/hyperdu/build" while the job stayed green.
-          path: .
+          channel: 5.21/stable
+        continue-on-error: true
+      - name: Build Snap (CLI) via Snapcraft
+        if: steps.snap-lxd.outcome == 'success'
+        run: bash scripts/package/snap-ci.sh
         continue-on-error: true
       - name: Move Snap artifacts to dist
         run: |
