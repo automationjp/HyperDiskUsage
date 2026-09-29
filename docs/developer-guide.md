@@ -57,7 +57,7 @@ hyperdu-gui ───────┘                            │
 use std::path::Path;
 use hyperdu_core::{scan_directory, Options};
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = Options::default();
     let directories = scan_directory(Path::new("."), &options)?;
     for (path, stat) in &directories {

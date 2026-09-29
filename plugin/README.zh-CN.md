@@ -13,7 +13,7 @@ hyperdu --help
 hyperdu mcp --help
 ```
 
-需要 Rust 1.88+。发布后可使用 `cargo install hyperdu --version 0.5.0-beta.5`。
+需要 Rust 1.88+。已发布版本可通过 `cargo install hyperdu --locked --version 0.5.0-beta.5` 安装。
 安装脚本优先使用当前源码；找不到源码时从 GitHub 安装。
 
 ```sh

@@ -13,7 +13,7 @@ hyperdu --help
 hyperdu mcp --help
 ```
 
-Rust 1.88+ が必要です。公開後は `cargo install hyperdu --version 0.5.0-beta.5` を利用できます。
+Rust 1.88+ が必要です。公開版は `cargo install hyperdu --locked --version 0.5.0-beta.5` で導入できます。
 セットアップスクリプトは、チェックアウトがあればそのソースから、なければGitHubからインストールします。
 
 ```sh
