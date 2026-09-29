@@ -78,9 +78,9 @@ core progress counter -----------------> status / elapsed time
 
 开始扫描时立即显示工作状态。共享计数器独立于结果队列更新进度和经过时间，事件到达时请求重绘，扫描中也会定期刷新。取消通过共享标志传递给核心和索引准备过程，不会把部分结果标记为完成。同步I/O或已经开始的单次排序不能保证立即中断。接收端被释放时，等待队列的发送端会被解除阻塞；更换扫描句柄也会隔离旧扫描的结果。
 
-终止事件在之前的更新处理完毕后才处理。读取错误、取消、没有终止事件的发送端断开，均与成功完成区分。用户触发的JSON/CSV导出会复制所有行并按路径排序。这些操作以及模型替换等仍在UI线程同步执行。
+终止事件在之前的更新处理完毕后才处理。读取错误、取消、没有终止事件的发送端断开，均与成功完成区分。专用导出线程处理原生对话框、复制、排序及文件写入，UI 只交付 Arc 快照并非阻塞接收结果。同目录临时文件在完成后替换目标，失败或替换前观察到取消时保留旧文件。模型替换等其他同步操作仍然存在。
 
-实现位置：[GUI传输与索引](../../hyperdu-gui/src/scan.rs)、[UI接收与绘制](../../hyperdu-gui/src/app.rs)、[核心模式与事件](../../hyperdu-core/src/lib.rs)。
+实现位置：[GUI传输与索引](../../hyperdu-gui/src/scan.rs)、[UI接收与绘制](../../hyperdu-gui/src/app.rs)、[导出线程](../../hyperdu-gui/src/app/export.rs)、[核心模式与事件](../../hyperdu-core/src/lib.rs)。
 
 ## Platform boundary
 
@@ -132,11 +132,11 @@ MFT是Windows MSVC上的实验性可选路径。CLI、GUI和核心直接API共�
 
 reader通过默认上限1MiB的原始字节窗口批量读取连续MFT记录。预读限制在物理extent内；跨extent边界的记录由必需片段组成。fixup只应用于记录副本，因此重新读取和扩展记录查询不会把已修改的缓存字节当作原始数据。预读失败时清空缓存，并仅重试必需片段；不会接受必需读取或解析不完整的结果。
 
-集计先按父记录ID累加大小，再生成目录路径并在核心中向父级汇总。硬链接身份、缺失父级和循环父级的处理保留已有集计规则。读取窗口有上限，但所有条目和汇总结果仍保存在内存中，并非对整个MFT使用固定内存的流式扫描。
+集计先按父记录ID累加大小，再生成目录路径并在核心中向父级汇总。无法解释的父引用缺失或循环、重复ID或目录路径以及整数溢出，会拒绝整个MFT结果，不再静默丢弃条目。可见名称跨越多个父目录的硬链接也会回退，由普通枚举决定归属。读取窗口有上限，但所有条目和汇总结果仍保存在内存中，并非对整个MFT使用固定内存的流式扫描。
 
 reader在开始前、最多每256条记录、正常结束时检查进度和取消。记录数包含未使用的slot，与最终文件数或完成百分比不同。同步扩展记录读取不能保证立即中断。Interactive模式请求的MFT扫描成功后，通过 `BatchFallback(Mft)` 和 `BatchCompleted` 明确表示结果批量交付；这与MFT失败后回退到普通枚举是不同的情况。
 
-满足资格条件并成功解析必需记录，并不能证明与目录枚举完全一致。仍存在已知集计差异，性能验证必须分别记录实际使用的路径和集计差异。
+满足资格条件并成功解析，不代表在实时修改、ACL差异或未支持布局下均与目录枚举完全一致。受控只读NTFS fixture验证支持场景的目录行精确相等，并单独验证歧义硬链接回退。性能验证仍需分别记录实际使用的路径和集计差异。
 
 实现位置：[共用资格检查](../../hyperdu-core/src/platform/windows_impl/mod.rs)、[reader](../../hyperdu-core/src/platform/windows_impl/mft_reader.rs)、[原始字节窗口](../../hyperdu-core/src/platform/windows_impl/mft_reader/window.rs)、[ID集计](../../hyperdu-core/src/platform/windows_impl/mft_aggregate.rs)。
 
@@ -191,3 +191,7 @@ HyperDU 的 fast path 以不改变结果语义为前提。
 过去按 Issue 划分的设计、MFT 验证记录和旧 persistent-index 方案已移至[old/README.md](../old/README.md)。
 
 要理解当前架构，请从本文和 [Performance design](performance.md) 开始。
+
+## MFT namespace validation
+
+当前 MFT 源码拒绝无法解释的父引用、循环、重复及溢出，而不返回部分合计。磁盘名称计数包含 DOS 别名。跨目录或未解析的硬链接名回退到普通枚举；不跟随链接时跳过 symlink / junction，未知 provider reparse tag 或缺失 DATA 则拒绝 MFT。在只读受控 NTFS fixture 上分别检查目录行完全一致和歧义命名空间回退。这不保证实时修改、ACL 和未支持布局的全面一致，也不放宽既有容差。

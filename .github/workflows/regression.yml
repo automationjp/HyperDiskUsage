@@ -1,0 +1,82 @@
+name: regression
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - name: Record source, compiler and dependency requirements
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/commit.txt
+          git archive --format=tar HEAD > evidence/source.tar
+          rustc -vV > evidence/rustc.txt
+          cargo metadata --locked --format-version 1 > evidence/dependencies.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          metadata = json.loads(Path('evidence/dependencies.json').read_text())
+          rows = sorted((p.get('rust_version') or 'unknown', p['name'], p['version'])
+                        for p in metadata['packages'])
+          Path('evidence/rust-requirements.txt').write_text(
+              '\n'.join('\t'.join(row) for row in rows) + '\n')
+          for row in rows:
+              print('\t'.join(row))
+          PY
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: dependency-evidence
+          path: evidence/
+          retention-days: 3
+          if-no-files-found: error
+
+  # These are the supported floors now declared by the package manifests,
+  # not a claim to have discovered the mathematical minimum of every feature.
+  declared-msrv:
+    name: declared-msrv (${{ matrix.os }}, ${{ matrix.crate }}, ${{ matrix.rust }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        crate: [hyperdu-core, hyperdu-gui, hyperdu]
+        include:
+          - crate: hyperdu-core
+            rust: '1.82.0'
+          - crate: hyperdu-gui
+            rust: '1.85.0'
+          - crate: hyperdu
+            rust: '1.88.0'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # declared compiler, not stable
+        with:
+          toolchain: ${{ matrix.rust }}
+      - name: Check default-feature targets at the declared compiler
+        shell: bash
+        env:
+          DECLARED_RUST: ${{ matrix.rust }}
+          CRATE: ${{ matrix.crate }}
+        run: |
+          set -euo pipefail
+          cargo +"$DECLARED_RUST" check --locked -p "$CRATE" --all-targets
+          git diff --exit-code -- Cargo.lock

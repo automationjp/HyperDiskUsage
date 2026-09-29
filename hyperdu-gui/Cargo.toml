@@ -6,7 +6,7 @@ description = "Hyper-fast GUI disk usage analyzer (Windows/Linux)."
 license.workspace = true
 # Inherited only here and in hyperdu: cargo-wix needs it to build the MSI.
 authors.workspace = true
-rust-version = "1.75"
+rust-version = "1.85"
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
@@ -37,7 +37,6 @@ hyperdu-core = { workspace = true }
 profiling = { version = "1", optional = true }
 color-eyre = { version = "0.6", optional = true }
 
-[dev-dependencies]
 tempfile = "3.10"
 
 # Windows executable icon, see build.rs. Cargo matches a target-specific

@@ -1,6 +1,6 @@
 //! Aggregate bytes by parent record before materializing directory paths.
-//! The legacy reader remains the accounting oracle, including damaged-parent
-//! handling and the 255-component path limit.
+//! Production rejects ambiguous/incomplete namespaces instead of silently losing
+//! bytes. The legacy conversion is retained only for historical regression tests.
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -8,11 +8,13 @@ use std::{
 
 use super::{mft::ROOT_RECORD, mft_reader::Entry};
 
+#[cfg(test)]
 struct Paths<'a> {
     records: HashMap<u64, &'a Entry>,
     resolved: HashMap<u64, Option<(String, usize)>>,
 }
 
+#[cfg(test)]
 impl<'a> Paths<'a> {
     fn new(entries: &'a [Entry]) -> Self {
         Self {
@@ -93,6 +95,7 @@ fn join_path(prefix: &str, rest: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+#[cfg(test)]
 pub(crate) fn to_stat_map(
     entries: &[Entry],
     root_prefix: &str,
@@ -128,21 +131,121 @@ pub(crate) fn to_stat_map(
     let mut map = crate::StatMap::default();
     for (record, total) in totals {
         // Distinct IDs can have equal paths; preserve the legacy merged total.
-        map.entry(join_path(root_prefix, paths.get(record)))
-            .or_default()
-            .add(&total);
+        let dest = map
+            .entry(join_path(root_prefix, paths.get(record)))
+            .or_default();
+        dest.logical += total.logical;
+        dest.physical += total.physical;
+        dest.files += total.files;
     }
     map
 }
 
+/// Build only a complete mounted-namespace map. An unexplained orphan, cycle,
+/// duplicate identity/path or overflow rejects the whole raw result. Metadata
+/// descendants are intentionally excluded; deep valid user trees are not truncated.
+pub(crate) fn try_to_stat_map(
+    entries: &[Entry],
+    root_prefix: &str,
+    compute_physical: bool,
+) -> Option<crate::StatMap> {
+    let mut records = HashMap::new();
+    for entry in entries {
+        if entry.record < 16
+            || records.insert(entry.record, entry).is_some()
+            || entry.name.is_empty()
+            || matches!(entry.name.as_str(), "." | "..")
+            || entry.name.chars().any(|c| matches!(c, '\\' | '/' | '\0'))
+        {
+            return None;
+        }
+    }
+    // None means a known NTFS metadata subtree, not an unresolved user path.
+    let mut paths: HashMap<u64, Option<String>> =
+        HashMap::from([(ROOT_RECORD, Some(String::new()))]);
+    for directory in entries.iter().filter(|entry| entry.is_directory) {
+        let mut chain = Vec::new();
+        let mut active = HashSet::new();
+        let mut current = directory.record;
+        let mut path = loop {
+            if let Some(path) = paths.get(&current) {
+                break path.clone();
+            }
+            if current < 16 {
+                break None;
+            }
+            let entry = records.get(&current)?;
+            if !entry.is_directory || !active.insert(current) {
+                return None;
+            }
+            chain.push(*entry);
+            current = entry.parent;
+        };
+        for entry in chain.into_iter().rev() {
+            if let Some(value) = &mut path {
+                if !value.is_empty() {
+                    value.push('\\');
+                }
+                value.push_str(&entry.name);
+                // Decline unrepresentable paths instead of returning a partial map.
+                if value.encode_utf16().count() + root_prefix.encode_utf16().count() + 1 > 32767 {
+                    return None;
+                }
+            }
+            paths.insert(entry.record, path.clone());
+        }
+    }
+    let mut map = crate::StatMap::default();
+    map.insert(PathBuf::from(root_prefix), crate::Stat::default());
+    for directory in entries.iter().filter(|entry| entry.is_directory) {
+        if let Some(path) = paths.get(&directory.record)? {
+            if map
+                .insert(join_path(root_prefix, path), crate::Stat::default())
+                .is_some()
+            {
+                return None;
+            }
+        }
+    }
+    let mut total = crate::Stat::default();
+    for file in entries.iter().filter(|entry| !entry.is_directory) {
+        if file.parent < 16 && file.parent != ROOT_RECORD {
+            continue;
+        }
+        let Some(parent) = paths.get(&file.parent)? else {
+            continue;
+        };
+        // Checking the complete sum also prevents overflow during later rollup.
+        total.files = total.files.checked_add(1)?;
+        total.logical = total.logical.checked_add(file.sizes.real_size)?;
+        total.physical = total.physical.checked_add(if compute_physical {
+            file.sizes.allocated_size
+        } else {
+            file.sizes.real_size
+        })?;
+        let stat = map.get_mut(&join_path(root_prefix, parent))?;
+        stat.files = stat.files.checked_add(1)?;
+        stat.logical = stat.logical.checked_add(file.sizes.real_size)?;
+        stat.physical = stat.physical.checked_add(if compute_physical {
+            file.sizes.allocated_size
+        } else {
+            file.sizes.real_size
+        })?;
+    }
+    Some(map)
+}
+
 #[cfg(test)]
 mod tests {
+    include!("mft_reader/aggregate_safety_tests.rs");
     use std::collections::BTreeMap;
 
-    use super::*;
-    use crate::platform::windows_impl::{
-        mft::DataSizes,
-        mft_reader::{self, SizeSource},
+    use super::{
+        super::{
+            mft::DataSizes,
+            mft_reader::{self, SizeSource},
+        },
+        *,
     };
 
     fn entry(id: u64, parent: u64, name: &str, directory: bool) -> Entry {

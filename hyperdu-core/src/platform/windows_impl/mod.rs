@@ -129,7 +129,13 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
         return None;
     }
 
-    let map = mft_stat_map(root, &entries, opt);
+    let Some(map) = mft_stat_map(root, &entries, opt) else {
+        log::warn!("MFT namespace is incomplete or ambiguous; declining MFT result");
+        if std::env::var_os("HYPERDU_MFT_DIAG").is_some() {
+            eprintln!("mft-diag: rejected: incomplete or ambiguous namespace; no MFT result");
+        }
+        return None;
+    };
 
     if opt.cancel.load(std::sync::atomic::Ordering::Relaxed) {
         return None;
@@ -343,11 +349,11 @@ fn mft_stat_map(
     root: &std::path::Path,
     entries: &[mft_reader::Entry],
     opt: &crate::Options,
-) -> StatMap {
+) -> Option<StatMap> {
     // Keep the operand's prefix (including verbatim disk roots) so root lookup
     // and display-depth checks use the same paths as enumeration does.
     let prefix = root.to_string_lossy();
-    mft_aggregate::to_stat_map(entries, &prefix, opt.count_hardlinks, opt.compute_physical)
+    mft_aggregate::try_to_stat_map(entries, &prefix, opt.compute_physical)
 }
 
 /// Drive letter to read the MFT of, or `None` when the backend does not apply.
@@ -520,7 +526,9 @@ mod mft_root_identity_tests {
             let root = Path::new(operand);
             assert!(volume_root_letter(root).is_some());
             let opt = crate::Options::default();
-            let map = crate::rollup::rollup_child_to_parent(mft_stat_map(root, &entries, &opt));
+            let map = crate::rollup::rollup_child_to_parent(
+                mft_stat_map(root, &entries, &opt).expect("valid namespace"),
+            );
             for path in [root.to_path_buf(), root.join("a"), root.join(r"a\b")] {
                 let stat = map.get(&path).unwrap_or_else(|| panic!("missing {path:?}"));
                 assert_eq!(

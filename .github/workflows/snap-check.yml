@@ -1,0 +1,43 @@
+name: snap-check
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/snap-check.yml'
+      - '.github/workflows/release.yml'
+      - 'scripts/package/snap-ci.sh'
+      - 'snap/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/snap-check.yml'
+      - '.github/workflows/release.yml'
+      - 'scripts/package/snap-ci.sh'
+      - 'snap/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snap-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: canonical/setup-lxd@da2ac84e727dc534215fd14cd088b9209d65893b # reviewed composite, no Node runtime
+        with:
+          channel: 5.21/stable
+      - name: Build Snap without publishing
+        run: bash scripts/package/snap-ci.sh
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: snap-check
+          path: '*.snap'
+          if-no-files-found: error
+          retention-days: 3

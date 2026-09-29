@@ -1,0 +1,165 @@
+name: registry
+
+on:
+  workflow_call:
+    secrets:
+      CARGO_REGISTRY_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - name: Verify and package the workspace without publication credentials
+        run: |
+          set -euo pipefail
+          version="$(cargo pkgid -p hyperdu | sed 's/.*[#@]//')"
+          test "$GITHUB_REF_NAME" = "v$version"
+          cargo package --workspace --locked
+          python3 scripts/package/prepare_registry.py --version "$version"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: registry-payloads
+          path: registry-payloads/*.bin
+          if-no-files-found: error
+          retention-days: 7
+
+  # A fresh runner receives only same-run data, never source or build scripts.
+  # The uploader is inline reviewed workflow code, not an artifact executable.
+  upload:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: registry-payloads
+          path: payloads
+      - name: Publish verified request data to crates.io
+        env:
+          REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          import stat
+          import struct
+          import time
+          from pathlib import Path
+          from urllib.error import HTTPError
+          from urllib.parse import quote
+          from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+
+          CRATES = ("hyperdu-core", "hyperdu", "hyperdu-gui")
+          MAX_BYTES = 32 * 1024 * 1024
+
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  raise ValueError("registry redirect rejected")
+
+          def request(opener, url, data=None, token=None):
+              headers = {"User-Agent": "hyperdu-release/1", "Accept": "application/json"}
+              if token is not None:
+                  headers["Authorization"] = token
+                  headers["Content-Type"] = "application/octet-stream"
+              req = Request(url, data=data, headers=headers,
+                            method="PUT" if data is not None else "GET")
+              with opener.open(req, timeout=30) as response:
+                  body = response.read(MAX_BYTES + 1)
+                  if len(body) > MAX_BYTES:
+                      raise ValueError("registry response exceeds size limit")
+                  return body
+
+          def read_payload(path, name, version):
+              info = path.lstat()
+              if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
+                  raise ValueError("expected bounded regular payload file")
+              data = path.read_bytes()
+              if len(data) < 8:
+                  raise ValueError("truncated registry request")
+              length = struct.unpack_from("<I", data)[0]
+              end = 4 + length
+              if end + 4 > len(data):
+                  raise ValueError("invalid metadata length")
+              meta = json.loads(data[4:end])
+              if (meta.get("name"), meta.get("vers")) != (name, version):
+                  raise ValueError("payload does not match expected release identity")
+              size = struct.unpack_from("<I", data, end)[0]
+              if size == 0 or end + 4 + size != len(data):
+                  raise ValueError("invalid crate length or trailing bytes")
+              return data, hashlib.sha256(data[end + 4:]).hexdigest()
+
+          def indexed(opener, name, version, checksum):
+              url = f"https://index.crates.io/{name[:2]}/{name[2:4]}/{name}"
+              for attempt in range(12):
+                  try:
+                      rows = request(opener, url).splitlines()
+                  except HTTPError as exc:
+                      if exc.code != 404:
+                          raise
+                      rows = []
+                  for line in rows:
+                      row = json.loads(line)
+                      if row.get("vers") == version:
+                          if row.get("cksum") != checksum or row.get("yanked") is not False:
+                              raise ValueError("registry index identity mismatch or yanked version")
+                          return
+                  if attempt < 11:
+                      time.sleep(5)
+              raise ValueError("published version did not appear in the registry index")
+
+          def main():
+              tag = os.environ["GITHUB_REF_NAME"]
+              if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", tag):
+                  raise ValueError("invalid release tag")
+              version = tag[1:]
+              token = os.environ.get("REGISTRY_TOKEN", "")
+              if not token:
+                  raise ValueError("publication token is missing")
+              # Reject every malformed request BEFORE making any network call.
+              payloads = {name: read_payload(Path("payloads") / f"{name}.bin", name, version)
+                          for name in CRATES}
+              opener = build_opener(ProxyHandler({}), NoRedirect())
+              for name, (data, checksum) in payloads.items():
+                  url = f"https://crates.io/api/v1/crates/{name}/{quote(version, safe='')}"
+                  try:
+                      existing = json.loads(request(opener, url))["version"]
+                  except HTTPError as exc:
+                      if exc.code != 404:
+                          raise
+                  else:
+                      if existing.get("checksum") != checksum or existing.get("yanked") is not False:
+                          raise ValueError("existing version differs from this artifact or is yanked")
+                      indexed(opener, name, version, checksum)
+                      print(f"{name} {version}: identical version already published")
+                      continue
+                  result = json.loads(request(opener, "https://crates.io/api/v1/crates/new", data, token))
+                  # Cargo Registry Web API success is an object with optional
+                  # warnings, not a mandatory {"ok": true} acknowledgment.
+                  if not isinstance(result, dict) or result.get("errors") or result.get("ok") is False:
+                      raise ValueError("registry rejected publication")
+                  warnings = result.get("warnings", {})
+                  if isinstance(warnings, dict):
+                      for category, messages in warnings.items():
+                          if isinstance(messages, list):
+                              for message in messages:
+                                  # JSON encoding keeps untrusted newlines and workflow
+                                  # commands inside a prefixed, single-line diagnostic.
+                                  print("registry warning: " + json.dumps([category, message]))
+                  indexed(opener, name, version, checksum)
+                  print(f"{name} {version}: published and indexed")
+
+          if __name__ == "__main__":
+              main()
+          PY

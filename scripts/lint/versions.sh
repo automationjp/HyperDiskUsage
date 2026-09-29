@@ -149,17 +149,20 @@ WORKSPACE_FILES=(
     scripts/package/snap.sh
     scripts/package/winget.ps1
     snap/snapcraft.yaml
+)
+
+# Installation documentation advertises the published release, not whichever
+# version a development checkout is preparing next. --fix must never change
+# these commands to a version whose assets or registry entries do not exist.
+# The benchmark commit and its historical measurements are a separate concern.
+RELEASE_FILES=(
+    bucket/hyperdu.json
     README.md README.en.md README.zh-CN.md
     hyperdu/README.md hyperdu/README.en.md hyperdu/README.zh-CN.md
     hyperdu-gui/README.md hyperdu-gui/README.en.md hyperdu-gui/README.zh-CN.md
     plugin/README.md plugin/README.en.md plugin/README.zh-CN.md
     site/_config.yml
 )
-
-# Current documentation explicitly describes the pending workspace release.
-# The bucket instead advertises assets already published and must not be bumped
-# until those assets exist.
-RELEASE_FILES=(bucket/hyperdu.json)
 
 fail=0
 unfixable=0

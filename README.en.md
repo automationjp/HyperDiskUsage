@@ -1,64 +1,95 @@
 # HyperDU
 
-> **Find what is filling your disk, fast.**<br>
-> A fast, cross-platform disk usage analyzer written in Rust. It provides a CLI, GUI, GNU `du` compatibility mode, and MCP / Skill interfaces for AI agents.
+[日本語](README.md) · **English** · [简体中文](README.zh-CN.md)
+
+> **Find what fills your disk — with one engine for people, applications, and agents.**
+> A Rust disk-usage analyzer combining platform-specific metadata reads with parallel traversal. Inspect from the CLI, explore in the GUI, or pass structured results to an AI agent through MCP.
 
 [![CI](https://github.com/automationjp/HyperDiskUsage/actions/workflows/ci.yml/badge.svg)](https://github.com/automationjp/HyperDiskUsage/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/hyperdu.svg)](https://crates.io/crates/hyperdu)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.88%2B-black?logo=rust)](https://www.rust-lang.org/)
-[![Platform](https://img.shields.io/badge/Windows%20%7C%20Linux-tested-blue)](#platform-status)
 
-[日本語](README.md) · **English** · [简体中文](README.zh-CN.md)
+[Website](https://hyperdu.automation.jp/en/) · [Setup](docs/en/setup.md) · [Developer guide (Japanese)](docs/developer-guide.md) · [CLI reference (Japanese)](docs/cli-reference.md) · [Documentation](docs/en/README.md)
 
-[Setup](docs/en/setup.md) · [Performance](docs/en/performance.md) · [Benchmark plan](docs/en/benchmarks.md) · [Documentation](docs/en/README.md) · [Web site](https://automationjp.github.io/HyperDiskUsage/) · [Japanese](https://automationjp.github.io/HyperDiskUsage/)
+## Use the published beta
 
----
-
-## Quick start
-
-See the [CLI parameter reference (Japanese)](docs/cli-reference.md) for defaults, output modes, and platform restrictions. The `--time` options require the `time-format` feature, enabled by default.
-
-> **0.5.0-beta.5 is being prepared for publication.** On this branch, install it with `cargo install --locked --path hyperdu`. The crates.io commands and newly named distribution artifacts below become available after the release is published.
+**v0.5.0-beta.5 is published**, both on [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.5) and crates.io. It is a beta, not an unreleased preview and not a stable release: CLI options, MCP schemas, and output formats may still change.
 
 ```bash
-cargo install hyperdu --version 0.5.0-beta.5
+cargo install hyperdu --locked --version 0.5.0-beta.5
 hyperdu . --top 20
 ```
 
-The crate and executable are both **`hyperdu`**. This installs the CLI and MCP server together.
+The crate and executable are both **`hyperdu`**, not the retired name `hyperdu-cli`. One installation provides the CLI and the MCP server; the server starts only when you run `hyperdu mcp`.
 
-The workspace has three user-facing crates: `hyperdu-core` is the shared scanning engine, `hyperdu` is the CLI binary with the built-in MCP server (`hyperdu mcp`), and `hyperdu-gui` is the separate GUI package.
+**Prebuilt Windows / Linux binaries do not require Rust to run.** For source builds, use a recent stable Rust and platform build tools. Current source declares Rust 1.82 for core, 1.85 for GUI, and 1.88 for CLI, with Linux / Windows CI at each floor. Immutable published beta manifests are not rewritten by this source fix; use a recent stable Rust when installing the published package.
+
+## What changes compared with a conventional implementation?
+
+The difference is not simply “written in Rust.” HyperDU combines **how metadata is acquired, how traversal work is shared, and how results are reused**.
+
+| Problem | Implementation | Practical difference |
+|---|---|---|
+| Listing names and then querying each file can multiply OS calls | Windows `NtQueryDirectoryFile` batches names, sizes, allocation sizes, and file IDs | Fewer additional file opens. Linux uses `getdents64` plus `statx`, but still needs metadata reads |
+| Fixed work allocation leaves one worker processing a large subtree | Per-worker LIFO queues with work stealing | Idle workers take available work from an uneven directory tree |
+| Separate CLI, GUI, and agent scanners drift in accounting behavior | All consume the independent `hyperdu-core` library | Shared hard-link accounting, aggregation, and platform optimizations |
+| Parsing human-readable shell output creates a weak integration contract | Built-in MCP tools with typed arguments and structured results | Programmatic inspection without a deletion tool |
+| A GUI that waits for the entire tree provides no early exploration | Interactive mode delivers completed child folders | Explore completed results during the remaining scan; this is not continuous monitoring |
+
+This compares implementation patterns, not every competing product. Other tools may also batch or parallelize. Speed claims below apply only to the measured workloads.
+
+See the [developer guide](docs/developer-guide.md) and [architecture](docs/en/architecture.md) for code entry points and tradeoffs.
+
+## CLI
 
 ```bash
-# Analyze the current directory
-hyperdu .
-
-# Show the 20 largest items
 hyperdu /path/to/data --top 20
-
-# Export to JSON
-hyperdu /path/to/data --json result.json
-
-# GNU du compatibility mode
+hyperdu /path/to/data --json usage.json
+hyperdu /path/to/data --csv usage.csv
 hyperdu --compat gnu -k /var/log
+hyperdu --compat gnu -b --time /usr/share
+hyperdu --help
 ```
 
-Run `hyperdu --help` to see all options.
+Normal top output ranks **directories by physical size**, including when `--apparent-size` is present. Time options require the default-enabled `time-format` feature. Exclusions, display depth, scan limits, and link following are distinct controls; consult the [CLI reference](docs/cli-reference.md).
 
-## Performance
+**Not a complete GNU / POSIX `du` replacement.** `--compat posix-strict` selects defaults such as 512-byte units, but required POSIX options `-a`, `-s`, `-H`, and `-L` are not implemented. Do not unconditionally alias `du` to HyperDU. [Compatibility audit](docs/posix-compatibility.md)
 
-HyperDU is focused on **fast disk usage analysis**.
+## GUI
 
-Rather than simply rewriting `du` in Rust, it optimizes the hot path for OS-specific directory enumeration, metadata retrieval, parallel traversal, and physical-size accounting.
+```bash
+cargo install hyperdu-gui --locked --version 0.5.0-beta.5
+hyperdu-gui
+```
 
-### HyperDU compared with du
+The Windows / Linux desktop app uses `egui` / `eframe`. Interactive mode delivers child-folder results progressively; Batch mode receives a complete map. Features include a directory tree, breadcrumbs, sortable rows, filters, progress, error and cancellation states, and JSON / CSV export. UI labels are Japanese.
 
-The measured Linux and Windows results are reported with the conditions for each environment. Every successful directory row matched the independent oracle. Speed ratio is GNU `du` time divided by HyperDU time. Measured source snapshot: `2645689515ab2e608a78b7492637e55179e4739a`. [GitHub Actions run](https://github.com/automationjp/HyperDiskUsage/actions/runs/34550503086) · [benchmarks.json](https://automationjp.github.io/HyperDiskUsage/benchmarks.json) · [site performance results](https://automationjp.github.io/HyperDiskUsage/en/#performance) · [Details](docs/en/benchmarks.md)
+Approximate mode does not promise exact allocation sizes. Cancellation and read errors are not reported as successful completion. [GUI behavior and limitations](hyperdu-gui/README.en.md)
 
-#### Linux — 1M files per shape
+## AI agents
 
-On GitHub-hosted Ubuntu 24.04 / ext4 with an AMD EPYC 9V74 (4 vCPU, 15.6 GiB RAM), each shape contained 1,000,000 regular 256-byte files. These are warm-cache medians using allocated bytes and eight alternating runs per tool. The Linux headline is **up to 3.25× faster** (3.256× for the wide shape) and applies to Linux only.
+```bash
+hyperdu mcp
+# Client registration examples:
+claude mcp add --transport stdio hyperdu -- hyperdu mcp
+codex mcp add hyperdu -- hyperdu mcp
+```
+
+| Tool | Purpose |
+|---|---|
+| `list_volumes` | Inspect volume capacity and free space |
+| `scan_path` | Inspect usage under a path |
+| `find_reclaimable` | Find outputs that might be regenerated and reviewed for cleanup |
+
+**All three tools are read-only and never delete files.** A cleanup candidate is not proof that deletion is safe; a person decides. The MCP server, CLI-based Agent Skill, and distributing Plugin are independent entry points. The Skill does not require MCP. [Agent setup](plugin/README.en.md)
+
+## Measured performance, with boundaries
+
+These are previously published measurements, **not a fresh benchmark of the current HEAD or every environment**. The measured source is `2645689515ab2e608a78b7492637e55179e4739a`, separate from the published package version.
+
+### Linux: one million files per shape
+
+GitHub-hosted Ubuntu 24.04 / ext4, AMD EPYC 9V74 (4 vCPU, 15.6 GiB RAM), 1,000,000 regular 256-byte files per shape. Warm cache, allocated bytes, medians of eight alternating runs per tool. Successful directory rows matched an independent oracle.
 
 | Shape | HyperDU | GNU `du` | du / HyperDU |
 |---|---:|---:|---:|
@@ -66,183 +97,44 @@ On GitHub-hosted Ubuntu 24.04 / ext4 with an AMD EPYC 9V74 (4 vCPU, 15.6 GiB RAM
 | wide | 745.96 ms | 2428.80 ms | 3.256× |
 | deep | 764.67 ms | 2434.28 ms | 3.183× |
 
-#### Windows — 1M result and 10K diagnostic
+“Up to 3.25× faster” is the headline for this Linux measurement, not a claim about cold caches, other filesystems, HDDs, or network storage.
 
-Measurements used Windows 11 / NTFS / NVMe on an AMD Ryzen 9 3900X (12 cores / 24 threads, 128 GiB RAM), with a warm cache and apparent-size logical bytes. For the flat 1M tree, standalone HyperDU measured a median of 589.91 ms over eight runs. GNU `du` 8.32 (Git for Windows / MSYS) timed out during warmup at 600 seconds before a measured run. There is no accepted 1M GNU `du` baseline or ratio; wide and deep 1M workloads were not run.
+### Windows: standalone 1M result and 10K diagnostic
 
-The 10K comparison diagnostic uses medians of two runs per tool. These ratios apply only to this small diagnostic and are not general 1M-file speed claims.
+Windows 11 / NTFS / NVMe, Ryzen 9 3900X (12 cores / 24 threads, 128 GiB RAM), warm cache and logical bytes. For the flat 1M tree, HyperDU's standalone median over eight runs was 589.91 ms. GNU `du` 8.32 (Git for Windows / MSYS) reached the 600-second warmup timeout: **there is no accepted 1M comparison ratio**. Wide / deep 1M workloads were not run.
 
-| Shape | HyperDU | GNU `du` 8.32 (MSYS) | du / HyperDU |
+| 10K diagnostic, median of two runs per tool | HyperDU | GNU `du` (MSYS) | du / HyperDU |
 |---|---:|---:|---:|
 | flat | 32.98 ms | 704.17 ms | 21.35× |
 | wide | 27.46 ms | 712.33 ms | 25.94× |
 | deep | 32.32 ms | 836.73 ms | 25.89× |
 
-### Why it is fast
+Do not extrapolate these diagnostic ratios to 1M files or Windows generally. Accounting, environment, and run counts also differ from Linux.
 
-| Platform | Main path | Optimization |
-|---|---|---|
-| Linux | `getdents64` + `statx` | Fetch directory entries in batches and aggregate metadata efficiently in parallel |
-| Windows | `NtQueryDirectoryFile` / `FileIdFullDirectoryInformation` | Fetch names, sizes, allocation sizes, and file IDs in batches |
-| macOS | `getattrlistbulk` | Fetch metadata in bulk |
+[Workflow evidence](https://github.com/automationjp/HyperDiskUsage/actions/runs/34550503086) · [Raw data](https://hyperdu.automation.jp/benchmarks.json) · [Method and limitations](docs/en/benchmarks.md) · [Performance design](docs/en/performance.md)
 
-In addition, `hyperdu-core` uses per-worker LIFO deques and work stealing to redistribute work according to directory-tree imbalance.
+## Distribution and platform status
 
-On Windows, `--mft` enables a direct `$MFT` read path when the NTFS volume root and permission requirements are met. If safe analysis is not possible, it falls back to directory enumeration.
-
-See [Performance design](docs/en/performance.md) for optimization details and [Architecture](docs/en/architecture.md) for relationships between components.
-
-## What HyperDU provides
-
-### Fast disk analysis
-
-- Logical size / physical allocation size accounting
-- Hard-link deduplication
-- Multithreaded scanning + work stealing
-- Filesystem-specific scan strategies
-- Exclude / maximum depth / minimum file size
-- JSON / CSV output
-- Basic / deep classification
-- Progress display
-
-### GNU `du` compatibility mode
-
-```bash
-hyperdu --compat gnu -k /var/log
-hyperdu --compat gnu -k /home --max-depth=2
-hyperdu --compat gnu -b --time /usr/share
-```
-
-HyperDU is not fully POSIX `du` compatible. `--compat posix-strict` selects defaults such as 512-byte units, but required POSIX options `-a`, `-s`, `-H` and `-L` are not implemented. Do not use it as a drop-in replacement or alias for `du`.
-
-Compatibility is tested continuously, but HyperDU does not guarantee unconditional, complete reproduction of every GNU coreutils behavior.
-
-### Structured output
-
-```bash
-hyperdu /srv/data --json usage.json
-hyperdu /srv/data --csv usage.csv
-```
-
-## AI agents: MCP / Skill / Plugin
-
-HyperDU can also be used by AI agents such as Claude and Codex.
-
-| Interface | Purpose | MCP required? |
-|---|---|---|
-| MCP server | Typed arguments / structured results | Yes |
-| Agent Skill | Triage workflow using the `hyperdu` CLI | No |
-| Agent Plugin | Distributes MCP + Skill together | Optional |
-
-The MCP server exposes three tools:
-
-| Tool | Question it answers |
-|---|---|
-| `list_volumes` | Which volume is running out of space? |
-| `scan_path` | What is taking up the most space there? |
-| `find_reclaimable` | Which candidates can be regenerated? |
-
-**There is intentionally no deletion tool.** This avoids giving agents a path to destroy data without human confirmation.
-
-```bash
-cargo install hyperdu --version 0.5.0-beta.5
-claude mcp add --transport stdio hyperdu -- hyperdu mcp
-# Codex:
-codex mcp add hyperdu -- hyperdu mcp
-```
-
-See [plugin/README.en.md](plugin/README.en.md) for the Agent Skill / Plugin.
-
-## GUI
-
-`hyperdu-gui` is an eGUI / eframe-based desktop UI.
-
-It offers Interactive scanning (the default) and Batch scanning with shared core semantics, advanced filter and performance options, and JSON/CSV export.
-
-<!-- Parent task: verify the final GUI feature wording before release. -->
-
-- Realtime scanning
-- Interactive tree view
-- Directory drill-down
-- Throughput display
-- Result export
-
-```bash
-cargo install hyperdu-gui --version 0.5.0-beta.5
-hyperdu-gui
-```
-
-## Installation
-
-**Rust is not required to run a prebuilt binary, use Scoop, or install the `.deb` package.** Rust versions, Windows MSVC / Windows SDK, Linux native build tools, GUI dependencies, and MCP requirements for source builds are described in [Setup and build environment](docs/en/setup.md).
-
-### crates.io
-
-```bash
-# CLI + MCP (Rust 1.88+)
-cargo install hyperdu --version 0.5.0-beta.5
-
-# GUI (Rust 1.75+)
-cargo install hyperdu-gui --version 0.5.0-beta.5
-
-# Start the MCP server only when needed
-hyperdu mcp
-```
-
-### Prebuilt binaries
-
-After publication, downloads will be available from [Releases](https://github.com/automationjp/HyperDiskUsage/releases). The following are the planned filenames for the next release.
-
-| Platform | CLI | GUI |
-|---|---|---|
-| Windows x86_64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-windows-x86_64-generic.zip) / [exe](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-windows-x86_64-generic.exe) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-gui-windows-x86_64-generic.zip) |
-| Linux x86_64 (glibc) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-linux-x86_64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-gui-linux-x86_64-generic.zip) |
-| Linux x86_64 (musl) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-linux-x86_64-musl-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-gui-linux-x86_64-musl-generic.zip) |
-| Linux aarch64 | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-linux-aarch64-generic.zip) | [zip](https://github.com/automationjp/HyperDiskUsage/releases/download/v0.5.0-beta.5/hyperdu-gui-linux-aarch64-generic.zip) |
-
-The same release also includes a `.deb` package for Debian / Ubuntu.
-
-### Scoop (Windows)
+The [published release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.5) provides Windows x86_64 and Linux x86_64 (glibc / musl) / aarch64 CLI and GUI binaries. Choose the available formats from its Assets list. A packaging manifest does not establish registration in a package store.
 
 ```powershell
 scoop bucket add hyperdu https://github.com/automationjp/HyperDiskUsage
 scoop install hyperdu
 ```
 
-### winget (Windows) — pending submission
-
-```powershell
-winget install automationjp.HyperDU
-```
-
-The manifest has passed `winget validate`, but it cannot be used until registration in winget-pkgs is complete.
-
-### From source
-
-```bash
-git clone https://github.com/automationjp/HyperDiskUsage.git
-cd HyperDiskUsage
-cargo install --path hyperdu
-```
-
-See [docs/en/setup.md](docs/en/setup.md) for the detailed build environment.
+For winget, check the actual catalog with `winget search --id automationjp.HyperDU --exact`; this repository's manifest alone does not establish availability.
 
 <a id="platform-status"></a>
-## Platform status
 
-| Platform | Status | Notes |
-|---|---|---|
-| Windows | **Tested** | NTFS, CI, native enumeration, optional MFT path |
-| Linux | **Tested** | XFS / ext4, CI |
-| macOS | CLI: **Unverified** / GUI: **Cannot build** | A `getattrlistbulk` implementation exists; the release workflow currently excludes macOS |
+| OS | Current verification / distribution scope |
+|---|---|
+| Windows | Native CI, NTFS fixture, CLI / GUI distribution |
+| Linux | CI, CLI / GUI distribution, ext4 benchmark above |
+| macOS | `getattrlistbulk` implementation exists, but no current CI or release target. CLI verification is incomplete; GUI use is not guaranteed |
 
-Minimum Rust versions:
+Windows `--mft` is an experimental opt-in path requiring an NTFS volume root, administrator privileges, and supported options. Incomplete required reads or parsing fall back to normal enumeration. **Successful MFT parsing is not proof of complete accounting parity.** [MFT boundaries](docs/en/architecture.md)
 
-- `hyperdu-core`, `hyperdu-gui`: **Rust 1.75+**
-- `hyperdu` (CLI + MCP): **Rust 1.88+**
-- Workspace-wide build/test: **Rust 1.88+**
-
-## Experimental: persisted Linux snapshots
+## Experimental Linux snapshots
 
 ```bash
 mkdir -p "$HOME/.cache/hyperdu"
@@ -250,54 +142,24 @@ hyperdu index refresh /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 hyperdu index show /srv/data --database "$HOME/.cache/hyperdu/data.idx"
 ```
 
-This is not a watcher. `show` returns the stored value and always marks freshness as `stale`.
-
-See [Linux directory snapshots](docs/en/index-snapshots.md) for details.
-
-## Documentation
-
-- [Setup and build environment](docs/en/setup.md)
-- [Documentation index](docs/en/README.md)
-- [Performance design](docs/en/performance.md)
-- [Benchmark plan / remeasurement checklist](docs/en/benchmarks.md)
-- [Architecture](docs/en/architecture.md)
-- [Linux persisted snapshots](docs/en/index-snapshots.md)
-- [Historical / old documents](docs/old/README.md)
-- [Agent Plugin / Skill](plugin/README.en.md)
+This is not a watcher. `show` reads saved values and always marks freshness as `stale`. [Snapshot contract](docs/en/index-snapshots.md)
 
 ## Development
 
 ```bash
-cargo check --workspace
-cargo test --workspace
+git clone https://github.com/automationjp/HyperDiskUsage.git
+cd HyperDiskUsage
+cargo check --workspace --locked
+cargo test --workspace --locked
 cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo run -p hyperdu -- --help
 ```
 
-Use Rust 1.88+ for workspace-wide development. See [Setup and build environment](docs/en/setup.md) for platform-specific prerequisites and how to check optional features.
+See the [developer guide](docs/developer-guide.md) for crate responsibilities, Rust integration, CI / publication trust boundaries, and feature-specific checks. Tracy and Puffin cannot be enabled together; do not use `--all-features` as an aggregate verification command.
 
-For pull requests that change a performance path, check the correctness gate and remeasurement conditions in the [Benchmark plan](docs/en/benchmarks.md) in addition to the regular tests.
+[Architecture](docs/en/architecture.md) · [Setup](docs/en/setup.md) · [Historical documents](docs/old/README.md) · [Documentation index](docs/en/README.md)
 
-## Known limitations
+## License / Acknowledgements
 
-- This is a beta release. CLI options, MCP tool schemas, and output formats may change.
-- Public benchmarks include the Linux and Windows measurements above. OS, accounting method, file count, and run count differ, so the Linux headline and Windows diagnostic ratios do not extend to unmeasured conditions.
-- macOS performance and compatibility validation is not complete.
-- On network filesystems or HDDs, I/O latency can dominate and reduce the gains from parallelism.
-- Symbolic links are not followed by default. Take care with cycles when using `--follow-links`.
-
-## License
-
-[MIT License](LICENSE)
-
-## Acknowledgements
-
-- [ripgrep](https://github.com/BurntSushi/ripgrep) — high-performance filesystem/search implementation
-- [fd](https://github.com/sharkdp/fd) — parallel filesystem traversal
-- [dust](https://github.com/bootandy/dust) — disk usage UX
-
----
-
-**HyperDU — fast disk analysis for humans and agents.**
-
-[POSIX du compatibility audit](docs/en/posix-compatibility.md)
+[MIT License](LICENSE). Design references: [ripgrep](https://github.com/BurntSushi/ripgrep), [fd](https://github.com/sharkdp/fd), and [dust](https://github.com/bootandy/dust).

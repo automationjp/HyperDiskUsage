@@ -4,116 +4,74 @@
 
 ![HyperDU GUI](../docs/images/gui.png)
 
-`hyperdu-gui` 是使用共享 scanner core 检查磁盘使用量的桌面 GUI。可以输入目标路径或选择文件夹，然后随着结果到达逐步查看目录明细。
+用于探索磁盘使用量的 Windows / Linux 桌面界面。它复用 CLI / MCP 使用的 `hyperdu-core`，不另写扫描引擎。界面文字为日语，启动时从系统字体中寻找 CJK、emoji 等回退字体。
 
-GUI 中的标签、状态消息和设置项均为日语。启动时会搜索操作系统的字体目录，并注册 CJK、emoji、UI 和等宽字体 fallback，因此可以显示包含日语字符的路径。native startup 的日语渲染已经确认。
+## 安装已发布的 Beta 版
 
-## 发布状态
-
-`0.5.0-beta.5` 正在准备发布。发布后才能从 crate registry 安装指定版本。目前请从仓库 root 安装 source checkout。
-
-## 安装与启动
-
-在仓库 root 执行：
+**0.5.0-beta.5 已发布。** 可使用 [GitHub Release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.5) 的 GUI 二进制文件，或从 crates.io 安装。运行预构建二进制文件不需要 Rust。
 
 ```bash
-cargo install --locked --path hyperdu-gui
+cargo install hyperdu-gui --locked --version 0.5.0-beta.5
 hyperdu-gui
 ```
 
-从 development checkout 启动：
+开发 checkout 请在仓库根目录执行：
 
 ```bash
+cargo install --locked --path hyperdu-gui
 cargo run --release -p hyperdu-gui
 ```
 
-Linux 需要 `eframe` / `winit` 使用的 X11 或 Wayland development libraries。Windows 需要普通 desktop session。macOS 目前不属于 GUI release target。Rust 版本、系统依赖和构建步骤请参见[环境配置](../docs/zh-CN/setup.md)。
+源码构建请使用较新的 stable Rust。当前 GUI 源码声明最低 Rust 1.85，并在 Linux / Windows 检查；已发布 Beta 包的 manifest 不会改变，安装公开包请使用较新的 stable。Linux 需要 X11 / Wayland 开发库，Windows 需要构建环境及桌面会话。macOS 不在当前 GUI Release 范围内。[环境设置](../docs/zh-CN/setup.md) · [最低版本说明（日语）](../docs/developer-guide.md)
 
-## 界面与扫描流程
+## 操作与结果交付
 
-1. 在“目标文件夹”中输入路径，或使用“选择…”选择文件夹
-2. 选择“扫描模式”
-3. 按需修改详细设置
-4. 点击“开始扫描”
-5. 在左侧目录 tree 和右侧列表中查看结果
+在「対象フォルダ」中输入路径，或通过「選択…」选择目录；设置模式后点击「スキャン開始」。设置仅用于下一次扫描，扫描中不能更改。「中止」请求协作式取消。
 
-设置会应用于下一次扫描。扫描进行时目标和设置不可修改。“中止”按钮会请求 cooperative cancellation。
+**Interactive（默认）** 先枚举根目录，报告直属文件合计和待扫描子目录，再用全部工作线程依次扫描每个子目录，逐步交付完成结果。不必等待整个扫描结束，就能查看已完成的目录。这不是持续监视文件变化的 watcher。
 
-### Interactive 与 Batch
+**Batch** 一次性交付整体汇总 map。Interactive 请求成功使用 MFT 时也会交付批量结果，并在界面明确提示。
 
-`Interactive` 是默认模式。core 首先列出 root 直下的内容，并报告直下文件的汇总以及 pending 子文件夹。随后让所有 worker 一次扫描一个子文件夹，并在每个子文件夹完成后更新 GUI。剩余扫描继续时，已经完成的文件夹仍可查看。
+## 设置
 
-`Batch` 一次接收完整的结果 map。它用于扫描完成后显示整体结果，不用于在扫描过程中逐个显示子文件夹结果。
-
-Windows MFT 路径在 interactive scan 中成功时，GUI 会提示正在接收一次批量结果，而不是通常的逐子文件夹结果。
-
-## 详细设置
-
-| 设置 | 行为 |
+| 选项 | 行为 |
 |---|---|
-| 名称/路径包含 | literal contains filter。每行一个 pattern；会忽略首尾空白和空行 |
-| glob | glob filter。每行一个 pattern；会忽略首尾空白和空行 |
-| 正则表达式 | regex filter。每行一个 pattern；会忽略首尾空白和空行。不合法的 regex 会在扫描开始时报告错误 |
-| 最小文件大小 | 输入整数及 `B / KB / KiB / MB / MiB / GB / GiB`。KB/MB/GB 使用 1000 倍，KiB/MiB/GiB 使用 1024 倍。忽略空格且不区分大小写 |
-| 最大深度 | `0` 表示无限制。正数以原始 scan root 为基准 |
-| 追踪链接 | 追踪 symlink，并启用 link-cycle detection |
-| 单独计算 hardlink | 默认关闭，像 GNU `du` 一样对 hardlink 去重；开启后每个 hardlink 分别计数 |
-| 仅限同一 filesystem | 不越过 scan root 所在 filesystem 的边界 |
+| 子串 / glob / 正则表达式 | 每行一个模式，去除首尾空白与空行。无效正则在开始时报错 |
+| 最小文件大小 | 整数及 B / KB / KiB / MB / MiB / GB / GiB。十进制单位为1000倍，二进制单位为1024倍；规范化空白及大小写 |
+| 深度上限 | `0` 为无限制，正值相对于原扫描根目录 |
+| 跟随链接 | 跟随 symlink，并检测循环 |
+| 单独统计硬链接 | 默认去重，启用后分别统计每个链接 |
+| 仅同一文件系统 | 不跨越扫描根的文件系统边界 |
 
-### 大小计算
+### 大小统计与 I/O 策略分开选择
 
-- **物理 + 逻辑**（默认）：计算 allocation/physical size 和 logical file size。
-- **仅逻辑**：跳过 physical-size 计算，并在物理列显示 logical size 作为替代值。
-- **概算（更快）**：跳过 physical-size 计算，并估算 regular-file size 以减少 metadata I/O。当最小大小为 0 时，当前 regular-file fast path 使用 4 KiB（4096 bytes）作为估算值，并将 directory entry 按 0 处理。它不优先保证 file size 的精确性，GUI 会将结果标为概算；物理列同样是替代值。
+**物理＋逻辑（默认）** 计算分配大小和文件逻辑大小。**仅逻辑** 跳过物理统计，物理列也用逻辑值代替。**估算（快速）** 优先减少元数据 I/O 而不是精确大小；最小大小为0的普通文件当前使用4096字节估算，目录项为0，界面会标记为估算结果。不要将替代的物理列解释为实际分配字节。
 
-在仅逻辑和概算模式下，不要把物理列解释为实际 allocation size。
-
-### 速度与 I/O
-
-| 设置 | 行为 |
+| I/O 选项 | 行为 |
 |---|---|
-| 线程数 | `0` 使用 core 的 default thread 数。正数请求对应数量的 worker。Gentle 会将有效数量限制为最多 2 个 |
-| I/O 标准 | **Balanced**：保持结果正确，不刻意 warm page cache |
-| I/O 速度优先 | **Throughput**：尽可能使用 hardware 能提供的 I/O |
-| I/O 低负荷 | **Gentle**：关闭 readahead，减少 worker 和大型 directory 分割，尽量不妨碍其他工作 |
-| 预读 自动 | 由 I/O profile 决定 |
-| 预读 启用 / 禁用 | 显式打开或关闭 readahead。readahead 可以降低 latency，但会增加读取总量，因此除非明确要求，默认关闭 |
-| 大型目录分割间隔 | 每 `N` 个 entry 分割大型 directory 并 yield。`0` 表示禁用；GUI 接受 `0..=1,000,000` |
+| 线程数 | `0` 使用核心默认值；正值为请求线程数，Gentle 将有效数量限制到最多2 |
+| Balanced | 默认，保持正确统计，不主动预热缓存 |
+| Throughput | 更积极使用可用 I/O |
+| Gentle | 不预读，限制线程数和大目录拆分 |
+| 预读 自动 / 开 / 关 | 由 profile 决定或显式选择；预读可能增加总读取量 |
+| 大目录拆分间隔 | 每 N 项拆分并 yield，`0` 为关闭，范围 `0..=1,000,000` |
 
-### Windows MFT
+Windows MFT 扫描需手动启用，要求 NTFS、卷根目录、管理员权限及受支持的选项。必要读取或解析不完整时回退到普通枚举。成功也不保证与普通枚举的统计完全一致。[MFT 边界](../docs/zh-CN/architecture.md)
 
-“尝试直接扫描 NTFS MFT”是 Windows 专用的 opt-in 设置。它需要管理员权限、NTFS、volume root 和整个 volume 的扫描。如果无法安全完整解析 MFT layout、进程没有提权、volume 不是 NTFS，或目标不是整个 volume，HyperDU 会回退到普通 directory enumeration，而不会返回部分结果。
+## 显示限制、错误与导出
 
-MFT 路径报告的是 volume 自身的 view，而不是用户通过 filesystem 看到的 view，因此默认永远不启用。成功时，interactive GUI 会显示一次批量结果。
+左侧树对每个展开目录最多绘制500项，整体最多1500行；这不会丢弃扫描结果。右侧列表覆盖当前目录的全部子目录，仅绘制可见行，可按物理大小、逻辑大小、文件数或名称排序。仍可通过列表进入深层目录。
 
-## 结果显示
+直属文件作为独立合计显示，不构造虚拟目录。每行大小为物理 / 逻辑。进度包括处理文件数、剩余目录和错误数；错误详情最多显示20项。
 
-### 左侧 tree
+读取错误、取消和扫描失败不视为成功完成。取消后仍可查看已完成的部分结果，但不能保证立即中断同步 I/O。只有收到 `Finished`、错误数为0且没有活动扫描时，才允许 JSON / CSV 导出。
 
-每个展开的 directory 最多显示 500 个子项，整个视图的 recursive rendering 最多显示 1,500 行。更深层的 directory 仍可通过右侧列表访问。这些是渲染限制，不会删除扫描结果。
+当前源码在导出工作线程中处理原生对话框、行复制、排序和写入。UI 以常数时间交付共享快照，保存期间仍可浏览。写入失败或替换前观察到取消时保留旧文件；完成前禁止新扫描与重复保存。取消不会立即中断 OS I/O、排序或已打开的对话框。此源码变更不会更新已发布二进制文件。[架构](../docs/zh-CN/architecture.md)
 
-### 右侧列表
+## 其他入口
 
-列表显示选中 directory 的**全部**子项。可以按物理大小、逻辑大小、文件数或名称排序。每个 directory 500 项和整个 tree 1,500 行的限制不适用于此列表。
-
-root 直下的文件显示为**直下文件总计**。GUI 不会创建可能与 directory 结果混淆的 virtual path。
-
-每一行显示 `physical / logical`。在仅逻辑和概算模式下，physical 值是前面说明的替代值。
-
-## 状态、错误与取消
-
-- 扫描时，pending 子文件夹显示 spinner；状态区显示已扫描 files、剩余 folders 和 error 数。
-- 读取错误会增加 error count；最多保留并显示 20 条详细信息。
-- 如果 core 在存在错误时发出完成事件，GUI 会显示结果，但将其标为 partial，不视为 complete。
-- “中止”请求 cooperative cancellation。已完成文件夹的部分结果仍可查看，但取消的扫描不会报告为完成。
-- root 不存在、pattern 或 size 不合法、scan thread 失败等情况会显示错误状态。
-
-只有在扫描发出 `Finished`、error count 为 0 且当前没有扫描运行时，JSON 和 CSV 保存按钮才会启用。partial、cancelled 和 failed 结果不能导出。
-
-## 普通 CLI / MCP
-
-GUI 是可视化和交互式 front-end。脚本、CI、structured output 或 AI agent 请使用普通的 `hyperdu` CLI 和 `hyperdu mcp`。安装和 MCP 注册请参见 [hyperdu CLI / MCP README](../hyperdu/README.zh-CN.md)。
+脚本、CI 和 AI 集成请用 [hyperdu CLI / MCP](../hyperdu/README.zh-CN.md)。Rust 集成见[开发者指南（日语）](../docs/developer-guide.md)。
 
 ## 许可证
 
-MIT。egui dependency chain 中捆绑的字体分别带有自己的 OFL-1.1 和 Ubuntu-font-1.0 许可证。
+MIT。通过 egui 依赖包含的字体保留其 OFL-1.1 和 Ubuntu-font-1.0 许可证。

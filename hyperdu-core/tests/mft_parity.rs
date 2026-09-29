@@ -103,6 +103,21 @@ fn the_mft_backend_agrees_with_directory_enumeration() {
     if std::env::var_os("HYPERDU_MFT_PARITY_FIXTURE").is_some() {
         assert_fixture(&from_mft, &root);
         assert_fixture(&walked, &root);
+        // Every controlled directory row must agree, not merely a percentage
+        // of volume-wide totals that could hide misplaced hard-link bytes.
+        let fixture = root.join("hyperdu-fixture");
+        let rows = |map: &hyperdu_core::StatMap| {
+            map.iter()
+                .filter(|(path, _)| path.starts_with(&fixture))
+                .map(|(path, stat)| (path.clone(), (stat.logical, stat.physical, stat.files)))
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
+        assert_eq!(rows(&from_mft), rows(&walked));
+        for excluded in ["junction", "dir-link", "file-link"] {
+            assert!(!from_mft.contains_key(&fixture.join(excluded)));
+            assert!(!walked.contains_key(&fixture.join(excluded)));
+        }
+        eprintln!("controlled namespace: exact directory-row parity, including no-follow links");
     }
 
     let (wl, wp, wf) = totals(&walked, &root);

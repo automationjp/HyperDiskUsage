@@ -63,10 +63,8 @@ pub(crate) struct Entry {
     /// enumeration API disagreed by 37% on a real volume until each was read
     /// its own way (#39).
     pub(crate) data_flags: u16,
-    /// Why this record's sizes are what they are. The MFT still reports 6.1 GB
-    /// less than enumeration (#41) and the candidate causes are distinguishable
-    /// only by counting them: guessing which one dominates is how #39 went
-    /// wrong twice.
+    /// Accounting diagnostics. Historical live-volume differences (#41) do not
+    /// establish parity; incomplete namespaces now decline the raw result.
     pub(crate) size_source: SizeSource,
 }
 
@@ -74,8 +72,8 @@ pub(crate) struct Entry {
 /// account for a discrepancy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SizeSource {
-    /// False when no unnamed `$DATA` was found and the stale copy in
-    /// `$FILE_NAME` had to stand in.
+    /// True for files with resolved unnamed `$DATA`; directories may be false.
+    /// Missing file DATA never falls back to the stale `$FILE_NAME` size.
     pub(crate) from_data_attribute: bool,
     /// The record has an `$ATTRIBUTE_LIST`, so some of its attributes --
     /// possibly the rest of `$DATA` -- live in extension records. Ordinary-file
@@ -290,18 +288,76 @@ impl<S: VolumeSource> MftReader<S> {
 
         let mut names: Vec<FileName> = Vec::new();
         let mut source = SizeSource::default();
+        let mut reparse_tag = None;
         for attr in Attributes::new(&rec, &header) {
             match attr.type_code {
                 attr_type::FILE_NAME if !attr.non_resident => {
                     let value =
                         rec.get(attr.value_offset..attr.value_offset + attr.value_length)?;
-                    if let Some(f) = parse_file_name(value) {
-                        names.push(f);
+                    let Some(f) = parse_file_name(value) else {
+                        self.complete = false;
+                        return None;
+                    };
+                    // Lossy display names must never collapse distinct NTFS paths.
+                    let units = value[66..66 + usize::from(value[64]) * 2]
+                        .chunks_exact(2)
+                        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]));
+                    if !f.name.encode_utf16().eq(units) || f.namespace > namespace::WIN32_AND_DOS {
+                        self.complete = false;
+                        return None;
                     }
+                    names.push(f);
                 }
                 attr_type::ATTRIBUTE_LIST => source.has_attribute_list = true,
+                // $REPARSE_POINT, resident REPARSE_DATA_BUFFER header.
+                0xC0 => {
+                    let value =
+                        rec.get(attr.value_offset..attr.value_offset + attr.value_length)?;
+                    if attr.non_resident
+                        || value.len() < 8
+                        || reparse_tag.is_some()
+                        || usize::from(u16::from_le_bytes([value[4], value[5]])) + 8 > value.len()
+                    {
+                        self.complete = false;
+                        return None;
+                    }
+                    reparse_tag = Some(u32::from_le_bytes(value[..4].try_into().ok()?));
+                }
                 _ => {}
             }
+        }
+        let links = distinct_links(&names);
+        let Some(chosen) = links
+            .iter()
+            .find(|f| f.namespace == namespace::WIN32 || f.namespace == namespace::WIN32_AND_DOS)
+            .or_else(|| links.first())
+        else {
+            self.complete = false;
+            return None;
+        };
+        // NTFS metadata descendants are not part of the mounted user namespace.
+        if !header.is_directory && chosen.parent < 16 && chosen.parent != super::mft::ROOT_RECORD {
+            return None;
+        }
+        // Enumeration ignores symbolic links and junctions when not following.
+        // WOF, cloud and other provider-defined tags need the mounted view;
+        // guessing their physical usage from unnamed $DATA is not correct.
+        if let Some(tag) = reparse_tag {
+            if matches!(tag, 0xA000_0003 | 0xA000_000C) {
+                return None;
+            }
+            self.complete = false;
+            return None;
+        }
+        // A record-order choice cannot reproduce traversal-order attribution
+        // between folders. Incomplete/extension-resident link names also cannot
+        // establish which folders own the bytes. Decline, never guess.
+        // NTFS's on-disk count includes DOS aliases; only attribution excludes them.
+        if names.len() != usize::from(header.hard_link_count)
+            || links.iter().any(|name| name.parent != chosen.parent)
+        {
+            self.complete = false;
+            return None;
         }
         let resolved = match self.data_streams(number, &rec, &header) {
             Some(streams) => streams,
@@ -311,28 +367,22 @@ impl<S: VolumeSource> MftReader<S> {
             }
         };
         let sizes = resolved.unnamed;
+        if !header.is_directory && sizes.is_none() {
+            // $FILE_NAME sizes can be stale. They are not an accounting oracle.
+            self.complete = false;
+            return None;
+        }
         let data_flags = resolved.flags;
         source.named_stream_bytes = resolved.named_bytes;
         source.from_data_attribute = sizes.is_some();
-
-        let links = distinct_links(&names);
-        // Prefer a Win32 name for display; a POSIX-only record still has one.
-        let chosen = links
-            .iter()
-            .find(|f| f.namespace == namespace::WIN32 || f.namespace == namespace::WIN32_AND_DOS)
-            .or_else(|| links.first())?;
 
         Some(Entry {
             record: number,
             parent: chosen.parent,
             name: chosen.name.clone(),
             is_directory: header.is_directory,
-            // Extensions are resolved above. Retain the legacy fallback only
-            // for records without a DATA attribute, never for a failed extent.
-            sizes: sizes.unwrap_or(DataSizes {
-                real_size: chosen.real_size,
-                allocated_size: chosen.allocated_size,
-            }),
+            // Directories have no unnamed file stream; never use stale name sizes.
+            sizes: sizes.unwrap_or_default(),
             hard_link_count: header.hard_link_count,
             data_flags,
             size_source: source,
@@ -691,6 +741,7 @@ pub(crate) fn paths_for(entries: &[Entry]) -> HashMap<u64, String> {
 mod tests {
     include!("mft_reader/batching_tests.rs");
     include!("mft_reader/progress_tests.rs");
+    include!("mft_reader/namespace_tests.rs");
     use super::{super::mft::ROOT_RECORD, *};
 
     // --- a synthetic NTFS volume ---------------------------------------------
@@ -985,14 +1036,14 @@ mod tests {
     }
 
     #[test]
-    fn the_hard_link_count_is_carried_through() {
+    fn missing_link_names_are_not_treated_as_complete() {
         let records =
             with_metadata_records(vec![file_record(ROOT_RECORD, "linked.txt", 4096, 10, 3)], 8);
         let mut reader = MftReader::open(volume(records)).expect("open");
-        assert_eq!(
-            reader.entry(16).expect("entry").hard_link_count,
-            3,
-            "dedupe needs this, and it is free here"
+        assert!(reader.entry(16).is_none());
+        assert!(
+            !reader.is_complete(),
+            "unresolved link names must decline MFT"
         );
     }
 

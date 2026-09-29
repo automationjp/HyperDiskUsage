@@ -272,7 +272,7 @@ pub fn start(
 pub struct Model {
     pub root: PathBuf,
     cancel: Option<Arc<AtomicBool>>,
-    entries: Vec<(PathBuf, Stat)>,
+    entries: Arc<Vec<(PathBuf, Stat)>>,
     paths: HashMap<PathBuf, u32>,
     children: HashMap<PathBuf, Orders>,
     child_sums: HashMap<PathBuf, Stat>,
@@ -314,7 +314,7 @@ impl Model {
                 a.files += s.files;
                 a
             });
-        self.entries.clear();
+        Arc::make_mut(&mut self.entries).clear();
         self.paths.clear();
         self.children.clear();
         self.child_sums.clear();
@@ -391,7 +391,10 @@ impl Model {
     }
     fn set_node(&mut self, index: u32, path: PathBuf, stat: Stat, pending: bool) {
         let old = if (index as usize) < self.entries.len() {
-            std::mem::replace(&mut self.entries[index as usize].1, stat)
+            std::mem::replace(
+                &mut Arc::make_mut(&mut self.entries)[index as usize].1,
+                stat,
+            )
         } else {
             assert_eq!(
                 index as usize,
@@ -399,7 +402,7 @@ impl Model {
                 "ordered display node IDs"
             );
             self.paths.insert(path.clone(), index);
-            self.entries.push((path.clone(), stat));
+            Arc::make_mut(&mut self.entries).push((path.clone(), stat));
             Stat::default()
         };
         if let Some(parent) = path.parent() {
@@ -471,9 +474,31 @@ impl Model {
         total.files = total.files.saturating_sub(children.files);
         total
     }
+    /// Constant-time capture: cloning and sorting all rows belongs to the export worker.
+    pub fn export_snapshot(&self) -> ExportSnapshot {
+        ExportSnapshot {
+            entries: Arc::clone(&self.entries),
+            root: self.root.clone(),
+            total: self.total_of(&self.root),
+        }
+    }
+    #[cfg(test)]
     pub fn rows(&self) -> Vec<(PathBuf, Stat)> {
-        let mut rows = self.entries.clone();
-        rows.push((self.root.clone(), self.total_of(&self.root)));
+        self.export_snapshot().rows()
+    }
+}
+
+/// Immutable ownership of completed rows. Later scans cannot change an export.
+pub struct ExportSnapshot {
+    entries: Arc<Vec<(PathBuf, Stat)>>,
+    root: PathBuf,
+    total: Stat,
+}
+impl ExportSnapshot {
+    /// Materialize and sort on the background thread, never on the UI thread.
+    pub fn rows(&self) -> Vec<(PathBuf, Stat)> {
+        let mut rows = self.entries.as_ref().clone();
+        rows.push((self.root.clone(), self.total));
         rows.sort_by(|a, b| a.0.cmp(&b.0));
         rows
     }

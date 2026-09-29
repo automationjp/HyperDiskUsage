@@ -14,8 +14,8 @@ hyperdu --help
 hyperdu mcp --help
 ```
 
-Rust 1.88+ is required. Once this release is published, use
-`cargo install hyperdu --version 0.5.0-beta.5` instead.
+Rust 1.88+ is required. The published release installs with
+`cargo install hyperdu --locked --version 0.5.0-beta.5`.
 
 The setup scripts install from the checkout when present, otherwise from GitHub:
 

@@ -4,116 +4,74 @@
 
 ![HyperDU GUI](../docs/images/gui.png)
 
-`hyperdu-gui` is a desktop GUI for inspecting disk usage through the shared scanner core. Enter a target path or choose a folder, then inspect the directory breakdown as results arrive.
+A Windows / Linux desktop interface for exploring disk usage. It reuses `hyperdu-core`, the same scanner as the CLI and MCP server. UI labels are Japanese; startup searches OS fonts for CJK, emoji, and other fallbacks.
 
-The labels, status messages, and settings in the GUI are Japanese. At startup it searches the operating system's font directories and registers CJK, emoji, UI, and monospace fallbacks, so paths containing Japanese characters can be displayed. Japanese rendering during native startup has been verified.
+## Install the published beta
 
-## Release status
-
-`0.5.0-beta.5` is being prepared for publication. Installing a specific version from the crate registry will be available after publication. For now, install the source checkout from the repository root.
-
-## Install and run
-
-Run these commands from the repository root.
+**0.5.0-beta.5 is published.** Use the GUI binaries in [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.5), or install from crates.io. Running a prebuilt binary does not require Rust.
 
 ```bash
-cargo install --locked --path hyperdu-gui
+cargo install hyperdu-gui --locked --version 0.5.0-beta.5
 hyperdu-gui
 ```
 
-To run from a development checkout:
+For a development checkout, run from the repository root:
 
 ```bash
+cargo install --locked --path hyperdu-gui
 cargo run --release -p hyperdu-gui
 ```
 
-On Linux, the X11 or Wayland development libraries used by `eframe` / `winit` are required. Windows requires a normal desktop session. macOS is not currently a GUI release target. See [setup](../docs/en/setup.md) for Rust versions, OS dependencies, and build steps.
+Use a recent stable Rust for source builds. Current GUI source declares Rust 1.85 and checks that floor on Linux / Windows. Published beta manifests remain immutable; install the published package with a recent stable toolchain. Linux needs X11 / Wayland development libraries; Windows needs its build environment and a desktop session. macOS is not a current GUI release target. [Setup](../docs/en/setup.md) · [Minimum-version caveat (Japanese)](../docs/developer-guide.md)
 
-## UI and scan flow
+## Operation and delivery modes
 
-1. Enter a path in **Target folder**, or choose a folder with **Select…**
-2. Choose a **Scan mode**
-3. Change the detailed settings if needed
-4. Press **Start scan**
-5. Inspect the directory tree on the left and the table on the right
+Enter a path in 「対象フォルダ」 or choose it with 「選択…」, select a mode and settings, then press 「スキャン開始」. Settings apply to the next scan and cannot change during an active scan. 「中止」 requests cooperative cancellation.
 
-Settings apply to the next scan. While a scan is running, the target and settings are disabled. The **Cancel** button requests cooperative cancellation.
+**Interactive (default)** first lists the root, reporting direct-file totals and pending child folders. It then scans one child folder at a time with all workers and delivers completed results. Unlike waiting for the entire scan, this lets you explore completed folders while remaining work runs. It is not a filesystem watcher.
 
-### Interactive and Batch
+**Batch** receives the aggregate map as one result. A successful MFT scan requested in Interactive mode also delivers a batch result, explicitly indicated by the UI.
 
-`Interactive` is the default. The core first lists the entries directly under the root and reports the aggregate of direct files together with pending child folders. It then scans one child folder at a time with all workers and updates the GUI as each child completes. Completed folders remain available while the rest of the scan continues.
+## Settings
 
-`Batch` receives one complete result map. It is intended to show the whole result after completion rather than display per-child results while the scan is running.
-
-When the Windows MFT path succeeds during an interactive scan, the GUI indicates that it is receiving one batch result instead of the usual per-child results.
-
-## Detailed settings
-
-| Setting | Behavior |
+| Control | Behavior |
 |---|---|
-| Name/path contains | Literal contains filter. Enter one pattern per line; surrounding whitespace and empty lines are ignored |
-| glob | Glob filter. Enter one pattern per line; surrounding whitespace and empty lines are ignored |
-| Regular expression | Regex filter. Enter one pattern per line; surrounding whitespace and empty lines are ignored. An invalid regex produces an error when the scan starts |
-| Minimum file size | Enter an integer with `B / KB / KiB / MB / MiB / GB / GiB`. KB/MB/GB use a 1000 multiplier; KiB/MiB/GiB use 1024. Spaces are ignored and case does not matter |
-| Maximum depth | `0` means unlimited. A positive value is relative to the original scan root |
-| Follow links | Follows symlinks and enables link-cycle detection |
-| Count hardlinks separately | Disabled by default, so hardlinks are deduplicated like GNU `du`; enabled, each hardlink is counted separately |
-| Same filesystem only | Keeps the scan within the filesystem boundary of the scan root |
+| Substring / glob / regex | One pattern per line; trims whitespace and empty lines. Invalid regex fails at scan start |
+| Minimum file size | Integer plus B / KB / KiB / MB / MiB / GB / GiB. Decimal units use 1000; binary units use 1024. Whitespace and case are normalized |
+| Depth limit | `0` means unlimited; positive values are relative to the original scan root |
+| Follow links | Follows symlinks with cycle detection |
+| Count hard links separately | Default deduplicates; enabling counts each link |
+| Same filesystem only | Does not cross the root filesystem boundary |
 
-### Size calculation
+### Size accounting is separate from I/O policy
 
-- **Physical + logical** (default): computes allocation/physical size and logical file size.
-- **Logical only**: skips physical-size computation and displays logical size as the substitute in the physical column.
-- **Approximate (faster)**: skips physical-size computation and estimates regular-file sizes to reduce metadata I/O. When the minimum size is 0, the current regular-file fast path uses 4 KiB (4096 bytes) as the estimate and treats directory entries as 0. It does not prioritize exact file-size results, and the GUI marks the result as approximate. The physical column is also a substitute.
+**Physical + logical (default)** computes allocation and logical file sizes. **Logical only** skips physical accounting and uses logical size as the physical-column substitute. **Approximate (fast)** prioritizes reduced metadata I/O rather than exact file sizes: regular files with minimum size zero currently use a 4096-byte estimate, and directory entries use zero. The UI labels approximate results. Do not interpret substituted physical values as allocated bytes.
 
-In logical-only and approximate modes, do not interpret the physical column as actual allocation size.
-
-### Speed and I/O
-
-| Setting | Behavior |
+| I/O control | Behavior |
 |---|---|
-| Thread count | `0` uses the core's default thread count. A positive value requests that many workers. Gentle limits the effective count to at most two |
-| I/O Standard | **Balanced**: preserves correct results without deliberately warming the page cache |
-| I/O Throughput | **Throughput**: uses as much I/O as the hardware can provide |
-| I/O Gentle | **Gentle**: stays out of the way of other work by disabling readahead and reducing workers and large-directory splitting |
-| Prefetch Auto | Lets the I/O profile decide |
-| Prefetch Enabled / Disabled | Explicitly turns readahead on or off. Readahead can reduce latency but increases total bytes read, so it is off unless requested |
-| Large-directory yield interval | Splits a large directory and yields every `N` entries. `0` disables it; the GUI accepts `0..=1,000,000` |
+| Thread count | `0` uses the core default. Positive values request workers; Gentle caps the effective count at two |
+| Balanced | Default; preserves correct accounting without deliberately warming the cache |
+| Throughput | Uses available I/O more aggressively |
+| Gentle | No readahead; limits workers and large-directory splitting |
+| Readahead auto / on / off | Delegate to the profile or select explicitly; readahead can increase total bytes read |
+| Large-directory yield interval | Split/yield every N entries; `0` disables it; range `0..=1,000,000` |
 
-### Windows MFT
+Windows MFT scanning is opt-in and requires NTFS, a volume root, administrator privileges, and supported options. Incomplete required reads or parsing fall back to enumeration. Success does not guarantee complete accounting parity with enumeration. [MFT boundaries](../docs/en/architecture.md)
 
-**Try direct NTFS MFT scan** is an opt-in Windows setting. It requires administrator privileges, NTFS, a volume root, and a whole-volume scan. If the MFT layout cannot be parsed safely and completely, the process is not elevated, the volume is not NTFS, or the target is not the whole volume, HyperDU falls back to ordinary directory enumeration instead of returning a partial result.
+## Display limits, errors, and export
 
-The MFT path reports the volume's own view rather than the view a user sees through the filesystem, so it is never enabled by default. When it succeeds, the interactive GUI displays one batch result.
+The left tree renders at most 500 entries per opened directory and 1500 rows overall. This does not discard scan results. The right table covers all children of the selected directory and renders visible rows; sort by physical size, logical size, file count, or name. Deep directories remain accessible through the table.
 
-## Result display
+Direct files are shown as a separate total, not a synthetic directory. Rows show physical / logical sizes. Progress includes processed files, remaining folders, and error counts; up to 20 error details are displayed.
 
-### Left tree
+Read errors, cancellation, and scan failures are not successful completion. Completed partial results remain viewable after cancellation, but synchronous I/O is not guaranteed to stop immediately. JSON / CSV export is enabled only after `Finished`, with zero errors and no active scan.
 
-Each expanded directory shows at most 500 children, and recursive rendering is capped at 1,500 rows for the whole view. Deeper directories remain accessible through the table. These are rendering limits; they do not remove scan results.
+In current source, an export worker handles the native dialog, row copy, sort, and write. The UI hands off a constant-time shared snapshot and stays available for browsing. Failed writes and cancellation observed before replacement preserve the previous destination. New scans and duplicate exports are blocked until completion. Cancellation does not instantly interrupt OS I/O, sorting, or an open dialog. This source change does not update already published binaries. [Architecture](../docs/en/architecture.md)
 
-### Right table
+## Other entry points
 
-The table shows **all** children of the selected directory. Sort by physical size, logical size, file count, or name. The 500-per-directory and 1,500-row tree limits do not apply to this table.
-
-Files directly under the root are shown as **direct file total**. The GUI does not create a virtual path that could be confused with a directory result.
-
-Each row displays `physical / logical`. In logical-only and approximate modes, the physical value is the substitute described above.
-
-## Status, errors, and cancellation
-
-- While scanning, pending child folders show a spinner, and the status displays files seen, remaining folders, and the error count.
-- Read errors increment the error count; details are retained and displayed for at most 20 messages.
-- If the core emits its completion event with errors, the GUI shows the result but marks it as partial and does not treat it as complete.
-- **Cancel** requests cooperative cancellation. Completed-folder partial results remain viewable, but a cancelled scan is not reported as complete.
-- A missing root, invalid pattern or size, or scan-thread failure is shown as an error state.
-
-The JSON and CSV save buttons are enabled only when the scan has emitted `Finished`, the error count is zero, and no scan is running. Partial, cancelled, and failed results cannot be exported.
-
-## Normal CLI / MCP
-
-The GUI is a visual and interactive front-end. For scripts, CI, structured output, or AI agents, use the normal `hyperdu` CLI and `hyperdu mcp`. See the [hyperdu CLI / MCP README](../hyperdu/README.en.md) for installation and MCP registration.
+For scripts, CI, and AI integration, use [hyperdu CLI / MCP](../hyperdu/README.en.md). For embedding in Rust, see the [developer guide (Japanese)](../docs/developer-guide.md).
 
 ## License
 
-MIT. Fonts bundled through the egui dependency chain carry their own OFL-1.1 and Ubuntu-font-1.0 licenses.
+MIT. Fonts bundled through egui dependencies retain their OFL-1.1 and Ubuntu-font-1.0 licenses.
