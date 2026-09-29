@@ -20,8 +20,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          components: rustfmt
       - name: Record source, compiler and dependency requirements
         run: |
           set -euo pipefail
@@ -29,7 +27,6 @@ jobs:
           git rev-parse HEAD > evidence/commit.txt
           git archive --format=tar HEAD > evidence/source.tar
           rustc -vV > evidence/rustc.txt
-          cp "$(rustup which rustfmt)" evidence/rustfmt
           cargo metadata --locked --format-version 1 > evidence/dependencies.json
           python3 - <<'PY'
           import json
@@ -50,12 +47,15 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
-  candidate-rust:
-    name: candidate-rust (${{ matrix.os }}, ${{ matrix.crate }}, ${{ matrix.rust }})
+  # These are the supported floors now declared by the package manifests,
+  # not a claim to have discovered the mathematical minimum of every feature.
+  declared-msrv:
+    name: declared-msrv (${{ matrix.os }}, ${{ matrix.crate }}, ${{ matrix.rust }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        crate: [hyperdu-core, hyperdu-gui, hyperdu]
         include:
           - crate: hyperdu-core
             rust: '1.82.0'
@@ -63,21 +63,20 @@ jobs:
             rust: '1.85.0'
           - crate: hyperdu
             rust: '1.88.0'
-        crate: [hyperdu-core, hyperdu-gui, hyperdu]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # candidate floor, not stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # declared compiler, not stable
         with:
           toolchain: ${{ matrix.rust }}
-      - name: Check every target at the candidate compiler without rewriting the lockfile
+      - name: Check default-feature targets at the declared compiler
         shell: bash
         env:
-          CANDIDATE_RUST: ${{ matrix.rust }}
+          DECLARED_RUST: ${{ matrix.rust }}
           CRATE: ${{ matrix.crate }}
         run: |
           set -euo pipefail
-          cargo +"$CANDIDATE_RUST" check --locked -p "$CRATE" --all-targets
+          cargo +"$DECLARED_RUST" check --locked -p "$CRATE" --all-targets
           git diff --exit-code -- Cargo.lock

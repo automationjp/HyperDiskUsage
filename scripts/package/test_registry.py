@@ -55,23 +55,24 @@ def payload(name):
 
 
 class FakeRegistry:
-    def __init__(self, existing=False, error=None, reject=False, wrong=False, yanked=False):
+    def __init__(self, existing=False, error=None, reject=False, wrong=False, yanked=False, response=None):
         self.calls = []
         self.existing = existing
         self.error = error
         self.reject = reject
         self.wrong = wrong
         self.yanked = yanked
+        self.response = response if response is not None else {
+            "warnings": {"invalid_categories": [], "invalid_badges": [], "other": []}
+        }
 
     def open(self, req, timeout):
         self.calls.append(req)
         if self.error:
             raise HTTPError(req.full_url, self.error, "test failure", {}, None)
         if req.method == "PUT":
-            # A successful publish has no "ok" field, only optional warnings.
             return contextlib.closing(io.BytesIO(json.dumps(
-                {"errors": [{"detail": "rejected"}]} if self.reject else
-                {"warnings": {"invalid_categories": [], "invalid_badges": [], "other": []}}
+                {"errors": [{"detail": "rejected"}]} if self.reject else self.response
             ).encode()))
         if "index.crates.io" in req.full_url:
             name = req.full_url.rsplit("/", 1)[-1]
@@ -161,6 +162,20 @@ class RegistryTests(unittest.TestCase):
         for req in registry.calls:
             if req.method == "GET":
                 self.assertIsNone(req.get_header("Authorization"))
+
+    def test_documented_success_objects_do_not_require_ok(self):
+        for response in ({}, {"warnings": {"other": ["notice"]}}):
+            registry = FakeRegistry(response=response)
+            with self.subTest(response=response):
+                self.run_upload(registry)
+            self.assertEqual(sum(req.method == "PUT" for req in registry.calls), 3)
+
+    def test_non_object_and_explicit_negative_success_are_rejected(self):
+        for response in ([], ["error"], "error", {"ok": False}):
+            registry = FakeRegistry(response=response)
+            with self.subTest(response=response), self.assertRaises(ValueError):
+                self.run_upload(registry)
+            self.assertEqual(sum(req.method == "PUT" for req in registry.calls), 1)
 
     def test_identical_existing_versions_are_not_reuploaded(self):
         registry = FakeRegistry(existing=True)

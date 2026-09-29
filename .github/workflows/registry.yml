@@ -13,7 +13,7 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -24,7 +24,7 @@ jobs:
           test "$GITHUB_REF_NAME" = "v$version"
           cargo package --workspace --locked
           python3 scripts/package/prepare_registry.py --version "$version"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: registry-payloads
           path: registry-payloads/*.bin
@@ -40,7 +40,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: registry-payloads
           path: payloads
@@ -145,8 +145,18 @@ jobs:
                       print(f"{name} {version}: identical version already published")
                       continue
                   result = json.loads(request(opener, "https://crates.io/api/v1/crates/new", data, token))
-                  if not isinstance(result, dict) or result.get("errors"):
+                  # Cargo Registry Web API success is an object with optional
+                  # warnings, not a mandatory {"ok": true} acknowledgment.
+                  if not isinstance(result, dict) or result.get("errors") or result.get("ok") is False:
                       raise ValueError("registry rejected publication")
+                  warnings = result.get("warnings", {})
+                  if isinstance(warnings, dict):
+                      for category, messages in warnings.items():
+                          if isinstance(messages, list):
+                              for message in messages:
+                                  # JSON encoding keeps untrusted newlines and workflow
+                                  # commands inside a prefixed, single-line diagnostic.
+                                  print("registry warning: " + json.dumps([category, message]))
                   indexed(opener, name, version, checksum)
                   print(f"{name} {version}: published and indexed")
 
