@@ -240,11 +240,13 @@ mod tests {
     include!("mft_reader/aggregate_safety_tests.rs");
     use std::collections::BTreeMap;
 
-    use super::super::{
-        mft::DataSizes,
-        mft_reader::{self, SizeSource},
+    use super::{
+        super::{
+            mft::DataSizes,
+            mft_reader::{self, SizeSource},
+        },
+        *,
     };
-    use super::*;
 
     fn entry(id: u64, parent: u64, name: &str, directory: bool) -> Entry {
         Entry {
