@@ -1,0 +1,519 @@
+{
+  "commit": "d4ebdb85577c53e881af292b549bc784f05bec60",
+  "date": "2026-09-30",
+  "cache": "warm",
+  "runs": 12,
+  "platform": "Windows-11-10.0.26200-SP0",
+  "logical_cpus": 24,
+  "note": "Unrelated background jobs (a densel GC and Python workers) held the 24 logical CPUs at roughly 60-90 percent busy during the run; tools alternate so all see the same load, but absolute times are inflated.",
+  "complete": true,
+  "tools": {
+    "hyperdu": {
+      "version": "hyperdu 0.5.0-beta.5",
+      "sha256": "dd8df33382c8b08261480f486898093b3d5bab980358c19f286b2e09fdbe9734"
+    },
+    "dua": {
+      "version": "dua 2.45.0",
+      "sha256": "08265cf3f5e46a5034a9d8598c7ff3a373d804b8ad2404cc2c30bad1022d31cc"
+    },
+    "tokei": {
+      "version": "tokei 15.0.0 compiled with serialization support: json",
+      "sha256": "268c8bda1ca0869a6803dd5ecc16a25963affc0dda86b8e42526d7bee92334d5"
+    }
+  },
+  "datasets": [
+    {
+      "name": "wide",
+      "root": "synthetic: wide",
+      "commands": {
+        "hyperdu": [
+          "hyperdu.exe",
+          "ROOT",
+          "--top",
+          "1",
+          "--exclude",
+          "",
+          "--one-file-system"
+        ],
+        "dua": [
+          "dua.exe",
+          "aggregate",
+          "-A",
+          "-x",
+          "-f",
+          "bytes",
+          "ROOT"
+        ],
+        "tokei": [
+          "tokei.exe",
+          "ROOT",
+          "--output",
+          "json"
+        ]
+      },
+      "oracle": {
+        "files": 99856,
+        "logical": 409010176,
+        "physical": null,
+        "entries": 99856,
+        "directories": 317,
+        "directory_and_link_physical": null
+      },
+      "gate": {
+        "hyperdu": {
+          "files": 99856,
+          "logical": 409010176
+        },
+        "dua": {
+          "logical": 409010176,
+          "output_lines": 317
+        },
+        "tokei": {
+          "files": 0,
+          "code_lines": 0
+        }
+      },
+      "samples_ms": {
+        "hyperdu": [
+          71.405,
+          127.005,
+          75.159,
+          65.449,
+          67.454,
+          46.942,
+          55.276,
+          59.653,
+          77.3,
+          67.695,
+          72.925,
+          51.892
+        ],
+        "dua": [
+          187.71,
+          227.497,
+          249.177,
+          210.491,
+          184.438,
+          181.374,
+          187.034,
+          179.775,
+          214.983,
+          182.173,
+          168.463,
+          201.704
+        ]
+      },
+      "median_ms": {
+        "hyperdu": 67.575,
+        "dua": 187.372
+      },
+      "min_ms": {
+        "hyperdu": 46.942,
+        "dua": 168.463
+      },
+      "ratio_dua": 2.773,
+      "ratio_tokei_reference": null
+    },
+    {
+      "name": "deep",
+      "root": "synthetic: deep",
+      "commands": {
+        "hyperdu": [
+          "hyperdu.exe",
+          "ROOT",
+          "--top",
+          "1",
+          "--exclude",
+          "",
+          "--one-file-system"
+        ],
+        "dua": [
+          "dua.exe",
+          "aggregate",
+          "-A",
+          "-x",
+          "-f",
+          "bytes",
+          "ROOT"
+        ],
+        "tokei": [
+          "tokei.exe",
+          "ROOT",
+          "--output",
+          "json"
+        ]
+      },
+      "oracle": {
+        "files": 100000,
+        "logical": 409600000,
+        "physical": null,
+        "entries": 100000,
+        "directories": 401,
+        "directory_and_link_physical": null
+      },
+      "gate": {
+        "hyperdu": {
+          "files": 100000,
+          "logical": 409600000
+        },
+        "dua": {
+          "logical": 409600000,
+          "output_lines": 1
+        },
+        "tokei": {
+          "files": 0,
+          "code_lines": 0
+        }
+      },
+      "samples_ms": {
+        "hyperdu": [
+          185.587,
+          159.224,
+          169.822,
+          186.289,
+          170.732,
+          192.318,
+          160.809,
+          170.296,
+          238.031,
+          187.28,
+          173.765,
+          263.622
+        ],
+        "dua": [
+          214.038,
+          196.789,
+          221.782,
+          311.639,
+          177.011,
+          171.392,
+          178.527,
+          204.148,
+          169.828,
+          183.977,
+          192.456,
+          203.101
+        ]
+      },
+      "median_ms": {
+        "hyperdu": 179.676,
+        "dua": 194.623
+      },
+      "min_ms": {
+        "hyperdu": 159.224,
+        "dua": 169.828
+      },
+      "ratio_dua": 1.083,
+      "ratio_tokei_reference": null
+    },
+    {
+      "name": "flat",
+      "root": "synthetic: flat",
+      "commands": {
+        "hyperdu": [
+          "hyperdu.exe",
+          "ROOT",
+          "--top",
+          "1",
+          "--exclude",
+          "",
+          "--one-file-system"
+        ],
+        "dua": [
+          "dua.exe",
+          "aggregate",
+          "-A",
+          "-x",
+          "-f",
+          "bytes",
+          "ROOT"
+        ],
+        "tokei": [
+          "tokei.exe",
+          "ROOT",
+          "--output",
+          "json"
+        ]
+      },
+      "oracle": {
+        "files": 100000,
+        "logical": 409600000,
+        "physical": null,
+        "entries": 100000,
+        "directories": 1,
+        "directory_and_link_physical": null
+      },
+      "gate": {
+        "hyperdu": {
+          "files": 100000,
+          "logical": 409600000
+        },
+        "dua": {
+          "logical": 409600000,
+          "output_lines": 100001
+        },
+        "tokei": {
+          "files": 0,
+          "code_lines": 0
+        }
+      },
+      "samples_ms": {
+        "hyperdu": [
+          1096.324,
+          195.622,
+          333.121,
+          77.784,
+          68.187,
+          84.387,
+          88.374,
+          124.169,
+          94.102,
+          105.41,
+          103.499,
+          86.542
+        ],
+        "dua": [
+          2078.963,
+          1324.939,
+          1674.956,
+          674.101,
+          619.626,
+          864.009,
+          1071.377,
+          1122.809,
+          1568.273,
+          762.926,
+          645.192,
+          923.64
+        ]
+      },
+      "median_ms": {
+        "hyperdu": 98.8,
+        "dua": 997.508
+      },
+      "min_ms": {
+        "hyperdu": 68.187,
+        "dua": 619.626
+      },
+      "ratio_dua": 10.096,
+      "ratio_tokei_reference": null
+    },
+    {
+      "name": "cargo-registry",
+      "root": "%USERPROFILE%\\.cargo\\registry",
+      "commands": {
+        "hyperdu": [
+          "hyperdu.exe",
+          "ROOT",
+          "--top",
+          "1",
+          "--exclude",
+          "",
+          "--one-file-system"
+        ],
+        "dua": [
+          "dua.exe",
+          "aggregate",
+          "-A",
+          "-x",
+          "-f",
+          "bytes",
+          "ROOT"
+        ],
+        "tokei": [
+          "tokei.exe",
+          "ROOT",
+          "--output",
+          "json"
+        ]
+      },
+      "oracle": {
+        "files": 107953,
+        "logical": 3240433690,
+        "physical": null,
+        "entries": 107953,
+        "directories": 20342,
+        "directory_and_link_physical": null
+      },
+      "gate": {
+        "hyperdu": {
+          "files": 107953,
+          "logical": 3240433690
+        },
+        "dua": {
+          "logical": 3240433690,
+          "output_lines": 5
+        },
+        "tokei": {
+          "files": 80897,
+          "code_lines": 42553098
+        }
+      },
+      "samples_ms": {
+        "hyperdu": [
+          369.283,
+          934.945,
+          639.819,
+          628.699,
+          768.395,
+          392.931,
+          460.934,
+          395.846,
+          496.156,
+          432.882,
+          565.889,
+          449.365
+        ],
+        "dua": [
+          461.643,
+          769.722,
+          615.246,
+          800.581,
+          573.155,
+          532.165,
+          525.803,
+          499.877,
+          536.073,
+          489.16,
+          831.067,
+          831.773
+        ],
+        "tokei": [
+          6988.896,
+          10579.095,
+          10100.745,
+          9845.563,
+          10229.598,
+          9130.402,
+          8085.757,
+          7703.937,
+          9683.974,
+          13565.203,
+          8774.024,
+          8109.911
+        ]
+      },
+      "median_ms": {
+        "hyperdu": 478.545,
+        "dua": 554.614,
+        "tokei": 9407.188
+      },
+      "min_ms": {
+        "hyperdu": 369.283,
+        "dua": 461.643,
+        "tokei": 6988.896
+      },
+      "ratio_dua": 1.159,
+      "ratio_tokei_reference": 19.658
+    },
+    {
+      "name": "node-modules",
+      "root": "node_modules of a local JavaScript project",
+      "commands": {
+        "hyperdu": [
+          "hyperdu.exe",
+          "ROOT",
+          "--top",
+          "1",
+          "--exclude",
+          "",
+          "--one-file-system"
+        ],
+        "dua": [
+          "dua.exe",
+          "aggregate",
+          "-A",
+          "-x",
+          "-f",
+          "bytes",
+          "ROOT"
+        ],
+        "tokei": [
+          "tokei.exe",
+          "ROOT",
+          "--output",
+          "json"
+        ]
+      },
+      "oracle": {
+        "files": 27940,
+        "logical": 227733925,
+        "physical": null,
+        "entries": 27940,
+        "directories": 4641,
+        "directory_and_link_physical": null
+      },
+      "gate": {
+        "hyperdu": {
+          "files": 27940,
+          "logical": 227733925
+        },
+        "dua": {
+          "logical": 227733925,
+          "output_lines": 440
+        },
+        "tokei": {
+          "files": 16576,
+          "code_lines": 1809165
+        }
+      },
+      "samples_ms": {
+        "hyperdu": [
+          81.591,
+          63.131,
+          66.464,
+          70.286,
+          69.484,
+          176.446,
+          130.363,
+          72.586,
+          72.806,
+          68.481,
+          118.461,
+          71.93
+        ],
+        "dua": [
+          152.05,
+          156.795,
+          147.544,
+          149.199,
+          156.407,
+          207.634,
+          193.269,
+          146.679,
+          156.325,
+          197.824,
+          177.83,
+          159.463
+        ],
+        "tokei": [
+          757.927,
+          750.277,
+          716.856,
+          728.735,
+          783.898,
+          952.428,
+          785.427,
+          777.593,
+          780.719,
+          942.022,
+          1031.282,
+          944.396
+        ]
+      },
+      "median_ms": {
+        "hyperdu": 72.258,
+        "dua": 156.601,
+        "tokei": 782.309
+      },
+      "min_ms": {
+        "hyperdu": 63.131,
+        "dua": 146.679,
+        "tokei": 716.856
+      },
+      "ratio_dua": 2.167,
+      "ratio_tokei_reference": 10.827
+    }
+  ],
+  "dataset_note": "Synthetic fixtures: 4096-byte regular files without an extension, created by scripts/bench/remeasure.make_trees and reused from an earlier run in this session. Real trees are local, unmodified directories."
+}

@@ -111,6 +111,24 @@ Windows 11 / NTFS / NVMe、Ryzen 9 3900X（12 cores / 24 threads、128 GiB RAM�
 
 この診断倍率を100万ファイルや一般的なWindows性能へ外挿しません。Linuxとは集計方法・環境・試行回数も異なります。
 
+### Windows：dua-cli・tokei との比較
+
+Windows 11 / NTFS / NVMe、Ryzen 9 3900X、warm cache・論理バイト。HyperDU（開発版 d4ebdb8）と dua-cli 2.45.0 の合計値は、独立走査と全データセットで一致しました。各ツール12回の中央値です。
+
+| データセット | ファイル数 | HyperDU | dua-cli | dua / HyperDU |
+|---|---:|---:|---:|---:|
+| 横に広いフォルダ（合成） | 99,856 | 67.57 ms | 187.37 ms | 2.77倍 |
+| 深い階層のフォルダ（合成） | 100,000 | 179.68 ms | 194.62 ms | 1.08倍 |
+| 平坦なフォルダ（合成） | 100,000 | 98.80 ms | 997.51 ms | 10.10倍 |
+| Cargo registry（実データ） | 107,953 | 478.55 ms | 554.61 ms | 1.16倍 |
+| node_modules（実データ） | 27,940 | 72.26 ms | 156.60 ms | 2.17倍 |
+
+HyperDUは5件すべてで速い一方、差は木の形に左右されます（平坦を除き1.08〜2.77倍）。深い階層は並列化できる幅がなくほぼ同等です。平坦の10.10倍は、dua-cliが直下100,001行を出力する時間を含むため代表値ではありません。
+
+tokeiは中身を読んで行数を数える別の処理なので、**速度比は示しません**。参考として、Cargo registry（107,953ファイル）はHyperDU 478.55 ms・tokei 9,407.19 ms、node_modules（27,940ファイル）は72.26 ms・782.31 msでした。測定中は別ジョブがCPUの60〜90%を使っており、絶対値は膨らんでいます。
+
+[測定方法と限界](docs/benchmarks.md) · [記録JSON](docs/benchmarks/2026-09-30-windows-vs-dua-tokei.json)
+
 [実行記録](https://github.com/automationjp/HyperDiskUsage/actions/runs/34550503086) · [生データ](https://hyperdu.automation.jp/benchmarks.json) · [測定方法と限界](docs/benchmarks.md) · [性能設計](docs/performance.md)
 
 ## 配布とプラットフォーム
