@@ -111,7 +111,7 @@ Windows 11 / NTFS / NVMe，Ryzen 9 3900X（12核心 / 24线程、128 GiB RAM）�
 
 ### Windows：与 dua-cli 和 tokei 的比较
 
-Windows 11 / NTFS / NVMe，Ryzen 9 3900X，热缓存，逻辑字节。HyperDU（开发版 d4ebdb8）与 dua-cli 2.45.0 的总数在全部数据集上都与独立遍历一致。每个工具12次运行的中位数。
+Windows 11 / NTFS / NVMe，Ryzen 9 3900X，热缓存，逻辑字节。HyperDU（开发版 d4ebdb8）与 dua-cli 的总数在全部数据集上都与独立遍历一致。每个工具12次运行的中位数。
 
 | 数据集 | 文件数 | HyperDU | dua-cli | dua / HyperDU |
 |---|---:|---:|---:|---:|

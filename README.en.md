@@ -113,7 +113,7 @@ Do not extrapolate these diagnostic ratios to 1M files or Windows generally. Acc
 
 ### Windows: comparison with dua-cli and tokei
 
-Windows 11 / NTFS / NVMe, Ryzen 9 3900X, warm cache, logical bytes. HyperDU (development build d4ebdb8) and dua-cli 2.45.0 produced totals equal to an independent walk on every dataset. Medians of 12 runs per tool.
+Windows 11 / NTFS / NVMe, Ryzen 9 3900X, warm cache, logical bytes. HyperDU (development build d4ebdb8) and dua-cli produced totals equal to an independent walk on every dataset. Medians of 12 runs per tool.
 
 | Dataset | Files | HyperDU | dua-cli | dua / HyperDU |
 |---|---:|---:|---:|---:|
