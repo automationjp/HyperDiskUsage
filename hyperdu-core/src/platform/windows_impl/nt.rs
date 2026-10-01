@@ -52,6 +52,17 @@ const STATUS_NO_MORE_FILES: i32 = 0x8000_0006_u32 as i32;
 const STATUS_NO_SUCH_FILE: i32 = 0xC000_000F_u32 as i32;
 /// Size of the fixed part of `FILE_ID_FULL_DIR_INFORMATION` (up to `FileName`).
 const RECORD_HEADER_BYTES: usize = 80;
+/// A response no larger than this is taken to be the last one on local NTFS.
+///
+/// A response that fills the buffer is followed by another query, and so is one
+/// the kernel cut short. Cut-short responses were seen at about 64 KiB with a
+/// 128 KiB buffer, in 23 of 20,248 directories under `.cargo/registry`; judging
+/// the room against the buffer instead lost their subtrees. What decides the cut
+/// is not understood (fresh directories fill the whole buffer), so the limit
+/// sits at half the observed size rather than at it.
+const TAIL_SKIP_LIMIT_BYTES: usize = 32 * 1024;
+/// Largest `FILE_ID_FULL_DIR_INFORMATION`: header plus a 255-unit name, 8-aligned.
+const MAX_RECORD_BYTES: usize = 592;
 
 /// Enumeration buffer size in u64 words, read from the environment once.
 fn buffer_words() -> usize {
@@ -196,6 +207,15 @@ fn enumerate(
                 stat_cur,
             )
         };
+        // On local NTFS a response with room to spare is the last, so the call
+        // that would only return STATUS_NO_MORE_FILES is skipped. `st.volume`
+        // drops to zero once a reparse directory has been seen.
+        if opt.windows_ntfs_local
+            && st.volume != 0
+            && filled + MAX_RECORD_BYTES <= (buf.len() * 8).min(TAIL_SKIP_LIMIT_BYTES)
+        {
+            return Outcome::Done;
+        }
     }
 }
 
