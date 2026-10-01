@@ -323,6 +323,11 @@ pub struct Options {
     #[cfg(windows)]
     #[doc(hidden)]
     pub windows_root_volume: Option<Arc<AtomicU64>>,
+    /// The scan root sits on a local NTFS volume, so a directory query that
+    /// came back with room to spare is known to be the last one.
+    #[cfg(windows)]
+    #[doc(hidden)]
+    pub windows_ntfs_local: bool,
     /// How much I/O the scan may cause. See [`IoProfile`].
     pub io_profile: IoProfile,
     /// Ask the kernel to read ahead of the scan. `None` lets the profile decide.
@@ -418,6 +423,8 @@ impl Default for Options {
             root_fs_id: 0,
             #[cfg(windows)]
             windows_root_volume: None,
+            #[cfg(windows)]
+            windows_ntfs_local: false,
             compat_mode: CompatMode::HyperDU,
             count_hardlinks: false,
             inode_cache: None,
@@ -1105,6 +1112,11 @@ fn prepare_options(root: &Path, opt: &Options, threads: usize) -> Arc<Options> {
         } else {
             None
         };
+    }
+    #[cfg(windows)]
+    {
+        compiled.windows_ntfs_local =
+            compiled.windows_root_volume.is_some() && platform::root_is_ntfs(root);
     }
     #[cfg(not(windows))]
     if compiled.one_file_system {

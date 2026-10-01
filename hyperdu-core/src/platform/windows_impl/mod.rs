@@ -53,6 +53,27 @@ pub(crate) fn local_root_volume_for_reuse(root: &std::path::Path) -> Option<u64>
     reusable_volume(drive_type, volume_id(&resolved))
 }
 
+/// Whether the volume holding `root` is NTFS. Any failure answers no.
+pub(crate) fn root_is_ntfs(root: &std::path::Path) -> bool {
+    use windows::{core::PCWSTR, Win32::Storage::FileSystem::GetVolumeInformationW};
+    let Some(drive) = root.canonicalize().ok().as_deref().and_then(disk_root) else {
+        return false;
+    };
+    let mut name = [0u16; 32];
+    let ok = unsafe {
+        GetVolumeInformationW(
+            PCWSTR(drive.as_ptr()),
+            None,
+            None,
+            None,
+            None,
+            Some(&mut name),
+        )
+    };
+    let len = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+    ok.is_ok() && String::from_utf16_lossy(&name[..len]) == "NTFS"
+}
+
 fn disk_root(path: &std::path::Path) -> Option<[u16; 4]> {
     use std::path::{Component, Prefix};
     match path.components().next()? {

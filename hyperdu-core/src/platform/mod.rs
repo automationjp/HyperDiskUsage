@@ -45,7 +45,7 @@ pub fn filesystem_id(path: &std::path::Path) -> u64 {
 }
 
 #[cfg(windows)]
-pub(crate) use windows_impl::local_root_volume_for_reuse;
+pub(crate) use windows_impl::{local_root_volume_for_reuse, root_is_ntfs};
 
 #[cfg(windows)]
 pub fn process_dir_wrapped(ctx: &ScanContext, dir_ctx: &DirContext, map: &mut StatMap) {
