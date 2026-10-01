@@ -8,10 +8,10 @@
 
 ## 導入
 
-このREADMEは `0.5.0-beta.6` のものです（[Webサイト](https://hyperdu.automation.jp/)）。[GitHub Release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.6)のGUIバイナリ、またはcrates.ioから導入できます。バイナリの実行にRustは不要です。
+このREADMEは `0.5.0-beta.7` のものです（[Webサイト](https://hyperdu.automation.jp/)）。[GitHub Release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.7)のGUIバイナリ、またはcrates.ioから導入できます。バイナリの実行にRustは不要です。
 
 ```bash
-cargo install hyperdu-gui --locked --version 0.5.0-beta.6
+cargo install hyperdu-gui --locked --version 0.5.0-beta.7
 hyperdu-gui
 ```
 

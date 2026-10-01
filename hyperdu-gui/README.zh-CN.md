@@ -8,10 +8,10 @@
 
 ## 安装
 
-本 README 对应 `0.5.0-beta.6`（[网站](https://hyperdu.automation.jp/)）。可使用 [GitHub Release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.6) 的 GUI 二进制文件，或从 crates.io 安装。运行预构建二进制文件不需要 Rust。
+本 README 对应 `0.5.0-beta.7`（[网站](https://hyperdu.automation.jp/)）。可使用 [GitHub Release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.7) 的 GUI 二进制文件，或从 crates.io 安装。运行预构建二进制文件不需要 Rust。
 
 ```bash
-cargo install hyperdu-gui --locked --version 0.5.0-beta.6
+cargo install hyperdu-gui --locked --version 0.5.0-beta.7
 hyperdu-gui
 ```
 

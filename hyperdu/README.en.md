@@ -6,10 +6,10 @@ A disk-usage analyzer combining native metadata reads and parallel traversal. **
 
 ## Install
 
-This README ships with `0.5.0-beta.6`. [Website](https://hyperdu.automation.jp/) · [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases)
+This README ships with `0.5.0-beta.7`. [Website](https://hyperdu.automation.jp/) · [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases)
 
 ```bash
-cargo install hyperdu --locked --version 0.5.0-beta.6
+cargo install hyperdu --locked --version 0.5.0-beta.7
 ```
 
 Both the crate and command are `hyperdu`, not the retired `hyperdu-cli`. MCP starts only when you run `hyperdu mcp`. Source builds require Rust 1.88 or later and platform build tools; prebuilt binaries do not require Rust to run. [Platform setup](../docs/en/setup.md)
