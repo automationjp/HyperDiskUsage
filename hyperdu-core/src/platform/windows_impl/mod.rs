@@ -114,6 +114,10 @@ pub fn scan_volume_via_mft(root: &std::path::Path, opt: &crate::Options) -> Opti
     let diag_runs = reader.run_count();
     let diag_clusters = reader.mft_clusters();
     let mut last_progress = 0;
+    if let Some(c) = &opt.progress_counters {
+        c.mft_records_total
+            .store(reader.record_count(), std::sync::atomic::Ordering::Relaxed);
+    }
     let entries = reader
         .entries_with_control(|progress| report_mft_progress(opt, &mut last_progress, progress))?;
     if !reader.is_complete() {
@@ -235,6 +239,9 @@ fn report_mft_progress(
     use std::sync::atomic::Ordering;
     if opt.cancel.load(Ordering::Relaxed) {
         return false;
+    }
+    if let Some(c) = &opt.progress_counters {
+        c.mft_records.store(progress.records, Ordering::Relaxed);
     }
     if let (Some(bucket), Some(previous)) = (
         progress.files.checked_div(opt.progress_every),
