@@ -6,12 +6,12 @@
 
 A Windows / Linux desktop interface for exploring disk usage. It reuses `hyperdu-core`, the same scanner as the CLI and MCP server. The UI is available in Japanese, English and Simplified Chinese and starts in the OS display language (English for any other). Switch at any time with the selector at the top right, or choose the startup language with `HYPERDU_LANG` (`ja` / `en` / `zh`). Startup searches OS fonts for CJK, emoji, and other fallbacks; the Chinese UI on Linux needs a font with Simplified Chinese, such as `fonts-noto-cjk`.
 
-## Install the published beta
+## Install
 
-**0.5.0-beta.5 is published.** Use the GUI binaries in [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.5), or install from crates.io. Running a prebuilt binary does not require Rust.
+This README ships with `0.5.0-beta.6` ([website](https://hyperdu.automation.jp/)). Use the GUI binaries in [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.6), or install from crates.io. Running a prebuilt binary does not require Rust.
 
 ```bash
-cargo install hyperdu-gui --locked --version 0.5.0-beta.5
+cargo install hyperdu-gui --locked --version 0.5.0-beta.6
 hyperdu-gui
 ```
 

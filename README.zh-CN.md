@@ -13,10 +13,10 @@
 
 ## 使用已发布的 Beta 版
 
-**v0.5.0-beta.5 已经发布**，可从 [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.5) 和 crates.io 获取。它不是尚未发布的预览，也不是稳定版：CLI 参数、MCP schema 和输出格式仍可能变化。
+**v0.5.0-beta.6 已经发布**，可从 [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.6) 和 crates.io 获取。它不是尚未发布的预览，也不是稳定版：CLI 参数、MCP schema 和输出格式仍可能变化。
 
 ```bash
-cargo install hyperdu --locked --version 0.5.0-beta.5
+cargo install hyperdu --locked --version 0.5.0-beta.6
 hyperdu . --top 20
 ```
 
@@ -94,7 +94,7 @@ Summary:
 ## GUI
 
 ```bash
-cargo install hyperdu-gui --locked --version 0.5.0-beta.5
+cargo install hyperdu-gui --locked --version 0.5.0-beta.6
 hyperdu-gui
 ```
 
@@ -169,7 +169,7 @@ tokei 读取内容并统计行数，是不同的工作，因此**不给出速度
 
 ## 分发与平台状态
 
-[已发布版本](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.5)提供 Windows x86_64、Linux x86_64（glibc / musl）和 aarch64 的 CLI / GUI 二进制文件。可用格式以 Assets 为准。仓库中存在打包 manifest 并不等于已经在应用商店注册。
+[已发布版本](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.6)提供 Windows x86_64、Linux x86_64（glibc / musl）和 aarch64 的 CLI / GUI 二进制文件。可用格式以 Assets 为准。仓库中存在打包 manifest 并不等于已经在应用商店注册。
 
 ```powershell
 scoop bucket add hyperdu https://github.com/automationjp/HyperDiskUsage

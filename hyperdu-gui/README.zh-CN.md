@@ -6,12 +6,12 @@
 
 用于探索磁盘使用量的 Windows / Linux 桌面界面。它复用 CLI / MCP 使用的 `hyperdu-core`，不另写扫描引擎。界面支持日语、英语和简体中文，启动时使用操作系统的显示语言（其他语言显示为英语）。可随时通过右上角的选择框切换，也可用环境变量 `HYPERDU_LANG`（`ja` / `en` / `zh`）指定启动语言。启动时从系统字体中寻找 CJK、emoji 等回退字体；在 Linux 上使用中文界面需要包含简体中文的字体（如 `fonts-noto-cjk`）。
 
-## 安装已发布的 Beta 版
+## 安装
 
-**0.5.0-beta.5 已发布。** 可使用 [GitHub Release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.5) 的 GUI 二进制文件，或从 crates.io 安装。运行预构建二进制文件不需要 Rust。
+本 README 对应 `0.5.0-beta.6`（[网站](https://hyperdu.automation.jp/)）。可使用 [GitHub Release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.6) 的 GUI 二进制文件，或从 crates.io 安装。运行预构建二进制文件不需要 Rust。
 
 ```bash
-cargo install hyperdu-gui --locked --version 0.5.0-beta.5
+cargo install hyperdu-gui --locked --version 0.5.0-beta.6
 hyperdu-gui
 ```
 

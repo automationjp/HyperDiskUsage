@@ -4,12 +4,12 @@
 
 结合原生元数据读取和并行遍历的磁盘使用量分析器。**一个命令同时提供 CLI 和只读 MCP 服务**，与 GUI 和 Rust 应用共用 `hyperdu-core`。
 
-## 安装已发布的 Beta 版
+## 安装
 
-`0.5.0-beta.5` 已在 crates.io 和 GitHub Releases 发布。
+本 README 对应 `0.5.0-beta.6`。[网站](https://hyperdu.automation.jp/) · [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases)
 
 ```bash
-cargo install hyperdu --locked --version 0.5.0-beta.5
+cargo install hyperdu --locked --version 0.5.0-beta.6
 ```
 
 crate 和命令名称都是 `hyperdu`，不是已废弃的 `hyperdu-cli`。仅执行 `hyperdu mcp` 时才启动 MCP。源码构建需要 Rust 1.88 或更高版本及对应平台构建工具；运行预构建二进制文件不需要 Rust。[环境设置](../docs/zh-CN/setup.md)
@@ -28,6 +28,25 @@ hyperdu -- mcp
 ```
 
 依次为目录排行、JSON / CSV 导出、GNU 兼容输出、启动 MCP，以及扫描名称为 `mcp` 的目录。默认 `--top` 按物理大小排序。参数默认值、平台范围和进度 / 输出位置见 [CLI 参考（日语）](../docs/cli-reference.md)。时间参数需要默认启用的 `time-format` feature。
+
+
+### 运行中与结束后的显示
+
+扫描期间只有终端最下方两行每 20ms 刷新，显示完成比例、已处理文件数、速度、已用时间，以及正在扫描的文件。
+
+```text
+progress:  42% | 612880 files | 201865 f/s | 3.0s
+scan: photo_0412.jpg (2.31 MiB)
+```
+
+结束后这两行被清除，留下按物理大小排序的结果（路径为示例）：
+
+```text
+Top 3 under D:\data (physical desc):
+  1. D:\data | phys=204.39 GiB | log=201.76 GiB | files=1641117
+  2. D:\data\videos | phys=72.24 GiB | log=71.81 GiB | files=247520
+  3. D:\data\photos | phys=32.95 GiB | log=32.44 GiB | files=360626
+```
 
 ## 原理与边界
 

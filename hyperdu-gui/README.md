@@ -6,12 +6,12 @@
 
 ディスク使用量をツリーと一覧で調べる、Windows / Linux向けのデスクトップGUIです。独自の走査処理を持たず、CLI / MCPと共通の `hyperdu-core` を使います。画面は日本語・英語・簡体字中国語に対応し、OSの表示言語で始まります（それ以外の言語は英語）。右上の選択欄でいつでも切り替えられ、環境変数 `HYPERDU_LANG`（`ja` / `en` / `zh`）で起動時の言語も指定できます。起動時にOSのフォントからCJK・絵文字などのfallbackを探します。Linuxで中国語表示を使う場合は、簡体字を含むフォント（`fonts-noto-cjk` など）が必要です。
 
-## 公開済みベータ版の導入
+## 導入
 
-**0.5.0-beta.5 は公開済みです。** [GitHub Release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.5)のGUIバイナリ、またはcrates.ioから導入できます。バイナリの実行にRustは不要です。
+このREADMEは `0.5.0-beta.6` のものです（[Webサイト](https://hyperdu.automation.jp/)）。[GitHub Release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.6)のGUIバイナリ、またはcrates.ioから導入できます。バイナリの実行にRustは不要です。
 
 ```bash
-cargo install hyperdu-gui --locked --version 0.5.0-beta.5
+cargo install hyperdu-gui --locked --version 0.5.0-beta.6
 hyperdu-gui
 ```
 

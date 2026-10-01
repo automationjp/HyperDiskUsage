@@ -4,7 +4,7 @@
 
 Install **one command**, use it as a CLI or an MCP server. The published crate
 and executable are both named `hyperdu`; the MCP server is `hyperdu mcp`.
-The standalone `hyperdu-mcp` binary is replaced in 0.5.0-beta.5.
+The standalone `hyperdu-mcp` binary is replaced in 0.5.0-beta.6.
 
 ## Install from this checkout
 
@@ -15,7 +15,7 @@ hyperdu mcp --help
 ```
 
 Rust 1.88+ is required. The published release installs with
-`cargo install hyperdu --locked --version 0.5.0-beta.5`.
+`cargo install hyperdu --locked --version 0.5.0-beta.6`.
 
 The setup scripts install from the checkout when present, otherwise from GitHub:
 
