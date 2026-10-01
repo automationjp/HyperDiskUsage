@@ -1,0 +1,50 @@
+[package]
+name = "hyperdu-bench"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+publish = false
+
+# Deliberately separate from the release workspace and its registry artifacts.
+[workspace]
+
+[features]
+default = ["driver"]
+driver = ["dep:hyperdu-core", "dep:mimalloc"]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hyperdu-core = { path = "../../hyperdu-core", optional = true }
+mimalloc = { version = "0.1", default-features = false, features = ["secure"], optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_Performance", "Win32_System_ProcessStatus"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "hyperdu-bench"
+path = "src/main.rs"
+
+[[bin]]
+name = "hyperdu-bench-driver"
+path = "src/bin/driver.rs"
+required-features = ["driver"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+debug = 2
+strip = false
+incremental = false

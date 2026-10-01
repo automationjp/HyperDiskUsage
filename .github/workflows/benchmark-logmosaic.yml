@@ -1,0 +1,49 @@
+name: benchmark-logmosaic
+on:
+  pull_request:
+    paths:
+      - 'bench/hyperdu-bench/**'
+      - 'hyperdu-core/**'
+      - '.github/workflows/benchmark-logmosaic.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: benchmark-logmosaic-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - name: Check formatting
+        run: cargo fmt --manifest-path bench/hyperdu-bench/Cargo.toml --check
+      - name: Native benchmark and driver tests
+        run: cargo test --locked --manifest-path bench/hyperdu-bench/Cargo.toml --all-targets
+      - name: Strict diagnostic compile review
+        run: cargo clippy --locked --manifest-path bench/hyperdu-bench/Cargo.toml --all-targets -- -D warnings
+      - name: Record exact source and compiler without mutating the branch
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p evidence
+          cp bench/hyperdu-bench/Cargo.lock evidence/Cargo.lock
+          rustc -vV > evidence/rustc.txt
+          git rev-parse HEAD > evidence/commit.txt
+          git diff --exit-code -- bench/hyperdu-bench/Cargo.lock
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: benchmark-native-${{ matrix.os }}
+          path: evidence/
+          retention-days: 7
+# Real LogMosaic integration runs in automationjp/logmosaic PR #131.
+# Its source is private: do not pass cross-repository credentials into this public CI.
