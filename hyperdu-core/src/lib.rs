@@ -641,6 +641,7 @@ pub struct DirContext<'a> {
     pub dir: &'a Path,
     pub depth: u32,
     pub resume: Option<u64>,
+    pub batch: Option<&'a scheduler::StatBatch>,
 }
 
 impl<'a> ScanContext<'a> {
@@ -665,6 +666,7 @@ impl<'a> ScanContext<'a> {
                 depth,
                 resume: None,
                 unit: self.child_unit(depth),
+                stat_batch: None,
             },
         );
     }
@@ -689,7 +691,23 @@ impl<'a> ScanContext<'a> {
             depth,
             resume: Some(resume),
             unit: self.unit.map(ProgressUnit::join),
+            stat_batch: None,
         });
+    }
+
+    /// Hand a batch of a large directory's files to whichever worker is free.
+    #[inline]
+    pub fn enqueue_stat_batch(&self, path: PathBuf, depth: u32, batch: scheduler::StatBatch) {
+        self.sched.push_local(
+            self.local,
+            Job {
+                dir: path,
+                depth,
+                resume: None,
+                unit: self.unit.map(ProgressUnit::join),
+                stat_batch: Some(Arc::new(batch)),
+            },
+        );
     }
 
     /// Progress for one file. The sample carries the sizes the caller already
@@ -948,6 +966,7 @@ pub fn scan_directory_mode(
             depth: 0,
             resume: None,
             unit: None,
+            stat_batch: None,
         },
         options.clone(),
         counter.clone(),
@@ -977,6 +996,7 @@ pub fn scan_directory_mode(
                 depth: 1,
                 resume: None,
                 unit: None,
+                stat_batch: None,
             },
             options.clone(),
             counter.clone(),
@@ -1074,6 +1094,7 @@ fn prepare_scan(
         depth: 0,
         resume: None,
         unit: None,
+        stat_batch: None,
     });
     (options, workers, sched)
 }
@@ -1165,6 +1186,7 @@ fn run_worker(
             depth,
             resume,
             unit,
+            stat_batch,
         }) = sched.find_job(&local, &mut next)
         else {
             if !sched.wait_for_work(&backoff) {
@@ -1187,6 +1209,7 @@ fn run_worker(
             dir: &dir,
             depth,
             resume,
+            batch: stat_batch.as_deref(),
         };
         // The counter must come back down even if process_dir unwinds, or the
         // remaining workers would wait for a job that will never finish.

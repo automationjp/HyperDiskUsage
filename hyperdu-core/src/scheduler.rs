@@ -34,6 +34,37 @@ pub struct Job {
     /// The depth-1 or depth-2 directory this job counts towards; set only when
     /// [`crate::Options::progress_counters`] is installed.
     pub unit: Option<std::sync::Arc<crate::ProgressUnit>>,
+    /// Files of a large directory whose metadata another worker reads, so one
+    /// huge directory is not stat'ed by a single thread. Set only by the Linux
+    /// backend.
+    pub stat_batch: Option<std::sync::Arc<StatBatch>>,
+}
+
+/// A directory descriptor shared by the batches cut from one directory; the
+/// last batch to finish closes it.
+pub struct BatchFd(pub i32);
+
+impl Drop for BatchFd {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        // SAFETY: the descriptor was dup'ed for this owner and is closed once.
+        unsafe {
+            libc::close(self.0);
+        }
+    }
+}
+
+/// Names (each NUL-terminated, back to back) to stat relative to `fd`.
+impl std::fmt::Debug for StatBatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "StatBatch({} names)", self.count)
+    }
+}
+
+pub struct StatBatch {
+    pub fd: std::sync::Arc<BatchFd>,
+    pub names: Vec<u8>,
+    pub count: usize,
 }
 
 pub struct Scheduler {
@@ -189,6 +220,7 @@ mod tests {
             depth,
             resume: None,
             unit: None,
+            stat_batch: None,
         }
     }
 
