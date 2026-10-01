@@ -18,7 +18,9 @@
     "Windows 1M flat: eight HyperDU-only runs; GNU du timed out after600seconds in warmup. No accepted 1M comparison or speed ratio; wide/deep 1M workloads were not run.",
     "Windows 10K: three shapes, two alternating runs per tool, all 12 measured samples retained; diagnostic ratios are not general speedup claims.",
     "Warm cache, synthetic regular files of256bytes; timings include process startup and directory output. Conditions differ across platforms.",
-    "No cold-cache, whole-disk or unmeasured-device speed claims. Record hashes preserve provenance consistency, not cryptographic attestation."
+    "No cold-cache, whole-disk or unmeasured-device speed claims. Record hashes preserve provenance consistency, not cryptographic attestation.",
+    "Windows vs dua-cli: local Windows 11/NTFS, apparent-size logical bytes, HyperDU d4ebdb8 and dua-cli 2.45.0 built with the same rustc; 12 alternating warm runs per tool, all samples retained; byte totals equal an independent walk. Unrelated background jobs held the CPU at roughly 60-90 percent busy, so absolute times are inflated and this is not an isolated benchmark host.",
+    "Windows vs tokei: reference only. tokei counts source lines and reads file contents, so no speed ratio is claimed; two real trees only. A third tree (Rust toolchains, 345,102 files) was dropped after one tokei run exceeded 10 minutes; the cause was not investigated."
   ],
   "filters": [],
   "platforms": [
@@ -1023,6 +1025,1151 @@
               "exit_code": 0
             }
           ]
+        }
+      ]
+    },
+    {
+      "id": "windows-dua",
+      "group": "windows",
+      "kind": "comparison",
+      "title": "HyperDU vs dua-cli",
+      "subtitle": "Local Windows / 2026-09-30 / d4ebdb8",
+      "machine": "AMD Ryzen 9 3900X · 12 cores / 24 threads · 128 GiB RAM · NTFS / NVMe",
+      "candidate": "HyperDU",
+      "baseline": "dua-cli 2.45.0",
+      "show_comparison": false,
+      "accounting": "apparent-size",
+      "runs_per_tool": {
+        "hyperdu": 12,
+        "dua": 12
+      },
+      "condition": {
+        "ja": "Windows 11 · 論理サイズ · 各ツール12回の中央値 · 合成3種は各10万ファイル（4 KiB）+ 実データ2種",
+        "en": "Windows 11 · logical size · median of 12 runs per tool · three 100K-file synthetic trees + two real trees",
+        "zh-CN": "Windows 11 · 逻辑大小 · 每个工具12次运行的中位数 · 3种各10万文件的合成目录 + 2种真实目录"
+      },
+      "note": {
+        "ja": "両ツールの論理バイト合計は、全データセットで独立走査の値と一致しました。HyperDU は5件すべてで短い時間でしたが、差は木の形に左右されます（平坦を除き 1.08〜2.77倍）。深い階層は並列化できる幅がほぼなく、ほぼ同等です。平坦は dua が直下の全エントリを1行ずつ出力する（100,001行）時間を含むため、代表値には使えません。測定中は別プロジェクトのジョブが CPU の60〜90%を使っており、絶対値は膨らんでいます。",
+        "en": "Byte totals from both tools equalled the independent walk on every dataset. HyperDU was faster on all five, but the gap depends on tree shape (1.08-2.77x excluding flat). The deep tree has almost no width to parallelize, so the two are close. The flat figure includes dua printing one row per direct entry (100,001 rows) and is not a representative ratio. Unrelated jobs held the CPU at roughly 60-90% busy during measurement, so absolute times are inflated.",
+        "zh-CN": "两个工具的逻辑字节总数在全部数据集上都与独立遍历一致。HyperDU 在5项中均更快，但差距取决于目录结构（除平铺外为 1.08–2.77 倍）。深层目录几乎没有可并行的宽度，两者接近。平铺目录的倍率包含 dua 逐条输出直接子项（100,001 行）的时间，不能作为代表值。测量期间其他项目的任务占用了约60–90%的 CPU，绝对值偏大。"
+      },
+      "provenance": {
+        "provider": "local Windows",
+        "source": "d4ebdb85577c53e881af292b549bc784f05bec60",
+        "build": {
+          "head": "d4ebdb85577c53e881af292b549bc784f05bec60",
+          "binary_sha256": "dd8df33382c8b08261480f486898093b3d5bab980358c19f286b2e09fdbe9734",
+          "build_command": "cargo build --locked --release -p hyperdu",
+          "rustc_version": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+          "toolchain_selection": "RUSTUP_TOOLCHAIN=1.98.0"
+        },
+        "tools": {
+          "hyperdu": {
+            "version": "hyperdu 0.5.0-beta.5",
+            "sha256": "dd8df33382c8b08261480f486898093b3d5bab980358c19f286b2e09fdbe9734"
+          },
+          "dua": {
+            "version": "dua 2.45.0",
+            "sha256": "08265cf3f5e46a5034a9d8598c7ff3a373d804b8ad2404cc2c30bad1022d31cc"
+          },
+          "tokei": {
+            "version": "tokei 15.0.0 compiled with serialization support: json",
+            "sha256": "268c8bda1ca0869a6803dd5ecc16a25963affc0dda86b8e42526d7bee92334d5"
+          }
+        },
+        "install_command": "cargo install --locked dua-cli tokei (isolated --root, same rustc)",
+        "cache": "warm",
+        "accounting": "apparent-size",
+        "runs_per_tool": 12,
+        "record": "docs/benchmarks/2026-09-30-windows-vs-dua-tokei.json",
+        "record_sha256": "60562c14ba2b131cc184dff5ab9e781b6be9af0d36c48eba7730c8f202f4f5cf",
+        "runner": "scripts/bench/compare_tools.py",
+        "background_load": "Unrelated background jobs (a densel GC and Python workers) held the 24 logical CPUs at roughly 60-90 percent busy during the run; tools alternate so all see the same load, but absolute times are inflated."
+      },
+      "rows": [
+        {
+          "label": {
+            "ja": "横に広いフォルダ（合成）",
+            "en": "Wide directory tree (synthetic)",
+            "zh-CN": "宽目录树（合成）"
+          },
+          "shape": "wide",
+          "files": "99,856",
+          "file_count": 99856,
+          "hyperdu_ms": 67.57,
+          "baseline_ms": 187.37,
+          "ratio": 2.77,
+          "ratio_exact": 2.7728211085542624,
+          "median_ms_exact": {
+            "hyperdu": 67.5745,
+            "dua": 187.372
+          },
+          "min_ms": {
+            "hyperdu": 46.942,
+            "dua": 168.463
+          },
+          "baseline_status": "completed",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 71.405
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 127.005
+            },
+            {
+              "round": 2,
+              "tool": "hyperdu",
+              "elapsed_ms": 75.159
+            },
+            {
+              "round": 3,
+              "tool": "hyperdu",
+              "elapsed_ms": 65.449
+            },
+            {
+              "round": 4,
+              "tool": "hyperdu",
+              "elapsed_ms": 67.454
+            },
+            {
+              "round": 5,
+              "tool": "hyperdu",
+              "elapsed_ms": 46.942
+            },
+            {
+              "round": 6,
+              "tool": "hyperdu",
+              "elapsed_ms": 55.276
+            },
+            {
+              "round": 7,
+              "tool": "hyperdu",
+              "elapsed_ms": 59.653
+            },
+            {
+              "round": 8,
+              "tool": "hyperdu",
+              "elapsed_ms": 77.3
+            },
+            {
+              "round": 9,
+              "tool": "hyperdu",
+              "elapsed_ms": 67.695
+            },
+            {
+              "round": 10,
+              "tool": "hyperdu",
+              "elapsed_ms": 72.925
+            },
+            {
+              "round": 11,
+              "tool": "hyperdu",
+              "elapsed_ms": 51.892
+            },
+            {
+              "round": 0,
+              "tool": "dua",
+              "elapsed_ms": 187.71
+            },
+            {
+              "round": 1,
+              "tool": "dua",
+              "elapsed_ms": 227.497
+            },
+            {
+              "round": 2,
+              "tool": "dua",
+              "elapsed_ms": 249.177
+            },
+            {
+              "round": 3,
+              "tool": "dua",
+              "elapsed_ms": 210.491
+            },
+            {
+              "round": 4,
+              "tool": "dua",
+              "elapsed_ms": 184.438
+            },
+            {
+              "round": 5,
+              "tool": "dua",
+              "elapsed_ms": 181.374
+            },
+            {
+              "round": 6,
+              "tool": "dua",
+              "elapsed_ms": 187.034
+            },
+            {
+              "round": 7,
+              "tool": "dua",
+              "elapsed_ms": 179.775
+            },
+            {
+              "round": 8,
+              "tool": "dua",
+              "elapsed_ms": 214.983
+            },
+            {
+              "round": 9,
+              "tool": "dua",
+              "elapsed_ms": 182.173
+            },
+            {
+              "round": 10,
+              "tool": "dua",
+              "elapsed_ms": 168.463
+            },
+            {
+              "round": 11,
+              "tool": "dua",
+              "elapsed_ms": 201.704
+            }
+          ],
+          "byte_parity": "HyperDU and dua totals equal the independent lstat oracle: PASS",
+          "baseline_output_rows": 317
+        },
+        {
+          "label": {
+            "ja": "深い階層のフォルダ（合成）",
+            "en": "Deep directory tree (synthetic)",
+            "zh-CN": "深层目录树（合成）"
+          },
+          "shape": "deep",
+          "files": "100,000",
+          "file_count": 100000,
+          "hyperdu_ms": 179.68,
+          "baseline_ms": 194.62,
+          "ratio": 1.08,
+          "ratio_exact": 1.083185845633251,
+          "median_ms_exact": {
+            "hyperdu": 179.676,
+            "dua": 194.6225
+          },
+          "min_ms": {
+            "hyperdu": 159.224,
+            "dua": 169.828
+          },
+          "baseline_status": "completed",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 185.587
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 159.224
+            },
+            {
+              "round": 2,
+              "tool": "hyperdu",
+              "elapsed_ms": 169.822
+            },
+            {
+              "round": 3,
+              "tool": "hyperdu",
+              "elapsed_ms": 186.289
+            },
+            {
+              "round": 4,
+              "tool": "hyperdu",
+              "elapsed_ms": 170.732
+            },
+            {
+              "round": 5,
+              "tool": "hyperdu",
+              "elapsed_ms": 192.318
+            },
+            {
+              "round": 6,
+              "tool": "hyperdu",
+              "elapsed_ms": 160.809
+            },
+            {
+              "round": 7,
+              "tool": "hyperdu",
+              "elapsed_ms": 170.296
+            },
+            {
+              "round": 8,
+              "tool": "hyperdu",
+              "elapsed_ms": 238.031
+            },
+            {
+              "round": 9,
+              "tool": "hyperdu",
+              "elapsed_ms": 187.28
+            },
+            {
+              "round": 10,
+              "tool": "hyperdu",
+              "elapsed_ms": 173.765
+            },
+            {
+              "round": 11,
+              "tool": "hyperdu",
+              "elapsed_ms": 263.622
+            },
+            {
+              "round": 0,
+              "tool": "dua",
+              "elapsed_ms": 214.038
+            },
+            {
+              "round": 1,
+              "tool": "dua",
+              "elapsed_ms": 196.789
+            },
+            {
+              "round": 2,
+              "tool": "dua",
+              "elapsed_ms": 221.782
+            },
+            {
+              "round": 3,
+              "tool": "dua",
+              "elapsed_ms": 311.639
+            },
+            {
+              "round": 4,
+              "tool": "dua",
+              "elapsed_ms": 177.011
+            },
+            {
+              "round": 5,
+              "tool": "dua",
+              "elapsed_ms": 171.392
+            },
+            {
+              "round": 6,
+              "tool": "dua",
+              "elapsed_ms": 178.527
+            },
+            {
+              "round": 7,
+              "tool": "dua",
+              "elapsed_ms": 204.148
+            },
+            {
+              "round": 8,
+              "tool": "dua",
+              "elapsed_ms": 169.828
+            },
+            {
+              "round": 9,
+              "tool": "dua",
+              "elapsed_ms": 183.977
+            },
+            {
+              "round": 10,
+              "tool": "dua",
+              "elapsed_ms": 192.456
+            },
+            {
+              "round": 11,
+              "tool": "dua",
+              "elapsed_ms": 203.101
+            }
+          ],
+          "byte_parity": "HyperDU and dua totals equal the independent lstat oracle: PASS",
+          "baseline_output_rows": 1
+        },
+        {
+          "label": {
+            "ja": "平坦なフォルダ（合成）",
+            "en": "Flat directory (synthetic)",
+            "zh-CN": "平铺目录（合成）"
+          },
+          "shape": "flat",
+          "files": "100,000",
+          "file_count": 100000,
+          "hyperdu_ms": 98.8,
+          "baseline_ms": 997.51,
+          "ratio": 10.1,
+          "ratio_exact": 10.096188784469714,
+          "median_ms_exact": {
+            "hyperdu": 98.8005,
+            "dua": 997.5084999999999
+          },
+          "min_ms": {
+            "hyperdu": 68.187,
+            "dua": 619.626
+          },
+          "baseline_status": "completed",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 1096.324
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 195.622
+            },
+            {
+              "round": 2,
+              "tool": "hyperdu",
+              "elapsed_ms": 333.121
+            },
+            {
+              "round": 3,
+              "tool": "hyperdu",
+              "elapsed_ms": 77.784
+            },
+            {
+              "round": 4,
+              "tool": "hyperdu",
+              "elapsed_ms": 68.187
+            },
+            {
+              "round": 5,
+              "tool": "hyperdu",
+              "elapsed_ms": 84.387
+            },
+            {
+              "round": 6,
+              "tool": "hyperdu",
+              "elapsed_ms": 88.374
+            },
+            {
+              "round": 7,
+              "tool": "hyperdu",
+              "elapsed_ms": 124.169
+            },
+            {
+              "round": 8,
+              "tool": "hyperdu",
+              "elapsed_ms": 94.102
+            },
+            {
+              "round": 9,
+              "tool": "hyperdu",
+              "elapsed_ms": 105.41
+            },
+            {
+              "round": 10,
+              "tool": "hyperdu",
+              "elapsed_ms": 103.499
+            },
+            {
+              "round": 11,
+              "tool": "hyperdu",
+              "elapsed_ms": 86.542
+            },
+            {
+              "round": 0,
+              "tool": "dua",
+              "elapsed_ms": 2078.963
+            },
+            {
+              "round": 1,
+              "tool": "dua",
+              "elapsed_ms": 1324.939
+            },
+            {
+              "round": 2,
+              "tool": "dua",
+              "elapsed_ms": 1674.956
+            },
+            {
+              "round": 3,
+              "tool": "dua",
+              "elapsed_ms": 674.101
+            },
+            {
+              "round": 4,
+              "tool": "dua",
+              "elapsed_ms": 619.626
+            },
+            {
+              "round": 5,
+              "tool": "dua",
+              "elapsed_ms": 864.009
+            },
+            {
+              "round": 6,
+              "tool": "dua",
+              "elapsed_ms": 1071.377
+            },
+            {
+              "round": 7,
+              "tool": "dua",
+              "elapsed_ms": 1122.809
+            },
+            {
+              "round": 8,
+              "tool": "dua",
+              "elapsed_ms": 1568.273
+            },
+            {
+              "round": 9,
+              "tool": "dua",
+              "elapsed_ms": 762.926
+            },
+            {
+              "round": 10,
+              "tool": "dua",
+              "elapsed_ms": 645.192
+            },
+            {
+              "round": 11,
+              "tool": "dua",
+              "elapsed_ms": 923.64
+            }
+          ],
+          "byte_parity": "HyperDU and dua totals equal the independent lstat oracle: PASS",
+          "baseline_output_rows": 100001
+        },
+        {
+          "label": {
+            "ja": "Cargo registry（実データ）",
+            "en": "Cargo registry (real files)",
+            "zh-CN": "Cargo registry（真实文件）"
+          },
+          "shape": "cargo-registry",
+          "files": "107,953",
+          "file_count": 107953,
+          "hyperdu_ms": 478.55,
+          "baseline_ms": 554.61,
+          "ratio": 1.16,
+          "ratio_exact": 1.158958927582568,
+          "median_ms_exact": {
+            "hyperdu": 478.545,
+            "dua": 554.614
+          },
+          "min_ms": {
+            "hyperdu": 369.283,
+            "dua": 461.643
+          },
+          "baseline_status": "completed",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 369.283
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 934.945
+            },
+            {
+              "round": 2,
+              "tool": "hyperdu",
+              "elapsed_ms": 639.819
+            },
+            {
+              "round": 3,
+              "tool": "hyperdu",
+              "elapsed_ms": 628.699
+            },
+            {
+              "round": 4,
+              "tool": "hyperdu",
+              "elapsed_ms": 768.395
+            },
+            {
+              "round": 5,
+              "tool": "hyperdu",
+              "elapsed_ms": 392.931
+            },
+            {
+              "round": 6,
+              "tool": "hyperdu",
+              "elapsed_ms": 460.934
+            },
+            {
+              "round": 7,
+              "tool": "hyperdu",
+              "elapsed_ms": 395.846
+            },
+            {
+              "round": 8,
+              "tool": "hyperdu",
+              "elapsed_ms": 496.156
+            },
+            {
+              "round": 9,
+              "tool": "hyperdu",
+              "elapsed_ms": 432.882
+            },
+            {
+              "round": 10,
+              "tool": "hyperdu",
+              "elapsed_ms": 565.889
+            },
+            {
+              "round": 11,
+              "tool": "hyperdu",
+              "elapsed_ms": 449.365
+            },
+            {
+              "round": 0,
+              "tool": "dua",
+              "elapsed_ms": 461.643
+            },
+            {
+              "round": 1,
+              "tool": "dua",
+              "elapsed_ms": 769.722
+            },
+            {
+              "round": 2,
+              "tool": "dua",
+              "elapsed_ms": 615.246
+            },
+            {
+              "round": 3,
+              "tool": "dua",
+              "elapsed_ms": 800.581
+            },
+            {
+              "round": 4,
+              "tool": "dua",
+              "elapsed_ms": 573.155
+            },
+            {
+              "round": 5,
+              "tool": "dua",
+              "elapsed_ms": 532.165
+            },
+            {
+              "round": 6,
+              "tool": "dua",
+              "elapsed_ms": 525.803
+            },
+            {
+              "round": 7,
+              "tool": "dua",
+              "elapsed_ms": 499.877
+            },
+            {
+              "round": 8,
+              "tool": "dua",
+              "elapsed_ms": 536.073
+            },
+            {
+              "round": 9,
+              "tool": "dua",
+              "elapsed_ms": 489.16
+            },
+            {
+              "round": 10,
+              "tool": "dua",
+              "elapsed_ms": 831.067
+            },
+            {
+              "round": 11,
+              "tool": "dua",
+              "elapsed_ms": 831.773
+            }
+          ],
+          "byte_parity": "HyperDU and dua totals equal the independent lstat oracle: PASS",
+          "baseline_output_rows": 5
+        },
+        {
+          "label": {
+            "ja": "node_modules（実データ）",
+            "en": "node_modules (real files)",
+            "zh-CN": "node_modules（真实文件）"
+          },
+          "shape": "node-modules",
+          "files": "27,940",
+          "file_count": 27940,
+          "hyperdu_ms": 72.26,
+          "baseline_ms": 156.6,
+          "ratio": 2.17,
+          "ratio_exact": 2.16724791718564,
+          "median_ms_exact": {
+            "hyperdu": 72.25800000000001,
+            "dua": 156.601
+          },
+          "min_ms": {
+            "hyperdu": 63.131,
+            "dua": 146.679
+          },
+          "baseline_status": "completed",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 81.591
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 63.131
+            },
+            {
+              "round": 2,
+              "tool": "hyperdu",
+              "elapsed_ms": 66.464
+            },
+            {
+              "round": 3,
+              "tool": "hyperdu",
+              "elapsed_ms": 70.286
+            },
+            {
+              "round": 4,
+              "tool": "hyperdu",
+              "elapsed_ms": 69.484
+            },
+            {
+              "round": 5,
+              "tool": "hyperdu",
+              "elapsed_ms": 176.446
+            },
+            {
+              "round": 6,
+              "tool": "hyperdu",
+              "elapsed_ms": 130.363
+            },
+            {
+              "round": 7,
+              "tool": "hyperdu",
+              "elapsed_ms": 72.586
+            },
+            {
+              "round": 8,
+              "tool": "hyperdu",
+              "elapsed_ms": 72.806
+            },
+            {
+              "round": 9,
+              "tool": "hyperdu",
+              "elapsed_ms": 68.481
+            },
+            {
+              "round": 10,
+              "tool": "hyperdu",
+              "elapsed_ms": 118.461
+            },
+            {
+              "round": 11,
+              "tool": "hyperdu",
+              "elapsed_ms": 71.93
+            },
+            {
+              "round": 0,
+              "tool": "dua",
+              "elapsed_ms": 152.05
+            },
+            {
+              "round": 1,
+              "tool": "dua",
+              "elapsed_ms": 156.795
+            },
+            {
+              "round": 2,
+              "tool": "dua",
+              "elapsed_ms": 147.544
+            },
+            {
+              "round": 3,
+              "tool": "dua",
+              "elapsed_ms": 149.199
+            },
+            {
+              "round": 4,
+              "tool": "dua",
+              "elapsed_ms": 156.407
+            },
+            {
+              "round": 5,
+              "tool": "dua",
+              "elapsed_ms": 207.634
+            },
+            {
+              "round": 6,
+              "tool": "dua",
+              "elapsed_ms": 193.269
+            },
+            {
+              "round": 7,
+              "tool": "dua",
+              "elapsed_ms": 146.679
+            },
+            {
+              "round": 8,
+              "tool": "dua",
+              "elapsed_ms": 156.325
+            },
+            {
+              "round": 9,
+              "tool": "dua",
+              "elapsed_ms": 197.824
+            },
+            {
+              "round": 10,
+              "tool": "dua",
+              "elapsed_ms": 177.83
+            },
+            {
+              "round": 11,
+              "tool": "dua",
+              "elapsed_ms": 159.463
+            }
+          ],
+          "byte_parity": "HyperDU and dua totals equal the independent lstat oracle: PASS",
+          "baseline_output_rows": 440
+        }
+      ]
+    },
+    {
+      "id": "windows-tokei",
+      "group": "windows",
+      "kind": "reference",
+      "title": "HyperDU / tokei (reference)",
+      "subtitle": "Local Windows / 2026-09-30 / different workload",
+      "machine": "AMD Ryzen 9 3900X · 12 cores / 24 threads · 128 GiB RAM · NTFS / NVMe",
+      "candidate": "HyperDU",
+      "baseline": "tokei 15.0.0",
+      "show_comparison": false,
+      "accounting": "apparent-size (HyperDU) / line count (tokei)",
+      "runs_per_tool": {
+        "hyperdu": 12,
+        "tokei": 12
+      },
+      "condition": {
+        "ja": "Windows 11 · 実データ2種 · 各ツール12回の中央値 · HyperDU はサイズ集計、tokei は行数解析",
+        "en": "Windows 11 · two real trees · median of 12 runs per tool · HyperDU sums sizes, tokei counts lines",
+        "zh-CN": "Windows 11 · 2种真实目录 · 每个工具12次运行的中位数 · HyperDU 汇总大小，tokei 统计行数"
+      },
+      "note": {
+        "ja": "tokei はファイルの中身を読んで行数を数える別の処理で、HyperDU はサイズの集計だけです。同じ仕事ではないため速度比は示さず、時間だけを参考に載せます。tokei が解析したのは Cargo registry で 80,897 件、node_modules で 16,576 件（対応言語の拡張子のみ）です。合成データには拡張子がなく tokei が何も解析しないため測っていません。",
+        "en": "tokei reads file contents and counts lines, while HyperDU only totals sizes. These are different jobs, so no speed ratio is shown; the times are reference only. tokei parsed 80,897 files in the Cargo registry and 16,576 in node_modules (recognized source extensions only). The synthetic fixtures have no extensions, so tokei parses nothing there and was not timed.",
+        "zh-CN": "tokei 读取文件内容并统计行数，而 HyperDU 只汇总大小。两者不是同一项工作，因此不给出速度比，时间仅供参考。tokei 在 Cargo registry 中解析了 80,897 个文件，在 node_modules 中解析了 16,576 个（仅限可识别的源码扩展名）。合成数据没有扩展名，tokei 不会解析任何内容，因此未测量。"
+      },
+      "provenance": {
+        "provider": "local Windows",
+        "source": "d4ebdb85577c53e881af292b549bc784f05bec60",
+        "build": {
+          "head": "d4ebdb85577c53e881af292b549bc784f05bec60",
+          "binary_sha256": "dd8df33382c8b08261480f486898093b3d5bab980358c19f286b2e09fdbe9734",
+          "build_command": "cargo build --locked --release -p hyperdu",
+          "rustc_version": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+          "toolchain_selection": "RUSTUP_TOOLCHAIN=1.98.0"
+        },
+        "tools": {
+          "hyperdu": {
+            "version": "hyperdu 0.5.0-beta.5",
+            "sha256": "dd8df33382c8b08261480f486898093b3d5bab980358c19f286b2e09fdbe9734"
+          },
+          "dua": {
+            "version": "dua 2.45.0",
+            "sha256": "08265cf3f5e46a5034a9d8598c7ff3a373d804b8ad2404cc2c30bad1022d31cc"
+          },
+          "tokei": {
+            "version": "tokei 15.0.0 compiled with serialization support: json",
+            "sha256": "268c8bda1ca0869a6803dd5ecc16a25963affc0dda86b8e42526d7bee92334d5"
+          }
+        },
+        "install_command": "cargo install --locked dua-cli tokei (isolated --root, same rustc)",
+        "cache": "warm",
+        "accounting": "apparent-size",
+        "runs_per_tool": 12,
+        "record": "docs/benchmarks/2026-09-30-windows-vs-dua-tokei.json",
+        "record_sha256": "60562c14ba2b131cc184dff5ab9e781b6be9af0d36c48eba7730c8f202f4f5cf",
+        "runner": "scripts/bench/compare_tools.py",
+        "background_load": "Unrelated background jobs (a densel GC and Python workers) held the 24 logical CPUs at roughly 60-90 percent busy during the run; tools alternate so all see the same load, but absolute times are inflated."
+      },
+      "rows": [
+        {
+          "label": {
+            "ja": "Cargo registry（実データ）",
+            "en": "Cargo registry (real files)",
+            "zh-CN": "Cargo registry（真实文件）"
+          },
+          "shape": "cargo-registry",
+          "files": "107,953",
+          "file_count": 107953,
+          "hyperdu_ms": 478.55,
+          "baseline_ms": 9407.19,
+          "median_ms_exact": {
+            "hyperdu": 478.545,
+            "tokei": 9407.188
+          },
+          "min_ms": {
+            "hyperdu": 369.283,
+            "tokei": 6988.896
+          },
+          "baseline_status": "completed",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 369.283
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 934.945
+            },
+            {
+              "round": 2,
+              "tool": "hyperdu",
+              "elapsed_ms": 639.819
+            },
+            {
+              "round": 3,
+              "tool": "hyperdu",
+              "elapsed_ms": 628.699
+            },
+            {
+              "round": 4,
+              "tool": "hyperdu",
+              "elapsed_ms": 768.395
+            },
+            {
+              "round": 5,
+              "tool": "hyperdu",
+              "elapsed_ms": 392.931
+            },
+            {
+              "round": 6,
+              "tool": "hyperdu",
+              "elapsed_ms": 460.934
+            },
+            {
+              "round": 7,
+              "tool": "hyperdu",
+              "elapsed_ms": 395.846
+            },
+            {
+              "round": 8,
+              "tool": "hyperdu",
+              "elapsed_ms": 496.156
+            },
+            {
+              "round": 9,
+              "tool": "hyperdu",
+              "elapsed_ms": 432.882
+            },
+            {
+              "round": 10,
+              "tool": "hyperdu",
+              "elapsed_ms": 565.889
+            },
+            {
+              "round": 11,
+              "tool": "hyperdu",
+              "elapsed_ms": 449.365
+            },
+            {
+              "round": 0,
+              "tool": "tokei",
+              "elapsed_ms": 6988.896
+            },
+            {
+              "round": 1,
+              "tool": "tokei",
+              "elapsed_ms": 10579.095
+            },
+            {
+              "round": 2,
+              "tool": "tokei",
+              "elapsed_ms": 10100.745
+            },
+            {
+              "round": 3,
+              "tool": "tokei",
+              "elapsed_ms": 9845.563
+            },
+            {
+              "round": 4,
+              "tool": "tokei",
+              "elapsed_ms": 10229.598
+            },
+            {
+              "round": 5,
+              "tool": "tokei",
+              "elapsed_ms": 9130.402
+            },
+            {
+              "round": 6,
+              "tool": "tokei",
+              "elapsed_ms": 8085.757
+            },
+            {
+              "round": 7,
+              "tool": "tokei",
+              "elapsed_ms": 7703.937
+            },
+            {
+              "round": 8,
+              "tool": "tokei",
+              "elapsed_ms": 9683.974
+            },
+            {
+              "round": 9,
+              "tool": "tokei",
+              "elapsed_ms": 13565.203
+            },
+            {
+              "round": 10,
+              "tool": "tokei",
+              "elapsed_ms": 8774.024
+            },
+            {
+              "round": 11,
+              "tool": "tokei",
+              "elapsed_ms": 8109.911
+            }
+          ],
+          "tokei_files_parsed": 80897
+        },
+        {
+          "label": {
+            "ja": "node_modules（実データ）",
+            "en": "node_modules (real files)",
+            "zh-CN": "node_modules（真实文件）"
+          },
+          "shape": "node-modules",
+          "files": "27,940",
+          "file_count": 27940,
+          "hyperdu_ms": 72.26,
+          "baseline_ms": 782.31,
+          "median_ms_exact": {
+            "hyperdu": 72.25800000000001,
+            "tokei": 782.3085000000001
+          },
+          "min_ms": {
+            "hyperdu": 63.131,
+            "tokei": 716.856
+          },
+          "baseline_status": "completed",
+          "samples": [
+            {
+              "round": 0,
+              "tool": "hyperdu",
+              "elapsed_ms": 81.591
+            },
+            {
+              "round": 1,
+              "tool": "hyperdu",
+              "elapsed_ms": 63.131
+            },
+            {
+              "round": 2,
+              "tool": "hyperdu",
+              "elapsed_ms": 66.464
+            },
+            {
+              "round": 3,
+              "tool": "hyperdu",
+              "elapsed_ms": 70.286
+            },
+            {
+              "round": 4,
+              "tool": "hyperdu",
+              "elapsed_ms": 69.484
+            },
+            {
+              "round": 5,
+              "tool": "hyperdu",
+              "elapsed_ms": 176.446
+            },
+            {
+              "round": 6,
+              "tool": "hyperdu",
+              "elapsed_ms": 130.363
+            },
+            {
+              "round": 7,
+              "tool": "hyperdu",
+              "elapsed_ms": 72.586
+            },
+            {
+              "round": 8,
+              "tool": "hyperdu",
+              "elapsed_ms": 72.806
+            },
+            {
+              "round": 9,
+              "tool": "hyperdu",
+              "elapsed_ms": 68.481
+            },
+            {
+              "round": 10,
+              "tool": "hyperdu",
+              "elapsed_ms": 118.461
+            },
+            {
+              "round": 11,
+              "tool": "hyperdu",
+              "elapsed_ms": 71.93
+            },
+            {
+              "round": 0,
+              "tool": "tokei",
+              "elapsed_ms": 757.927
+            },
+            {
+              "round": 1,
+              "tool": "tokei",
+              "elapsed_ms": 750.277
+            },
+            {
+              "round": 2,
+              "tool": "tokei",
+              "elapsed_ms": 716.856
+            },
+            {
+              "round": 3,
+              "tool": "tokei",
+              "elapsed_ms": 728.735
+            },
+            {
+              "round": 4,
+              "tool": "tokei",
+              "elapsed_ms": 783.898
+            },
+            {
+              "round": 5,
+              "tool": "tokei",
+              "elapsed_ms": 952.428
+            },
+            {
+              "round": 6,
+              "tool": "tokei",
+              "elapsed_ms": 785.427
+            },
+            {
+              "round": 7,
+              "tool": "tokei",
+              "elapsed_ms": 777.593
+            },
+            {
+              "round": 8,
+              "tool": "tokei",
+              "elapsed_ms": 780.719
+            },
+            {
+              "round": 9,
+              "tool": "tokei",
+              "elapsed_ms": 942.022
+            },
+            {
+              "round": 10,
+              "tool": "tokei",
+              "elapsed_ms": 1031.282
+            },
+            {
+              "round": 11,
+              "tool": "tokei",
+              "elapsed_ms": 944.396
+            }
+          ],
+          "tokei_files_parsed": 16576
         }
       ]
     }

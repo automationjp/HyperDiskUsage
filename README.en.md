@@ -111,6 +111,24 @@ Windows 11 / NTFS / NVMe, Ryzen 9 3900X (12 cores / 24 threads, 128 GiB RAM), wa
 
 Do not extrapolate these diagnostic ratios to 1M files or Windows generally. Accounting, environment, and run counts also differ from Linux.
 
+### Windows: comparison with dua-cli and tokei
+
+Windows 11 / NTFS / NVMe, Ryzen 9 3900X, warm cache, logical bytes. HyperDU (development build d4ebdb8) and dua-cli produced totals equal to an independent walk on every dataset. Medians of 12 runs per tool.
+
+| Dataset | Files | HyperDU | dua-cli | dua / HyperDU |
+|---|---:|---:|---:|---:|
+| Wide directory tree (synthetic) | 99,856 | 67.57 ms | 187.37 ms | 2.77× |
+| Deep directory tree (synthetic) | 100,000 | 179.68 ms | 194.62 ms | 1.08× |
+| Flat directory (synthetic) | 100,000 | 98.80 ms | 997.51 ms | 10.10× |
+| Cargo registry (real files) | 107,953 | 478.55 ms | 554.61 ms | 1.16× |
+| node_modules (real files) | 27,940 | 72.26 ms | 156.60 ms | 2.17× |
+
+HyperDU was faster on all five, but the gap depends on tree shape (1.08-2.77x excluding flat). The deep tree has no width to parallelize and is roughly equal. The flat 10.10x includes dua-cli printing 100,001 rows and is not representative.
+
+tokei reads contents and counts lines, a different job, so **no speed ratio is shown**. For reference, the Cargo registry (107,953 files) took 478.55 ms in HyperDU and 9,407.19 ms in tokei; node_modules (27,940 files) took 72.26 ms and 782.31 ms. Unrelated jobs held the CPU at roughly 60-90% busy during measurement, so absolute times are inflated.
+
+[Method and limitations](docs/en/benchmarks.md) · [Record JSON](docs/benchmarks/2026-09-30-windows-vs-dua-tokei.json)
+
 [Workflow evidence](https://github.com/automationjp/HyperDiskUsage/actions/runs/34550503086) · [Raw data](https://hyperdu.automation.jp/benchmarks.json) · [Method and limitations](docs/en/benchmarks.md) · [Performance design](docs/en/performance.md)
 
 ## Distribution and platform status

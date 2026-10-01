@@ -39,3 +39,53 @@ du -x --apparent-size --block-size=1 ROOT
 The AWS runbook is retained as an unexecuted plan; it contributes no current result or speed figure. See the [AWS runbook (unexecuted plan)](../benchmarks/aws-protocol.md).
 
 [Reproducible Linux benchmark runner](../../scripts/bench/du_same_conditions.py)
+
+
+## Comparison with dua-cli and tokei (local Windows)
+
+HyperDU built from `d4ebdb85577c53e881af292b549bc784f05bec60` (a development snapshot of v0.5.0-beta.5) with `cargo build --locked --release -p hyperdu` (rustc 1.98.0) was compared with dua-cli 2.45.0 and tokei 15.0.0, both built by `cargo install --locked` with the same rustc. The machine was Windows 11 / NTFS / NVMe, Ryzen 9 3900X (12 cores / 24 threads, 128 GiB RAM). Warm cache, tools alternating, 12 runs each; every raw sample is in the [record JSON](../benchmarks/2026-09-30-windows-vs-dua-tokei.json). Timings run from process start to exit and include writing to stdout. Each dataset was checked with an independent lstat walk before and after timing to confirm it had not changed.
+
+### dua-cli (same job)
+
+HyperDU and dua-cli logical byte totals equalled the independent walk on all five datasets. No external byte adjustment was applied.
+
+| Dataset | Files | HyperDU | dua-cli | dua / HyperDU |
+|---|---:|---:|---:|---:|
+| Wide directory tree (synthetic) | 99,856 | 67.57 ms | 187.37 ms | 2.77x |
+| Deep directory tree (synthetic) | 100,000 | 179.68 ms | 194.62 ms | 1.08x |
+| Flat directory (synthetic) | 100,000 | 98.80 ms | 997.51 ms | 10.10x |
+| Cargo registry (real files) | 107,953 | 478.55 ms | 554.61 ms | 1.16x |
+| node_modules (real files) | 27,940 | 72.26 ms | 156.60 ms | 2.17x |
+
+HyperDU was faster on all five, but the gap depends on tree shape: 1.08-2.77x excluding the flat tree.
+
+- The deep tree (1.08x) has almost no width to parallelize. The spreads overlap (HyperDU 159-264 ms, dua-cli 170-312 ms), so read it as roughly equal.
+- The flat tree's 10.10x is not a representative ratio. dua-cli prints one row per direct entry (100,001 rows) and that output time is included. `--depth 1` does not reduce the output and its total does not equal the independent walk, so it was not used.
+- Real files: 1.16x on the Cargo registry and 2.17x on node_modules.
+
+### tokei (reference, different job)
+
+tokei counts source lines: it reads file contents and parses each language. HyperDU only totals sizes and does not read contents. These are not the same job, so **no speed ratio is shown**; the times are reference only. The synthetic fixtures have no extensions, so tokei parses nothing there and only the two real trees were timed.
+
+| Dataset | Files | Files tokei parsed | HyperDU | tokei |
+|---|---:|---:|---:|---:|
+| Cargo registry (real files) | 107,953 | 80,897 | 478.55 ms | 9,407.19 ms |
+| node_modules (real files) | 27,940 | 16,576 | 72.26 ms | 782.31 ms |
+
+### Limits
+
+- During measurement, unrelated jobs (a densel GC and Python workers) held the 24 logical CPUs at roughly 60-90% busy. Tools alternated so each saw the same load, but absolute times are inflated and single runs vary widely (HyperDU on the flat tree: 68-1,096 ms). This is not an isolated benchmark host.
+- Cold cache was not measured. tokei reads file contents, so warm numbers must not be applied to cold runs.
+- The synthetic trees are extension-less 4 KiB regular files and interact with dua-cli's output format (it lists every direct entry). Do not generalize beyond the trees shown.
+- A third real tree (Rust toolchains, 345,102 files) was planned but dropped after one tokei run exceeded 10 minutes; the cause was not investigated.
+- HyperDU is origin/main at d4ebdb8, not the published v0.5.0-beta.5 binary.
+
+### Commands
+
+```powershell
+hyperdu ROOT --top 1 --exclude "" --one-file-system
+dua aggregate -A -x -f bytes ROOT
+tokei ROOT --output json
+```
+
+[Comparison benchmark runner](../../scripts/bench/compare_tools.py)

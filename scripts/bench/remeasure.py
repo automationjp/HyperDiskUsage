@@ -64,26 +64,27 @@ def oracle(root):
     return out
 
 
-def make_trees(parent):
+def make_trees(parent, wide=(500, 40), deep=(400, 5), flat=20_000):
+    """Create wide (dirs, files per dir), deep (levels, files per level) and flat (files) fixtures under `parent`."""
     root = Path(tempfile.mkdtemp(prefix="hyperdu-warm-", dir=parent))
     if os.name == "nt":
         root = Path("\\\\?\\" + str(root.resolve()))
     for kind in ("wide", "deep", "flat"):
         (root / kind).mkdir()
     payload = bytes(range(256)) * 16
-    for i in range(500):
+    for i in range(wide[0]):
         directory = root / "wide" / str(i)
         directory.mkdir()
-        for j in range(40):
+        for j in range(wide[1]):
             (directory / str(j)).write_bytes(payload)
     directory = root / "deep"
     # One-character components keep the Windows path below the NT limit.
-    for _ in range(400):
+    for _ in range(deep[0]):
         directory /= "d"
         directory.mkdir()
-        for j in range(5):
+        for j in range(deep[1]):
             (directory / str(j)).write_bytes(payload)
-    for i in range(20_000):
+    for i in range(flat):
         (root / "flat" / str(i)).write_bytes(payload)
     return [(name, root / name) for name in ("wide", "deep", "flat")]
 
