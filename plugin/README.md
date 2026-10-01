@@ -3,7 +3,7 @@
 **日本語** · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
 一度のインストールでCLIとMCPサーバを利用できます。公開クレートと実行コマンドは `hyperdu`、
-MCPサーバは `hyperdu mcp` です。0.5.0-beta.6で単独の `hyperdu-mcp` 実行ファイルを置き換えます。
+MCPサーバは `hyperdu mcp` です。0.5.0-beta.7で単独の `hyperdu-mcp` 実行ファイルを置き換えます。
 
 ## このチェックアウトからインストール
 
@@ -13,7 +13,7 @@ hyperdu --help
 hyperdu mcp --help
 ```
 
-Rust 1.88+ が必要です。公開版は `cargo install hyperdu --locked --version 0.5.0-beta.6` で導入できます。
+Rust 1.88+ が必要です。公開版は `cargo install hyperdu --locked --version 0.5.0-beta.7` で導入できます。
 セットアップスクリプトは、チェックアウトがあればそのソースから、なければGitHubからインストールします。
 
 ```sh
