@@ -93,7 +93,7 @@ fn bench_scan(c: &mut Criterion) {
     {
         group.bench_function(BenchmarkId::new("rayon_inner_single", 1), |b| {
             b.iter_batched(
-                || roots[0].clone(),
+                || roots1[0].clone(),
                 |r| core::scan_directory_rayon(&r, &opt).unwrap(),
                 BatchSize::SmallInput,
             )
