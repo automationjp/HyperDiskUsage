@@ -123,7 +123,7 @@ fn cancel_button_cannot_turn_a_queued_finish_into_success() {
     let mut screen = Screen::new(App {
         scan: Some(handle),
         started_at: Some(Instant::now()),
-        state: "スキャン中".into(),
+        state: Status::Scanning,
         ..Default::default()
     });
     screen.click("中止");
@@ -155,4 +155,48 @@ fn mode_and_sort_buttons_affect_the_next_scan_and_rendered_order() {
     assert!(screen.position("📁 zulu").y < screen.position("📁 alpha").y);
     screen.click("名前");
     assert!(screen.position("📁 alpha").y < screen.position("📁 zulu").y);
+}
+
+#[test]
+fn english_ui_runs_a_scan_end_to_end() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("data.bin"), [0u8; 64]).unwrap();
+    let mut screen = Screen::new(App {
+        lang: Lang::En,
+        ..App::default()
+    });
+    assert!(screen.sees("Choose a folder and start a scan"));
+    screen.click("C:\\ or a folder path");
+    screen.frame(vec![Event::Text(dir.path().display().to_string())]);
+    screen.click("Start scan");
+    assert!(screen.sees("Scanning"));
+    screen.finish();
+    assert!(screen.app.complete && screen.sees("Done"));
+    assert!(screen.sees("Files directly here: 1 files"));
+}
+
+#[test]
+fn chinese_ui_labels_render() {
+    let screen = Screen::new(App {
+        lang: Lang::Zh,
+        ..App::default()
+    });
+    for label in ["开始扫描", "目标文件夹", "交互式", "批量", "查看空间占用"] {
+        assert!(screen.sees(label), "missing {label}");
+    }
+}
+
+#[test]
+fn switching_language_rewords_a_message_already_on_screen() {
+    let mut screen = Screen::new(App {
+        state: Status::Cancelled,
+        ..App::default()
+    });
+    assert!(screen.sees("中断しました"));
+    screen.click("日本語");
+    screen.frame(Vec::new()); // The popup opens on the frame after the click.
+    screen.click("简体中文");
+    assert_eq!(screen.app.lang, Lang::Zh);
+    screen.frame(Vec::new());
+    assert!(screen.sees("已中止") && !screen.sees("中断しました"));
 }

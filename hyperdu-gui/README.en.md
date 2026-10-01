@@ -2,9 +2,9 @@
 
 [日本語](README.md) · **English** · [简体中文](README.zh-CN.md)
 
-![HyperDU GUI](../docs/images/gui.png)
+![HyperDU GUI](../docs/images/gui-en.png)
 
-A Windows / Linux desktop interface for exploring disk usage. It reuses `hyperdu-core`, the same scanner as the CLI and MCP server. UI labels are Japanese; startup searches OS fonts for CJK, emoji, and other fallbacks.
+A Windows / Linux desktop interface for exploring disk usage. It reuses `hyperdu-core`, the same scanner as the CLI and MCP server. The UI is available in Japanese, English and Simplified Chinese and starts in the OS display language (English for any other). Switch at any time with the selector at the top right, or choose the startup language with `HYPERDU_LANG` (`ja` / `en` / `zh`). Startup searches OS fonts for CJK, emoji, and other fallbacks; the Chinese UI on Linux needs a font with Simplified Chinese, such as `fonts-noto-cjk`.
 
 ## Install
 

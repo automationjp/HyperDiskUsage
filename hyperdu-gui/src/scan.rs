@@ -36,6 +36,8 @@ pub enum Msg {
     Update(Update),
     Core(ScanEvent),
     Failed(String),
+    /// The scan thread panicked; worded by the UI.
+    Crashed,
 }
 pub struct Handle {
     pub rx: mpsc::Receiver<Msg>,
@@ -102,12 +104,33 @@ fn patterns(value: &str) -> Vec<String> {
         .map(str::to_owned)
         .collect()
 }
+/// A minimum-size entry the GUI cannot read. Typed, so the message is shown in
+/// the UI's language instead of the one this module was written in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SizeError {
+    Format,
+    TooLarge,
+}
+
+impl std::fmt::Display for SizeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            SizeError::Format => "size must be an integer with B / KB / KiB / MB / MiB / GB / GiB",
+            SizeError::TooLarge => "size is too large",
+        })
+    }
+}
+
+impl std::error::Error for SizeError {}
+
 fn size(value: &str) -> anyhow::Result<u64> {
     let text = value.trim().to_ascii_lowercase().replace(' ', "");
     let split = text
         .find(|c: char| !c.is_ascii_digit())
         .unwrap_or(text.len());
-    let number = text[..split].parse::<u64>()?;
+    let number = text[..split]
+        .parse::<u64>()
+        .map_err(|_| SizeError::Format)?;
     let multiplier = match &text[split..] {
         "" | "b" => 1,
         "k" | "kb" => 1000,
@@ -116,11 +139,11 @@ fn size(value: &str) -> anyhow::Result<u64> {
         "mib" => 1048576,
         "g" | "gb" => 1000000000,
         "gib" => 1073741824,
-        _ => anyhow::bail!("サイズは整数と B / KB / KiB / MB / MiB / GB / GiB で入力してください"),
+        _ => return Err(SizeError::Format.into()),
     };
     number
         .checked_mul(multiplier)
-        .ok_or_else(|| anyhow::anyhow!("サイズが大きすぎます"))
+        .ok_or_else(|| SizeError::TooLarge.into())
 }
 impl Params {
     pub fn to_options(&self) -> anyhow::Result<core::Options> {
@@ -255,7 +278,7 @@ pub fn start(
                     send(Msg::Failed(e.to_string()));
                 }
                 Err(_) => {
-                    send(Msg::Failed("走査スレッドが異常終了しました".into()));
+                    send(Msg::Crashed);
                 }
             }
         })?;

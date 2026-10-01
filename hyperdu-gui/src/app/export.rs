@@ -16,10 +16,13 @@ pub(super) enum Format {
     Json,
     Csv,
 }
+#[derive(Debug)]
 pub(super) enum Outcome {
     Saved(PathBuf),
     Cancelled,
     Failed(String),
+    /// The save thread ended without reporting; worded by the UI.
+    Crashed,
 }
 pub(super) struct Task {
     receiver: mpsc::Receiver<Outcome>,
@@ -52,9 +55,7 @@ impl Task {
         match self.receiver.try_recv() {
             Ok(result) => Some(result),
             Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => {
-                Some(Outcome::Failed("保存スレッドが異常終了しました".into()))
-            }
+            Err(TryRecvError::Disconnected) => Some(Outcome::Crashed),
         }
     }
     /// Cooperative cancellation; an active OS call or sort finishes first.
@@ -253,7 +254,7 @@ mod tests {
             cancel: Arc::clone(&cancel),
         };
         drop(sender);
-        assert!(matches!(task.poll(), Some(Outcome::Failed(_))));
+        assert!(matches!(task.poll(), Some(Outcome::Crashed)));
         drop(task);
         assert!(cancel.load(Ordering::Relaxed));
     }

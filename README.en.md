@@ -100,7 +100,7 @@ cargo install hyperdu-gui --locked --version 0.5.0-beta.6
 hyperdu-gui
 ```
 
-The Windows / Linux desktop app uses `egui` / `eframe`. Interactive mode delivers child-folder results progressively; Batch mode receives a complete map. Features include a directory tree, breadcrumbs, sortable rows, filters, progress, error and cancellation states, and JSON / CSV export. UI labels are Japanese.
+The Windows / Linux desktop app uses `egui` / `eframe`. Interactive mode delivers child-folder results progressively; Batch mode receives a complete map. Features include a directory tree, breadcrumbs, sortable rows, filters, progress, error and cancellation states, and JSON / CSV export. The UI is available in Japanese, English and Simplified Chinese and starts in the OS display language.
 
 Approximate mode does not promise exact allocation sizes. Cancellation and read errors are not reported as successful completion. [GUI behavior and limitations](hyperdu-gui/README.en.md)
 

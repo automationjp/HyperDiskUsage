@@ -1,5 +1,6 @@
 mod app;
 mod fonts;
+mod i18n;
 mod scan;
 
 /// 256x256 RGBA export of assets/hyperdu.ico. winit turns it into the
