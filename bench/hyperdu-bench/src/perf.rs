@@ -62,7 +62,8 @@ impl Perf {
             let configured = if event == "cpu-clock" {
                 "cpu-clock/freq=99,call-graph=dwarf/".to_string()
             } else {
-                format!("{event}/period=1,call-graph=no/")
+                // Tracepoints default to every event; their grammar rejects period=1.
+                format!("{event}/call-graph=no/")
             };
             c.arg("-e").arg(configured);
         }
@@ -222,7 +223,8 @@ mod command_tests {
             .map(|s| s.to_string_lossy().into_owned())
             .collect();
         assert!(args.contains(&"cpu-clock/freq=99,call-graph=dwarf/".into()));
-        assert!(args.contains(&"raw_syscalls:sys_enter/period=1,call-graph=no/".into()));
+        assert!(args.contains(&"raw_syscalls:sys_enter/call-graph=no/".into()));
+        assert!(!args.iter().any(|a| a.contains("period=1")));
         assert!(!args.contains(&"-F".into()));
         assert!(!args.contains(&"-c".into()));
         assert!(!args.contains(&"--call-graph".into()));
