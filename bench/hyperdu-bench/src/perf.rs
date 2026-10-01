@@ -211,8 +211,8 @@ mod tests {
     #[test]
     fn flattened_cpu_sample_keeps_the_leaf_symbol() {
         let input = "15726/15731 235.688711771: cpu-clock/freq=99,call-graph=dwarf/: ";
-        let row = parse_header(&format!("{input}ffffffff9fde6d0b apparmor_inode_getattr"))
-            .unwrap();
+        let raw = format!("{input}ffffffff9fde6d0b apparmor_inode_getattr");
+        let row = parse_header(&raw).unwrap();
         assert_eq!(row.2, 235688711771);
         assert_eq!(row.4, "ffffffff9fde6d0b apparmor_inode_getattr");
     }
