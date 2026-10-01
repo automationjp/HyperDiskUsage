@@ -77,15 +77,22 @@ fn os_language() -> Option<String> {
 
 #[cfg(not(windows))]
 fn os_language() -> Option<String> {
+    first_locale(|key| std::env::var(key).ok())
+}
+
+/// POSIX precedence: the first non-empty of these wins, `C` and `POSIX`
+/// included, so `LC_ALL=C` means English even when `LANG` says otherwise.
+#[cfg_attr(windows, allow(dead_code))]
+fn first_locale(get: impl Fn(&str) -> Option<String>) -> Option<String> {
     ["LC_ALL", "LC_MESSAGES", "LANG"]
-        .iter()
-        .filter_map(|key| std::env::var(key).ok())
-        .find(|value| !value.is_empty() && value != "C" && value != "POSIX")
+        .into_iter()
+        .filter_map(get)
+        .find(|value| !value.is_empty())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Lang;
+    use super::{first_locale, Lang};
 
     #[test]
     fn locale_tags_map_to_the_three_languages() {
@@ -94,5 +101,24 @@ mod tests {
         assert_eq!(Lang::from_tag("zh-TW"), Lang::Zh);
         assert_eq!(Lang::from_tag("en_US.UTF-8"), Lang::En);
         assert_eq!(Lang::from_tag("de_DE"), Lang::En);
+    }
+
+    #[test]
+    fn an_explicit_c_locale_outranks_lang() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |key: &str| {
+                pairs
+                    .iter()
+                    .find(|(k, _)| *k == key)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        let pick = |pairs| Lang::from_tag(&first_locale(env(pairs)).unwrap());
+        assert_eq!(pick(&[("LC_ALL", "C"), ("LANG", "ja_JP.UTF-8")]), Lang::En);
+        assert_eq!(
+            pick(&[("LC_MESSAGES", "POSIX"), ("LANG", "zh_CN.UTF-8")]),
+            Lang::En
+        );
+        assert_eq!(pick(&[("LC_ALL", ""), ("LANG", "ja_JP.UTF-8")]), Lang::Ja);
     }
 }
