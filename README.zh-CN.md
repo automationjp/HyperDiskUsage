@@ -98,7 +98,7 @@ cargo install hyperdu-gui --locked --version 0.5.0-beta.5
 hyperdu-gui
 ```
 
-Windows / Linux 桌面应用基于 `egui` / `eframe`。Interactive 模式逐步交付子目录结果，Batch 模式接收整体结果。支持目录树、面包屑、可排序列表、筛选、进度、错误与取消状态，以及 JSON / CSV 导出。界面文字为日语。
+Windows / Linux 桌面应用基于 `egui` / `eframe`。Interactive 模式逐步交付子目录结果，Batch 模式接收整体结果。支持目录树、面包屑、可排序列表、筛选、进度、错误与取消状态，以及 JSON / CSV 导出。界面支持日语、英语和简体中文，启动时使用操作系统的显示语言。
 
 估算模式不保证精确的分配大小。取消或读取错误不会被报告为成功完成。[GUI 操作与限制](hyperdu-gui/README.zh-CN.md)
 

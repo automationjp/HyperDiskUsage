@@ -53,7 +53,8 @@ winresource = { version = "0.1.31", default-features = false }
 section = "utils"
 priority = "optional"
 depends = "$auto"
-# The UI is Japanese and egui bundles no CJK face; without one every label is tofu.
+# The UI is Japanese, English or Simplified Chinese and egui bundles no CJK face;
+# without one every Japanese or Chinese label is tofu. Noto CJK covers both.
 recommends = "fonts-noto-cjk"
 maintainer = "HyperDU Maintainers <maintainers@example.com>"
 extended-description = "Hyper-fast disk usage analyzer GUI."

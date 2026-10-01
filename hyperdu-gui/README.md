@@ -4,7 +4,7 @@
 
 ![HyperDU GUI](../docs/images/gui.png)
 
-ディスク使用量をツリーと一覧で調べる、Windows / Linux向けのデスクトップGUIです。独自の走査処理を持たず、CLI / MCPと共通の `hyperdu-core` を使います。画面は日本語で、起動時にOSのフォントからCJK・絵文字などのfallbackを探します。
+ディスク使用量をツリーと一覧で調べる、Windows / Linux向けのデスクトップGUIです。独自の走査処理を持たず、CLI / MCPと共通の `hyperdu-core` を使います。画面は日本語・英語・簡体字中国語に対応し、OSの表示言語で始まります（それ以外の言語は英語）。右上の選択欄でいつでも切り替えられ、環境変数 `HYPERDU_LANG`（`ja` / `en` / `zh`）で起動時の言語も指定できます。起動時にOSのフォントからCJK・絵文字などのfallbackを探します。Linuxで中国語表示を使う場合は、簡体字を含むフォント（`fonts-noto-cjk` など）が必要です。
 
 ## 公開済みベータ版の導入
 
