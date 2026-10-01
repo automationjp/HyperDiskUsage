@@ -26,6 +26,7 @@ TOOLS = ("hyperdu", "dua", "tokei")
 
 
 def commands(binaries, root):
+    """Return the timed argv of each tool for one tree; HyperDU keeps the extended-length path."""
     # dua and tokei reject the extended-length prefix that lets the deep fixture pass MAX_PATH.
     plain = str(root).removeprefix("\\\\?\\")
     return {
@@ -62,6 +63,7 @@ def gate(name, root, expected, cmds, scratch):
 
 
 def measure(binaries, name, root, runs, scratch, tools):
+    """Gate one tree against the oracle, time `tools` in rotating order, and return the raw record."""
     cmds = commands(binaries, root)
     expected = oracle(root)
     facts = gate(name, root, expected, cmds, scratch)
@@ -82,10 +84,12 @@ def measure(binaries, name, root, runs, scratch, tools):
 
 
 def version(binary, flag="--version"):
+    """Return the version banner a tool binary prints."""
     return run([str(binary), flag])[1].strip()
 
 
 def main():
+    """Parse arguments, measure every synthetic and real tree, and write the JSON record."""
     parser = argparse.ArgumentParser(description=__doc__)
     for tool in TOOLS:
         parser.add_argument(f"--{tool}", type=Path, required=True)

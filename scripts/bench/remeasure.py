@@ -65,6 +65,7 @@ def oracle(root):
 
 
 def make_trees(parent, wide=(500, 40), deep=(400, 5), flat=20_000):
+    """Create wide (dirs, files per dir), deep (levels, files per level) and flat (files) fixtures under `parent`."""
     root = Path(tempfile.mkdtemp(prefix="hyperdu-warm-", dir=parent))
     if os.name == "nt":
         root = Path("\\\\?\\" + str(root.resolve()))
