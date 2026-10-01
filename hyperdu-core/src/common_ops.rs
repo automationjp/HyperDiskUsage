@@ -48,6 +48,9 @@ pub fn report_file_progress(
     total_files: &AtomicU64,
     sample: Option<(&Path, u64, u64)>,
 ) {
+    if let (Some(c), Some((_, _, physical))) = (&opt.progress_counters, sample) {
+        c.bytes.fetch_add(physical, Ordering::Relaxed);
+    }
     if opt.progress_every == 0 {
         return;
     }
@@ -80,8 +83,12 @@ pub fn report_files_batch(
     opt: &Options,
     total_files: &AtomicU64,
     n: u64,
+    bytes: u64,
     sample: impl FnOnce() -> (std::path::PathBuf, u64, u64),
 ) {
+    if let Some(c) = &opt.progress_counters {
+        c.bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
     if n == 0 || opt.progress_every == 0 {
         return;
     }

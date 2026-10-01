@@ -182,6 +182,62 @@ pub struct ProgressSample<'a> {
     pub physical: u64,
 }
 
+/// Counters a caller can poll to estimate how much of a scan is done.
+///
+/// Updated only while installed as [`Options::progress_counters`]; none of them
+/// is a percentage on its own, the caller picks the one whose total it knows.
+#[derive(Debug, Default)]
+pub struct ProgressCounters {
+    /// Allocated bytes of the files accounted so far.
+    pub bytes: AtomicU64,
+    /// Directories at depth 1 and 2 discovered so far.
+    pub dirs_total: AtomicU64,
+    /// Those whose whole subtree is finished.
+    pub dirs_done: AtomicU64,
+    /// `$MFT` records read, and the records in the table (0 unless an MFT
+    /// read started).
+    pub mft_records: AtomicU64,
+    pub mft_records_total: AtomicU64,
+}
+
+/// A depth-1 or depth-2 directory whose completion [`ProgressCounters`] counts.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct ProgressUnit {
+    /// Its own jobs still queued or running, plus, for depth 1, the depth-2
+    /// directories below it not yet finished.
+    pending: AtomicU64,
+    parent: Option<Arc<ProgressUnit>>,
+}
+
+impl ProgressUnit {
+    fn new(parent: Option<Arc<ProgressUnit>>) -> Arc<Self> {
+        if let Some(p) = &parent {
+            p.pending.fetch_add(1, Ordering::Relaxed);
+        }
+        Arc::new(Self {
+            pending: AtomicU64::new(1),
+            parent,
+        })
+    }
+
+    fn join(self: &Arc<Self>) -> Arc<Self> {
+        self.pending.fetch_add(1, Ordering::Relaxed);
+        self.clone()
+    }
+
+    /// One pending item is through; a depth-1 directory therefore finishes
+    /// only after every depth-2 directory below it has.
+    fn finish(&self, counters: &ProgressCounters) {
+        if self.pending.fetch_sub(1, Ordering::AcqRel) == 1 {
+            counters.dirs_done.fetch_add(1, Ordering::Relaxed);
+            if let Some(p) = &self.parent {
+                p.finish(counters);
+            }
+        }
+    }
+}
+
 /// Called occasionally with a sample file, to show what a scan is working on.
 pub type ProgressSampleCallback = Arc<dyn Fn(&ProgressSample<'_>) + Send + Sync + 'static>;
 
@@ -238,6 +294,7 @@ pub struct Options {
     pub progress_every: u64, // 0 = disabled
     pub progress_callback: Option<ProgressCallback>,
     pub progress_sample_callback: Option<ProgressSampleCallback>,
+    pub progress_counters: Option<Arc<ProgressCounters>>,
     pub compute_physical: bool, // if false, use logical size as physical (faster)
     pub dir_yield_every: Arc<AtomicUsize>, // 0 = no yielding; split large dirs every N entries
     pub approximate_sizes: bool, // if true and compute_physical=false, estimate regular file size (e.g., 4KiB) to avoid statx
@@ -338,6 +395,7 @@ impl Default for Options {
             progress_every: 0,
             progress_callback: None,
             progress_sample_callback: None,
+            progress_counters: None,
             io_profile: IoProfile::default(),
             prefetch: None,
             io_prefetch: false,
@@ -575,6 +633,7 @@ pub struct ScanContext<'a> {
     pub(crate) local: &'a Worker<Job>,
     pub(crate) total_files: &'a AtomicU64,
     deferred: Option<&'a DeferredDirs>,
+    unit: Option<&'a Arc<ProgressUnit>>,
 }
 
 #[derive(Clone, Copy)]
@@ -605,8 +664,21 @@ impl<'a> ScanContext<'a> {
                 dir: path,
                 depth,
                 resume: None,
+                unit: self.child_unit(depth),
             },
         );
+    }
+
+    /// Depth 1 and 2 directories each start a unit of progress; deeper ones
+    /// join the unit of the directory that found them.
+    #[inline]
+    fn child_unit(&self, depth: u32) -> Option<Arc<ProgressUnit>> {
+        let counters = self.options.progress_counters.as_ref()?;
+        if depth <= 2 {
+            counters.dirs_total.fetch_add(1, Ordering::Relaxed);
+            return Some(ProgressUnit::new(self.unit.cloned()));
+        }
+        self.unit.map(ProgressUnit::join)
     }
 
     /// Schedule the continuation of a large directory (high priority).
@@ -616,6 +688,7 @@ impl<'a> ScanContext<'a> {
             dir: path,
             depth,
             resume: Some(resume),
+            unit: self.unit.map(ProgressUnit::join),
         });
     }
 
@@ -633,9 +706,10 @@ impl<'a> ScanContext<'a> {
         &self,
         opt: &Options,
         n: u64,
+        bytes: u64,
         sample: impl FnOnce() -> (PathBuf, u64, u64),
     ) {
-        crate::common_ops::report_files_batch(opt, self.total_files, n, sample);
+        crate::common_ops::report_files_batch(opt, self.total_files, n, bytes, sample);
     }
 }
 
@@ -873,6 +947,7 @@ pub fn scan_directory_mode(
             dir: root.to_path_buf(),
             depth: 0,
             resume: None,
+            unit: None,
         },
         options.clone(),
         counter.clone(),
@@ -901,6 +976,7 @@ pub fn scan_directory_mode(
                 dir: child.clone(),
                 depth: 1,
                 resume: None,
+                unit: None,
             },
             options.clone(),
             counter.clone(),
@@ -997,6 +1073,7 @@ fn prepare_scan(
         dir: root.to_path_buf(),
         depth: 0,
         resume: None,
+        unit: None,
     });
     (options, workers, sched)
 }
@@ -1083,7 +1160,13 @@ fn run_worker(
         {
             break;
         }
-        let Some(Job { dir, depth, resume }) = sched.find_job(&local, &mut next) else {
+        let Some(Job {
+            dir,
+            depth,
+            resume,
+            unit,
+        }) = sched.find_job(&local, &mut next)
+        else {
             if !sched.wait_for_work(&backoff) {
                 break;
             }
@@ -1098,6 +1181,7 @@ fn run_worker(
             local: &local,
             total_files,
             deferred: control.deferred,
+            unit: unit.as_ref(),
         };
         let dctx = DirContext {
             dir: &dir,
@@ -1111,6 +1195,11 @@ fn run_worker(
             scanner.process_dir(&ctx, &dctx, &mut local_map);
         }));
         drop(done);
+        // Children were counted into the unit before this, so it reaches zero
+        // only once the whole subtree is through.
+        if let (Some(unit), Some(counters)) = (&unit, &options.progress_counters) {
+            unit.finish(counters);
+        }
         if outcome.is_err() {
             // This worker is leaving and its deque goes with it. Release the
             // jobs still queued there, or the in-flight count would never reach

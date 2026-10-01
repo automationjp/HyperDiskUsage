@@ -3,69 +3,16 @@ use std::{
     io::{IsTerminal, Write},
     path::{Path, PathBuf},
     sync::Arc,
-    thread,
-    time::Duration,
 };
 
 mod index_cli;
 mod mcp;
+mod progress_view;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use humansize::{format_size, BINARY};
 
-struct KeepAlive {
-    stop: Option<std::sync::mpsc::SyncSender<()>>,
-    handle: Option<std::thread::JoinHandle<()>>,
-}
-
-impl KeepAlive {
-    fn start(
-        enabled: bool,
-        last: Arc<std::sync::Mutex<(u64, std::time::Instant)>>,
-    ) -> Option<Self> {
-        if !enabled {
-            return None;
-        }
-        eprintln!("scanning …");
-        let (stop, stopped) = std::sync::mpsc::sync_channel(1);
-        let handle = thread::spawn(move || {
-            let keep_secs = std::env::var("HYPERDU_PROGRESS_KEEPALIVE_SECS")
-                .ok()
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(1)
-                .max(1);
-            let started = std::time::Instant::now();
-            // Completion wakes the wait immediately, including a very short scan.
-            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
-                stopped.recv_timeout(Duration::from_secs(keep_secs))
-            {
-                let (n, t) = *last.lock().unwrap_or_else(|e| e.into_inner());
-                if t.elapsed().as_secs() >= keep_secs {
-                    eprintln!(
-                        "still scanning … processed {n} files | elapsed {:.1}s",
-                        started.elapsed().as_secs_f64()
-                    );
-                }
-            }
-        });
-        Some(Self {
-            stop: Some(stop),
-            handle: Some(handle),
-        })
-    }
-}
-
-impl Drop for KeepAlive {
-    fn drop(&mut self) {
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
-        }
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
-    }
-}
 // Cross-platform filesystem stats (total/free) for a given path's volume.
 //
 // The platform `cfg` blocks this used to carry now live in
@@ -347,11 +294,11 @@ struct Args {
     stderrが端末の場合は自動で有効です。リダイレクト時も表示するには --progress を指定します。"
     )]
     progress: bool,
-    /// Progress emission frequency (files). Default 8192
+    /// Progress emission frequency (files). Default 256 while progress is shown, else 8192
     #[arg(
         long = "progress-every",
         value_name = "N",
-        long_help = "進捗表示の頻度（ファイル件数）。既定は8192。小さい値にすると低速FSでも無反応に見えにくくなります。"
+        long_help = "進捗表示の頻度（ファイル件数）。既定は進捗表示中が256、それ以外は8192。小さい値にすると低速FSでも無反応に見えにくくなります。"
     )]
     progress_every: Option<u64>,
 
@@ -866,59 +813,19 @@ fn main() -> Result<()> {
         opt.visited_dirs = Some(std::sync::Arc::new(dashmap::DashMap::with_capacity(1024)));
     }
 
-    fn short_path(p: &std::path::Path) -> String {
-        let name = p.file_name().and_then(|s| s.to_str());
-        if let Some(n) = name {
-            return n.to_string();
-        }
-        let s = p.to_string_lossy();
-        let s: &str = &s;
-        if s.len() <= 80 {
-            s.to_string()
-        } else {
-            format!("…{}", &s[s.len() - 60..])
-        }
-    }
     if let Some(n) = args.dir_yield_every {
         opt.dir_yield_every
             .store(n, std::sync::atomic::Ordering::Relaxed);
     }
-    opt.progress_every = args.progress_every.unwrap_or(8192);
     // `--progress` is the explicit ask and always wins; the terminal heuristic
     // only applies where stderr is ours to narrate.
     let print_progress = args.progress || (chatty && std::io::stderr().is_terminal());
-    let t_start = std::time::Instant::now();
-    let last = std::sync::Arc::new(std::sync::Mutex::new((0u64, t_start)));
-    let last_cb = last.clone();
-    opt.progress_callback = Some(std::sync::Arc::new(move |n| {
-        let now = std::time::Instant::now();
-        let total_dt = now.duration_since(t_start).as_secs_f64().max(1e-6);
-        let total_rate = (n as f64) / total_dt;
-        let (prev_n, prev_t) = *last_cb.lock().unwrap();
-        let delta_n = n.saturating_sub(prev_n);
-        let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
-        let recent_rate = (delta_n as f64) / delta_dt;
-        *last_cb.lock().unwrap() = (n, now);
-        if print_progress {
-            eprintln!(
-                "progress: processed {n} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)"
-            );
-        }
-    }));
-    // Keep-alive: emit periodic status if no progress callback fired recently
-    let _keepalive = KeepAlive::start(print_progress, last.clone());
-    if print_progress {
-        opt.progress_sample_callback = Some(std::sync::Arc::new(
-            move |s: &hyperdu_core::ProgressSample<'_>| {
-                eprintln!(
-                    "  sample: {} (size: {})",
-                    short_path(s.path),
-                    format_size(s.logical, BINARY)
-                );
-            },
-        ));
-    }
-
+    // Shown progress wants a count that moves between redraws; at 8192 it
+    // jumped in visible steps and sat at 0 for the first moments. A tick is an
+    // atomic max and one short string, so 256 costs the scan nothing measurable.
+    opt.progress_every = args
+        .progress_every
+        .unwrap_or(if print_progress { 256 } else { 8192 });
     // Whether `--mft` could apply to this path at all. Elevation and the
     // filesystem type are checked in the core, which is where the fallback
     // lives; this only catches the case the user can see and fix themselves.
@@ -1023,6 +930,25 @@ fn main() -> Result<()> {
         );
     }
 
+    // Started after the warnings above so the in-place status sits below them.
+    let view = print_progress
+        .then(|| progress_view::ProgressView::start(&roots, std::io::stderr().is_terminal()));
+    if let Some(v) = &view {
+        opt.progress_counters = Some(v.counters());
+        let s = v.shared();
+        opt.progress_callback = Some(Arc::new(move |n| s.update(n)));
+        let s = v.shared();
+        opt.progress_sample_callback =
+            Some(Arc::new(move |p: &hyperdu_core::ProgressSample<'_>| {
+                s.sample(p.path, p.logical)
+            }));
+        // Errors printed mid-scan would otherwise land inside the status lines.
+        if let Some(report) = opt.error_report.take() {
+            let s = v.shared();
+            opt.error_report = Some(Arc::new(move |msg: &str| s.hold(|| report(msg))));
+        }
+    }
+
     let mut total_dt = std::time::Duration::from_secs(0);
     let mut exit_code = 0i32;
 
@@ -1049,23 +975,10 @@ fn main() -> Result<()> {
         }
         let dt = t0.elapsed();
         total_dt += dt;
-        // Emit a final progress line if progress enabled and threshold未達で未出力の場合
-        if print_progress {
-            let now = std::time::Instant::now();
-            let (prev_n, prev_t) = *last.lock().unwrap();
-            if total_stat.files > prev_n {
-                let total_dt_s = now.duration_since(t_start).as_secs_f64().max(1e-6);
-                let total_rate = (total_stat.files as f64) / total_dt_s;
-                let delta_n = total_stat.files.saturating_sub(prev_n);
-                let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
-                let recent_rate = (delta_n as f64) / delta_dt;
-                eprintln!(
-                    "progress: processed {files} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)",
-                    files = total_stat.files
-                );
-                *last.lock().unwrap() = (total_stat.files, now);
-            }
+        if let Some(v) = &view {
+            v.shared().record_total(total_stat.files);
         }
+        drop(view);
         let dirs_scanned = map.len();
         // `--max-depth` trims the listing below. `total_stat` and `dirs_scanned`
         // are already summed and stay whole, which is the point: the `Total:`
@@ -1198,7 +1111,6 @@ fn main() -> Result<()> {
                 println!("wrote class-report-csv: {}", p.display());
             }
         }
-        // progress already emitted during scan when enabled
         Ok(())
     } else {
         // du-like output: blocks<TAB>path, children before parents
@@ -1256,6 +1168,11 @@ fn main() -> Result<()> {
                 let t0 = std::time::Instant::now();
                 let merged = hyperdu_core::auto_parallel_scan(roots.clone(), &opt)?;
                 total_dt += t0.elapsed();
+                if let Some(v) = &view {
+                    let files = roots.iter().filter_map(|r| merged.get(r)).map(|s| s.files);
+                    v.shared().record_total(files.sum());
+                }
+                drop(view);
                 for root in &roots {
                     let mut entries: Vec<(PathBuf, hyperdu_core::Stat)> = merged
                         .iter()
@@ -1263,22 +1180,6 @@ fn main() -> Result<()> {
                         .map(|(p, s)| (p.clone(), *s))
                         .collect();
                     entries.sort_unstable_by(|a, b| post_order_cmp(&a.0, &b.0));
-                    if print_progress {
-                        let total_files: u64 = entries.iter().map(|(_, s)| s.files).sum();
-                        let now = std::time::Instant::now();
-                        let (prev_n, prev_t) = *last.lock().unwrap();
-                        if total_files > prev_n {
-                            let total_dt_s = now.duration_since(t_start).as_secs_f64().max(1e-6);
-                            let total_rate = (total_files as f64) / total_dt_s;
-                            let delta_n = total_files.saturating_sub(prev_n);
-                            let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
-                            let recent_rate = (delta_n as f64) / delta_dt;
-                            eprintln!(
-                                "progress: processed {total_files} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)"
-                            );
-                            *last.lock().unwrap() = (total_files, now);
-                        }
-                    }
                     for (p, s) in entries {
                         if p.as_os_str().is_empty() {
                             continue;
@@ -1314,6 +1215,11 @@ fn main() -> Result<()> {
                 let t0 = std::time::Instant::now();
                 let merged = hyperdu_core::parallel_scan(roots.clone(), &opt)?;
                 total_dt += t0.elapsed();
+                if let Some(v) = &view {
+                    let files = roots.iter().filter_map(|r| merged.get(r)).map(|s| s.files);
+                    v.shared().record_total(files.sum());
+                }
+                drop(view);
                 for root in &roots {
                     let mut entries: Vec<(PathBuf, hyperdu_core::Stat)> = merged
                         .iter()
@@ -1321,22 +1227,6 @@ fn main() -> Result<()> {
                         .map(|(p, s)| (p.clone(), *s))
                         .collect();
                     entries.sort_unstable_by(|a, b| post_order_cmp(&a.0, &b.0));
-                    if print_progress {
-                        let total_files: u64 = entries.iter().map(|(_, s)| s.files).sum();
-                        let now = std::time::Instant::now();
-                        let (prev_n, prev_t) = *last.lock().unwrap();
-                        if total_files > prev_n {
-                            let total_dt_s = now.duration_since(t_start).as_secs_f64().max(1e-6);
-                            let total_rate = (total_files as f64) / total_dt_s;
-                            let delta_n = total_files.saturating_sub(prev_n);
-                            let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
-                            let recent_rate = (delta_n as f64) / delta_dt;
-                            eprintln!(
-                                "progress: processed {total_files} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)"
-                            );
-                            *last.lock().unwrap() = (total_files, now);
-                        }
-                    }
                     for (p, s) in entries {
                         if p.as_os_str().is_empty() {
                             continue;
@@ -1376,65 +1266,67 @@ fn main() -> Result<()> {
             }
         }
 
+        let mut scanned_files = 0u64;
         for root in &roots {
             let t0 = std::time::Instant::now();
             match hyperdu_core::scan_directory(root, &opt) {
                 Ok(map) => {
                     let mut entries: Vec<(PathBuf, hyperdu_core::Stat)> = map.into_iter().collect();
                     entries.sort_unstable_by(|a, b| post_order_cmp(&a.0, &b.0));
-                    if print_progress {
-                        let total_files = entries
-                            .iter()
-                            .find(|(p, _)| p == root)
-                            .map(|(_, s)| s.files)
-                            .unwrap_or_else(|| entries.iter().map(|(_, s)| s.files).sum());
-                        let now = std::time::Instant::now();
-                        let (prev_n, prev_t) = *last.lock().unwrap();
-                        if total_files > prev_n {
-                            let total_dt_s = now.duration_since(t_start).as_secs_f64().max(1e-6);
-                            let total_rate = (total_files as f64) / total_dt_s;
-                            let delta_n = total_files.saturating_sub(prev_n);
-                            let delta_dt = now.duration_since(prev_t).as_secs_f64().max(1e-6);
-                            let recent_rate = (delta_n as f64) / delta_dt;
-                            eprintln!(
-                                "progress: processed {total_files} files | rate: {total_rate:.0} f/s (recent {recent_rate:.0} f/s)"
-                            );
-                            *last.lock().unwrap() = (total_files, now);
+                    let root_files = entries
+                        .iter()
+                        .find(|(p, _)| p == root)
+                        .map_or(0, |(_, s)| s.files);
+                    let print = || {
+                        for (p, s) in entries {
+                            if p.as_os_str().is_empty() {
+                                continue;
+                            }
+                            // Hides the row, never the number: `s` came from a
+                            // full-depth walk, exactly as GNU du's -d does.
+                            if !within_display_depth(&p, &roots, max_depth) {
+                                continue;
+                            }
+                            let bytes = if args.apparent_size {
+                                s.logical
+                            } else {
+                                s.physical
+                            };
+                            let blocks = div_ceil(bytes, bs as u64);
+                            if print_time {
+                                println!(
+                                    "{}\t{}\t{}",
+                                    blocks,
+                                    format_time(&p, time_kind, time_style),
+                                    p.display()
+                                );
+                            } else {
+                                println!("{}\t{}", blocks, p.display());
+                            }
                         }
-                    }
-                    for (p, s) in entries {
-                        if p.as_os_str().is_empty() {
-                            continue;
+                    };
+                    match &view {
+                        Some(v) => {
+                            v.shared().hold(print);
+                            v.shared().root_done(root_files);
+                            scanned_files += root_files;
                         }
-                        // Hides the row, never the number: `s` came from a
-                        // full-depth walk, exactly as GNU du's -d does.
-                        if !within_display_depth(&p, &roots, max_depth) {
-                            continue;
-                        }
-                        let bytes = if args.apparent_size {
-                            s.logical
-                        } else {
-                            s.physical
-                        };
-                        let blocks = div_ceil(bytes, bs as u64);
-                        if print_time {
-                            println!(
-                                "{}\t{}\t{}",
-                                blocks,
-                                format_time(&p, time_kind, time_style),
-                                p.display()
-                            );
-                        } else {
-                            println!("{}\t{}", blocks, p.display());
-                        }
+                        None => print(),
                     }
                 }
                 Err(e) => {
-                    eprintln!("{}: {}", root.display(), e);
+                    let report = || eprintln!("{}: {}", root.display(), e);
+                    match &view {
+                        Some(v) => v.shared().hold(report),
+                        None => report(),
+                    }
                     exit_code = 1;
                 }
             }
             total_dt += t0.elapsed();
+        }
+        if let (Some(v), 0) = (&view, exit_code) {
+            v.shared().record_total(scanned_files);
         }
         let errn = opt.error_count.load(std::sync::atomic::Ordering::Relaxed);
         if errn > 0 || exit_code != 0 {

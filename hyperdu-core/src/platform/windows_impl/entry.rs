@@ -45,6 +45,8 @@ pub(super) struct DirState {
     pub paths: ChildPathBuilder,
     /// Files accounted so far (flushed to the shared counter once per directory).
     pub files: u64,
+    /// Allocated bytes of those files.
+    pub bytes: u64,
     /// Volume serial of the directory (set by the backend when `needs_identity`).
     pub volume: u64,
     pub dedupe: bool,
@@ -69,6 +71,7 @@ impl DirState {
                 },
             ),
             files: 0,
+            bytes: 0,
             volume: if !crate::follows_links(opt) {
                 opt.windows_root_volume.as_ref().map_or(0, |volume| {
                     volume.load(std::sync::atomic::Ordering::Acquire)
@@ -93,10 +96,10 @@ impl DirState {
     /// Hand the directory's file tally to the shared progress counter. The
     /// sample path is only built if a callback actually fires.
     pub fn flush_progress(&mut self, ctx: &ScanContext, dir: &Path) {
-        let files = self.files;
-        self.files = 0;
+        let files = std::mem::take(&mut self.files);
+        let bytes = std::mem::take(&mut self.bytes);
         let sample = self.sample.take();
-        ctx.report_progress_batch(ctx.options, files, || match &sample {
+        ctx.report_progress_batch(ctx.options, files, bytes, || match &sample {
             Some(s) if !s.name.is_empty() => (self.paths.path(&s.name), s.logical, s.physical),
             _ => (dir.to_path_buf(), 0, 0),
         });
@@ -248,6 +251,7 @@ fn handle_file(opt: &Options, st: &mut DirState, stat_cur: &mut Stat, e: &RawEnt
     };
     update_file_stats(stat_cur, logical, physical);
     st.files += 1;
+    st.bytes += physical;
     if let Some(sample) = st.sample.as_mut() {
         sample.name.clear();
         sample.name.extend_from_slice(e.name);

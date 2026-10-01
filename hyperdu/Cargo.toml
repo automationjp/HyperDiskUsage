@@ -38,7 +38,7 @@ rmcp = { version = "3.2", features = ["server", "macros", "transport-io"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "sync", "time"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+windows = { version = "0.62", features = ["Win32_Storage_FileSystem", "Win32_Foundation", "Win32_System_Console"] }
 
 # Windows executable icon, see build.rs. Cargo matches a target-specific
 # build-dependency against the *host*, not the target being built, so a Linux

@@ -31,6 +31,9 @@ pub struct Job {
     pub dir: PathBuf,
     pub depth: u32,
     pub resume: Option<u64>,
+    /// The depth-1 or depth-2 directory this job counts towards; set only when
+    /// [`crate::Options::progress_counters`] is installed.
+    pub unit: Option<std::sync::Arc<crate::ProgressUnit>>,
 }
 
 pub struct Scheduler {
@@ -185,6 +188,7 @@ mod tests {
             dir: PathBuf::from(p),
             depth,
             resume: None,
+            unit: None,
         }
     }
 

@@ -339,6 +339,7 @@ pub fn open_dir_readonly(path: &std::ffi::CStr, follow_links: bool) -> libc::c_i
 ///
 pub struct FileCounter {
     files: u64,
+    bytes: u64,
     sample: Option<SampleSlot>,
 }
 
@@ -352,6 +353,7 @@ impl FileCounter {
     pub fn new(opt: &crate::Options) -> Self {
         Self {
             files: 0,
+            bytes: 0,
             sample: opt.progress_sample_callback.as_ref().map(|_| SampleSlot {
                 name: Vec::with_capacity(64),
                 logical: 0,
@@ -363,6 +365,7 @@ impl FileCounter {
     #[inline]
     pub fn record(&mut self, name: &[u8], logical: u64, physical: u64) {
         self.files += 1;
+        self.bytes += physical;
         if let Some(slot) = self.sample.as_mut() {
             slot.name.clear();
             slot.name.extend_from_slice(name);
@@ -378,7 +381,8 @@ impl FileCounter {
             return;
         }
         let files = std::mem::take(&mut self.files);
-        ctx.report_progress_batch(opt, files, || match self.sample.as_ref() {
+        let bytes = std::mem::take(&mut self.bytes);
+        ctx.report_progress_batch(opt, files, bytes, || match self.sample.as_ref() {
             Some(slot) if !slot.name.is_empty() => {
                 use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
                 (
