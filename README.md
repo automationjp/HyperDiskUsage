@@ -51,6 +51,44 @@ hyperdu --compat gnu -b --time /usr/share
 hyperdu --help
 ```
 
+### 実行するとこう表示されます
+
+Windowsで約164万ファイルのフォルダを調べた例です。パスとファイル名は例示用に置き換えています。
+
+```powershell
+hyperdu D:\data --top 3
+```
+
+走査中は、端末の下2行だけが20msごとに書き換わります。
+
+```text
+progress:  --% | 303661 files | 326255 f/s | 0.9s
+scan: photo_0412.jpg (2.31 MiB)
+```
+
+1行目は完了割合・処理済みファイル数・速度・経過時間、2行目はいま走査しているファイルです。割合は推定です。ドライブ直下ではボリュームの使用量、管理者の `--mft` では `$MFT` のレコード数、同じ場所を前に調べた記録があればそのファイル数、それ以外は2階層目までのフォルダのうち走査を終えた数を基準にします。基準がまだ無い間は `--%` と表示し、完了までは99%で止まります。
+
+走査が終わると2行は消え、物理サイズの大きい順の結果が残ります。
+
+```text
+fs-auto: fs='unknown' strategy='generic' reason='platform=non-linux' for 'D:\data'
+Top 3 under D:\data (physical desc):
+  1. D:\data | phys=204.39 GiB | log=201.76 GiB | files=1641117
+  2. D:\data\videos | phys=72.24 GiB | log=71.81 GiB | files=247520
+  3. D:\data\photos | phys=32.95 GiB | log=32.44 GiB | files=360626
+
+Summary:
+  Root: D:\data
+  Elapsed: 20.316s
+  Threads: 32
+  Excludes: (none)
+  Follow links: false
+  Total: files=1641117 | phys=204.39 GiB | log=201.76 GiB | dirs=766394
+  Disk: total=929.23 GiB | used=826.63 GiB | free=102.60 GiB | usage=89.0%
+```
+
+出力をリダイレクトしたときは、2行を書き換えず1秒ごとに追記します。
+
 通常の上位表示は**ディレクトリを物理サイズで順位付け**します。`--apparent-size` を付けても `--top` の順位は物理サイズ基準です。`--time` 系オプションには既定で有効な `time-format` featureが必要です。除外条件、出力の深さ、走査制限、リンク追従はそれぞれ意味が違うため、[CLIリファレンス](docs/cli-reference.md)を参照してください。
 
 **GNU / POSIX `du` の完全な置き換えではありません。** `--compat posix-strict` は512-byte単位などを選びますが、POSIX必須の `-a`、`-s`、`-H`、`-L` は未対応です。無条件の `du` エイリアス化は避けてください。[互換性監査](docs/posix-compatibility.md)

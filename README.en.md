@@ -51,6 +51,44 @@ hyperdu --compat gnu -b --time /usr/share
 hyperdu --help
 ```
 
+### What a run looks like
+
+Scanning a folder of about 1.64 million files on Windows (paths and file names replaced with placeholders):
+
+```powershell
+hyperdu D:\data --top 3
+```
+
+While the scan runs, only the last two lines of the terminal change, every 20 ms.
+
+```text
+progress:  --% | 303661 files | 326255 f/s | 0.9s
+scan: photo_0412.jpg (2.31 MiB)
+```
+
+The first line is the completed share, files processed, rate and elapsed time; the second is a file being scanned right now. The percentage is an estimate. A drive root is measured against the volume's used space, an elevated `--mft` scan against the `$MFT` record count, a folder scanned before against its previous file count, and anything else against the depth-1 and depth-2 folders already finished. Until a basis exists it reads `--%`, and it stays at 99% until the scan completes.
+
+When the scan finishes, the two lines are erased and the result, largest physical size first, remains:
+
+```text
+fs-auto: fs='unknown' strategy='generic' reason='platform=non-linux' for 'D:\data'
+Top 3 under D:\data (physical desc):
+  1. D:\data | phys=204.39 GiB | log=201.76 GiB | files=1641117
+  2. D:\data\videos | phys=72.24 GiB | log=71.81 GiB | files=247520
+  3. D:\data\photos | phys=32.95 GiB | log=32.44 GiB | files=360626
+
+Summary:
+  Root: D:\data
+  Elapsed: 20.316s
+  Threads: 32
+  Excludes: (none)
+  Follow links: false
+  Total: files=1641117 | phys=204.39 GiB | log=201.76 GiB | dirs=766394
+  Disk: total=929.23 GiB | used=826.63 GiB | free=102.60 GiB | usage=89.0%
+```
+
+With stderr redirected, the two lines are appended once a second instead of being redrawn.
+
 Normal top output ranks **directories by physical size**, including when `--apparent-size` is present. Time options require the default-enabled `time-format` feature. Exclusions, display depth, scan limits, and link following are distinct controls; consult the [CLI reference](docs/cli-reference.md).
 
 **Not a complete GNU / POSIX `du` replacement.** `--compat posix-strict` selects defaults such as 512-byte units, but required POSIX options `-a`, `-s`, `-H`, and `-L` are not implemented. Do not unconditionally alias `du` to HyperDU. [Compatibility audit](docs/posix-compatibility.md)

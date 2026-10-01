@@ -395,6 +395,14 @@ html[lang=en] .hero h1 {
   color:var(--lime);
 }
 
+/* Fixed height, so the progress and the result occupy the same box. */
+.term-out {
+  display:block;
+  min-height:4lh;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
 .terminal>p {
   border-top:1px solid #ffffff10;
   margin-inline:20px;
