@@ -2,7 +2,7 @@
 
 [日本語](README.md) · [English](README.en.md) · **简体中文**
 
-![HyperDU GUI](../docs/images/gui.png)
+![HyperDU GUI](../docs/images/gui-zh-CN.png)
 
 用于探索磁盘使用量的 Windows / Linux 桌面界面。它复用 CLI / MCP 使用的 `hyperdu-core`，不另写扫描引擎。界面支持日语、英语和简体中文，启动时使用操作系统的显示语言（其他语言显示为英语）。可随时通过右上角的选择框切换，也可用环境变量 `HYPERDU_LANG`（`ja` / `en` / `zh`）指定启动语言。启动时从系统字体中寻找 CJK、emoji 等回退字体；在 Linux 上使用中文界面需要包含简体中文的字体（如 `fonts-noto-cjk`）。
 
