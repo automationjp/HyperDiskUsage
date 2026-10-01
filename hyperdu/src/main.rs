@@ -1141,7 +1141,11 @@ fn main() -> Result<()> {
             // to a plausible default. Zero is rejected for the same reason du
             // rejects it, and because it reaches a division by zero below.
             match parse_block_size_with_si(bs, args.si) {
-                Some(0) | None => exit_invalid_block_size(bs),
+                // `exit` skips destructors; close the status lines first.
+                Some(0) | None => {
+                    drop(view);
+                    exit_invalid_block_size(bs)
+                }
                 Some(n) => n,
             }
         } else if std::env::var_os("POSIXLY_CORRECT").is_some()
@@ -1328,6 +1332,8 @@ fn main() -> Result<()> {
         if let (Some(v), 0) = (&view, exit_code) {
             v.shared().record_total(scanned_files);
         }
+        // `exit` below skips destructors, which would leave the status lines up.
+        drop(view);
         let errn = opt.error_count.load(std::sync::atomic::Ordering::Relaxed);
         if errn > 0 || exit_code != 0 {
             std::process::exit(1);
