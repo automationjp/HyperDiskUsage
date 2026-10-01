@@ -53,6 +53,8 @@ winresource = { version = "0.1.31", default-features = false }
 section = "utils"
 priority = "optional"
 depends = "$auto"
+# The UI is Japanese and egui bundles no CJK face; without one every label is tofu.
+recommends = "fonts-noto-cjk"
 maintainer = "HyperDU Maintainers <maintainers@example.com>"
 extended-description = "Hyper-fast disk usage analyzer GUI."
 # An explicit assets list turns OFF cargo-deb's automatic binary inclusion, so the
