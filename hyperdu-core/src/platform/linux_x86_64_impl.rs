@@ -1,6 +1,8 @@
 use std::sync::atomic::Ordering;
 
 #[cfg(not(target_env = "musl"))]
+mod batch;
+#[cfg(not(target_env = "musl"))]
 mod strict;
 
 use crate::{
@@ -18,6 +20,10 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let depth = dctx.depth;
     let resume = dctx.resume;
     let opt = ctx.options;
+    #[cfg(not(target_env = "musl"))]
+    if let Some(batch) = dctx.batch {
+        return batch::process_batch(ctx, dctx, batch, map);
+    }
     let strict_accounting = cfg!(not(target_env = "musl"))
         && matches!(
             opt.compat_mode,
@@ -109,6 +115,12 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
     let mut counted = crate::platform::linux_helpers::FileCounter::new(opt);
     let mut yield_every = opt.dir_yield_every.load(Ordering::Relaxed);
     let mut processed: usize = 0;
+    // Regular files of a large directory go to other workers, see `batch`.
+    #[cfg(not(target_env = "musl"))]
+    let mut pending = batch::Pending::new();
+    #[cfg(not(target_env = "musl"))]
+    let share = opt.threads > 1;
+    let approx_files = !opt.compute_physical && opt.approximate_sizes && opt.min_file_size == 0;
     loop {
         #[cfg(any(feature = "prof-tracy", feature = "prof-puffin"))]
         profiling::scope!("getdents64_loop");
@@ -153,6 +165,13 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
             }
 
             let dtype = d_type;
+            #[cfg(not(target_env = "musl"))]
+            let defer = share
+                && processed >= batch::LARGE_AFTER
+                && dtype == libc::DT_REG
+                && (strict_accounting || !approx_files);
+            #[cfg(target_env = "musl")]
+            let defer = false;
             let is_dir_hint = dtype == libc::DT_DIR;
             let is_lnk = dtype == libc::DT_LNK;
 
@@ -169,7 +188,10 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
                 continue;
             }
 
-            if strict_accounting {
+            if defer {
+                #[cfg(not(target_env = "musl"))]
+                pending.push(ctx, dctx, fd, stat_cur, name_slice);
+            } else if strict_accounting {
                 #[cfg(not(target_env = "musl"))]
                 {
                     use std::ffi::OsStr;
@@ -425,6 +447,8 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
             }
             if yield_every > 0 && processed % yield_every == 0 {
                 // Enqueue continuation from current offset and stop to let other threads proceed
+                #[cfg(not(target_env = "musl"))]
+                pending.flush(ctx, dctx, fd, stat_cur);
                 counted.flush(ctx, opt, dir);
                 ctx.enqueue_resume(dir.to_path_buf(), depth, d_off);
                 unsafe { libc::close(fd) };
@@ -432,6 +456,8 @@ pub fn process_dir(ctx: &ScanContext, dctx: &DirContext, map: &mut StatMap) {
             }
         }
     }
+    #[cfg(not(target_env = "musl"))]
+    pending.flush(ctx, dctx, fd, stat_cur);
     counted.flush(ctx, opt, dir);
     unsafe { libc::close(fd) };
 }
