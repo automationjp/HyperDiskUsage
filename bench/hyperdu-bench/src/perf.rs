@@ -55,14 +55,14 @@ impl Perf {
     }
     pub fn command(&self, driver: &Path, dir: &Path) -> Command {
         let mut c = Command::new(&self.binary);
-        c.args(["record", "--clockid", "mono", "--call-graph", "dwarf", "-o"])
+        c.args(["record", "--clockid", "mono", "-o"])
             .arg(dir.join("perf.data"));
         for event in &self.events {
-            // Sample CPU at 99 Hz; tracepoints retain their default period of one.
+            // CPU stacks are sampled; syscall/scheduler records do not copy user stacks.
             let configured = if event == "cpu-clock" {
-                "cpu-clock/freq=99/".to_string()
+                "cpu-clock/freq=99,call-graph=dwarf/".to_string()
             } else {
-                format!("{event}/period=1/")
+                format!("{event}/period=1,call-graph=no/")
             };
             c.arg("-e").arg(configured);
         }
@@ -221,9 +221,10 @@ mod command_tests {
             .get_args()
             .map(|s| s.to_string_lossy().into_owned())
             .collect();
-        assert!(args.contains(&"cpu-clock/freq=99/".into()));
-        assert!(args.contains(&"raw_syscalls:sys_enter/period=1/".into()));
+        assert!(args.contains(&"cpu-clock/freq=99,call-graph=dwarf/".into()));
+        assert!(args.contains(&"raw_syscalls:sys_enter/period=1,call-graph=no/".into()));
         assert!(!args.contains(&"-F".into()));
         assert!(!args.contains(&"-c".into()));
+        assert!(!args.contains(&"--call-graph".into()));
     }
 }
