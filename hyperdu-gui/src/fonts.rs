@@ -32,7 +32,7 @@ pub fn configure_fonts(ctx: &egui::Context) {
     // Find first matches
     let find_first = |names: &[&str]| find_font_in_dirs(&dirs, names);
 
-    if let Some(p) = find_first(&cjk_candidates) {
+    if let Some(p) = fontconfig_cjk().or_else(|| find_first(&cjk_candidates)) {
         if add_font_file("cjk", &p) {
             // Append CJK fallback
             fonts
@@ -194,14 +194,36 @@ fn platform_font_candidates() -> FontCandidates {
     }
 }
 
+/// CJK file names differ per distribution (NotoSansCJK-VF.ttc, ipag.ttf,
+/// VL-Gothic-Regular.ttf, ...), so ask fontconfig for the face it would use for
+/// Japanese. `fc-match` always answers, so the answer counts only if it covers `ja`.
+#[cfg(target_os = "linux")]
+fn fontconfig_cjk() -> Option<std::path::PathBuf> {
+    let out = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}\n%{lang}", "sans-serif:lang=ja"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8(out.stdout).ok()?;
+    let (file, langs) = text.split_once('\n')?;
+    langs
+        .split('|')
+        .any(|l| l == "ja")
+        .then(|| std::path::PathBuf::from(file))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn fontconfig_cjk() -> Option<std::path::PathBuf> {
+    None
+}
+
 fn find_font_in_dirs(dirs: &[std::path::PathBuf], names: &[&str]) -> Option<std::path::PathBuf> {
     if dirs.is_empty() || names.is_empty() {
         return None;
     }
-    let lower_names = names
-        .iter()
-        .map(|s| s.to_ascii_lowercase())
-        .collect::<Vec<_>>();
+    // Candidates are in priority order, so collect every file first and pick by
+    // name order; returning the first directory hit let meiryo/Yu Gothic UI win
+    // over Segoe UI and render `\` as `¥`.
+    let mut files: Vec<(String, std::path::PathBuf)> = Vec::new();
     let mut stack: Vec<std::path::PathBuf> = dirs.to_vec();
     let mut visited = 0usize;
     while let Some(p) = stack.pop() {
@@ -217,12 +239,30 @@ fn find_font_in_dirs(dirs: &[std::path::PathBuf], names: &[&str]) -> Option<std:
             if path.is_dir() {
                 stack.push(path);
             } else if let Some(file) = path.file_name().and_then(|s| s.to_str()) {
-                let lf = file.to_ascii_lowercase();
-                if lower_names.iter().any(|n| lf.ends_with(n)) {
-                    return Some(path);
-                }
+                files.push((file.to_ascii_lowercase(), path));
             }
         }
     }
-    None
+    names.iter().find_map(|n| {
+        let n = n.to_ascii_lowercase();
+        files
+            .iter()
+            .find(|(f, _)| f.ends_with(&n))
+            .map(|(_, p)| p.clone())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_font_in_dirs;
+
+    #[test]
+    fn candidate_order_wins_over_directory_order() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a_meiryo.ttc", "z_segoeui.ttf"] {
+            std::fs::write(dir.path().join(name), b"").unwrap();
+        }
+        let found = find_font_in_dirs(&[dir.path().to_path_buf()], &["segoeui.ttf", "meiryo.ttc"]);
+        assert_eq!(found.unwrap().file_name().unwrap(), "z_segoeui.ttf");
+    }
 }
