@@ -49,6 +49,44 @@ hyperdu --compat gnu -b --time /usr/share
 hyperdu --help
 ```
 
+### 运行时的输出
+
+在 Windows 上扫描约 164 万个文件的目录（路径和文件名已替换为示例）：
+
+```powershell
+hyperdu D:\data --top 3
+```
+
+扫描期间，只有终端最下方的两行每 20ms 刷新一次。
+
+```text
+progress:  --% | 303661 files | 326255 f/s | 0.9s
+scan: photo_0412.jpg (2.31 MiB)
+```
+
+第一行是完成比例、已处理文件数、速度和已用时间，第二行是正在扫描的文件。比例为估算值：驱动器根目录以卷的已用空间为基准，管理员权限的 `--mft` 以 `$MFT` 记录数为基准，之前扫描过的位置以上次的文件数为基准，其他情况以前两层目录中已扫描完成的数量为基准。尚无基准时显示 `--%`，扫描完成前最多显示 99%。
+
+扫描结束后，这两行会被清除，只留下按物理大小排序的结果：
+
+```text
+fs-auto: fs='unknown' strategy='generic' reason='platform=non-linux' for 'D:\data'
+Top 3 under D:\data (physical desc):
+  1. D:\data | phys=204.39 GiB | log=201.76 GiB | files=1641117
+  2. D:\data\videos | phys=72.24 GiB | log=71.81 GiB | files=247520
+  3. D:\data\photos | phys=32.95 GiB | log=32.44 GiB | files=360626
+
+Summary:
+  Root: D:\data
+  Elapsed: 20.316s
+  Threads: 32
+  Excludes: (none)
+  Follow links: false
+  Total: files=1641117 | phys=204.39 GiB | log=201.76 GiB | dirs=766394
+  Disk: total=929.23 GiB | used=826.63 GiB | free=102.60 GiB | usage=89.0%
+```
+
+重定向 stderr 时，不会原地刷新，而是每秒追加这两行。
+
 默认的上位列表按**目录的物理大小**排序，即使指定 `--apparent-size` 也不改变 `--top` 的排序依据。时间参数依赖默认启用的 `time-format` feature。排除、显示深度、扫描限制和链接跟随是不同设置，详见 [CLI 参考](docs/cli-reference.md)。
 
 **不是 GNU / POSIX `du` 的完全替代品。** `--compat posix-strict` 选择512字节等默认值，但尚未实现 POSIX 必需的 `-a`、`-s`、`-H`、`-L`。请勿无条件为 `du` 设置别名。[兼容性审计](docs/posix-compatibility.md)
