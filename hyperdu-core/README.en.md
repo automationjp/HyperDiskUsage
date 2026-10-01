@@ -2,12 +2,19 @@
 
 [日本語](README.md) · **English** · [简体中文](README.zh-CN.md)
 
-The scanning engine behind [HyperDU](https://github.com/automationjp/HyperDiskUsage).
+The scanning engine behind [HyperDU](https://hyperdu.automation.jp/).
 Walks a directory tree in parallel and reports logical size, physical size on disk,
 and file counts per directory. Most users want the [`hyperdu`](https://crates.io/crates/hyperdu)
 command; this crate embeds the scanner in your application.
 
-For an unpublished checkout, depend on the core crate directly:
+From crates.io (this README ships with `0.5.0-beta.6`):
+
+```toml
+[dependencies]
+hyperdu-core = "0.5.0-beta.6"
+```
+
+From a repository checkout, depend on the path instead:
 
 ```toml
 [dependencies]

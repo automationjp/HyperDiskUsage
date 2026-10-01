@@ -2,12 +2,19 @@
 
 [日本語](README.md) · [English](README.en.md) · **简体中文**
 
-[HyperDU](https://github.com/automationjp/HyperDiskUsage) 的扫描引擎。
+[HyperDU](https://hyperdu.automation.jp/) 的扫描引擎。
 并行遍历目录树，返回各目录的逻辑大小、磁盘分配空间和文件数。
 一般用户可使用 [`hyperdu`](https://crates.io/crates/hyperdu) 命令；
 此 crate 用于将扫描功能嵌入自己的应用。
 
-从尚未发布的 checkout 集成时，可直接依赖本地 core crate：
+从 crates.io 使用（本 README 对应 `0.5.0-beta.6`）：
+
+```toml
+[dependencies]
+hyperdu-core = "0.5.0-beta.6"
+```
+
+从仓库 checkout 集成时，按路径依赖：
 
 ```toml
 [dependencies]

@@ -2,12 +2,19 @@
 
 **日本語** · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
-[HyperDU](https://github.com/automationjp/HyperDiskUsage) の走査エンジンです。
+[HyperDU](https://hyperdu.automation.jp/) の走査エンジンです。
 ディレクトリツリーを並列に走査し、各ディレクトリの論理サイズ・物理サイズ・ファイル数を返します。
 通常の利用には [`hyperdu`](https://crates.io/crates/hyperdu) コマンドを使ってください。
 このクレートはアプリケーションへ走査機能を組み込むためのライブラリです。
 
-未公開のチェックアウトから組み込む場合は、コアクレートを直接依存に指定します。
+crates.ioから使う場合（このREADMEは `0.5.0-beta.6` のものです）:
+
+```toml
+[dependencies]
+hyperdu-core = "0.5.0-beta.6"
+```
+
+リポジトリのcheckoutから組み込む場合は、パスで指定します。
 
 ```toml
 [dependencies]
