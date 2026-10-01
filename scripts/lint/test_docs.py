@@ -10,6 +10,7 @@ import html
 import json
 import re
 import shlex
+import tomllib
 import unittest
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -17,9 +18,16 @@ from urllib.parse import unquote, urlsplit
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-READMES = [ROOT / directory / ("README" + suffix + ".md")
-           for directory in (".", "hyperdu", "hyperdu-gui")
-           for suffix in ("", ".en", ".zh-CN")]
+SUFFIXES = ("", ".en", ".zh-CN")
+# The repository front page advertises the published release.
+PUBLIC_READMES = [ROOT / ("README" + suffix + ".md") for suffix in SUFFIXES]
+# Crate READMEs are packaged into the crate and become its permanent crates.io
+# page, so they name the version they ship with: the workspace version.
+CRATE_READMES = [ROOT / directory / ("README" + suffix + ".md")
+                 for directory in ("hyperdu", "hyperdu-gui", "hyperdu-core")
+                 for suffix in SUFFIXES]
+READMES = PUBLIC_READMES + [path for path in CRATE_READMES
+                            if path.parent.name != "hyperdu-core"]
 DOCUMENTS = READMES + [ROOT / "docs/developer-guide.md"] + [
     ROOT / "docs" / directory / "setup.md" for directory in (".", "en", "zh-CN")]
 RENDERED = None
@@ -51,20 +59,37 @@ class DocumentationTests(unittest.TestCase):
         cls.copy = json.loads((ROOT / "site/_data/copy.json").read_text())
         cls.landing = (ROOT / "site/_includes/landing.html").read_text()
         cls.bucket = json.loads((ROOT / "bucket/hyperdu.json").read_text())
+        manifest = tomllib.loads((ROOT / "Cargo.toml").read_text())
+        cls.workspace_version = manifest["workspace"]["package"]["version"]
+
+    def install_versions(self, path):
+        commands = [line for line in path.read_text().splitlines()
+                    if line.startswith("cargo install ") and "--version" in line]
+        self.assertTrue(commands, f"missing install command: {path}")
+        for command in commands:
+            words = shlex.split(command)
+            self.assertIn("--locked", words, str(path))
+            yield words[words.index("--version") + 1]
 
     def test_installation_commands_use_published_versions(self):
         version = self.bucket["version"]
         self.assertEqual(self.config["versions"], {"cli": version, "gui": version})
         asset = self.bucket["architecture"]["64bit"]["url"]
         self.assertIn(f"/releases/download/v{version}/", asset)
+        for path in PUBLIC_READMES:
+            for found in self.install_versions(path):
+                self.assertEqual(found, version, str(path))
+
+    def test_crate_readmes_name_the_version_they_ship_with(self):
         for path in READMES:
-            commands = [line for line in path.read_text().splitlines()
-                        if line.startswith("cargo install ") and "--version" in line]
-            self.assertTrue(commands, f"missing published install command: {path}")
-            for command in commands:
-                words = shlex.split(command)
-                self.assertEqual(words[words.index("--version") + 1], version, str(path))
-                self.assertIn("--locked", words, str(path))
+            if path in CRATE_READMES:
+                for found in self.install_versions(path):
+                    self.assertEqual(found, self.workspace_version, str(path))
+        for path in CRATE_READMES:
+            text = path.read_text()
+            self.assertIn(f"`{self.workspace_version}`", text, str(path))
+            for claim in ("公開済み", "is published", "已发布"):
+                self.assertNotIn(f"{self.workspace_version}` {claim}", text, str(path))
 
     def test_no_stale_publication_notice(self):
         for path in READMES + [ROOT / "site/_data/copy.json"]:
@@ -120,8 +145,10 @@ class DocumentationTests(unittest.TestCase):
             return set(shlex.split(match[1], comments=True))
         workspace, released = inventory("WORKSPACE_FILES"), inventory("RELEASE_FILES")
         self.assertFalse(workspace & released)
-        for path in READMES + [ROOT / "site/_config.yml"]:
+        for path in PUBLIC_READMES + [ROOT / "site/_config.yml"]:
             self.assertIn(path.relative_to(ROOT).as_posix(), released)
+        for path in CRATE_READMES:
+            self.assertIn(path.relative_to(ROOT).as_posix(), workspace)
         self.assertIn("plugin/plugin.json", workspace)
         self.assertIn("snap/snapcraft.yaml", workspace)
 
