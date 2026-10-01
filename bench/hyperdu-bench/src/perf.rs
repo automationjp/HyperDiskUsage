@@ -82,9 +82,12 @@ impl Perf {
             "perf artifact quota exceeded"
         );
         let text = dir.join("perf-script.txt");
+        // Flatten only the presentation: raw perf.data retains complete callchains.
+        // Otherwise perf places the leaf on a continuation line, leaving an empty
+        // CPU symbol and treating short unknown-frame addresses as parse failures.
         let status = OwnedChild::spawn(
             Command::new(&self.binary)
-                .args(["script", "--ns", "-i"])
+                .args(["script", "--ns", "--hide-call-graph", "-i"])
                 .arg(dir.join("perf.data"))
                 .args([
                     "-F",
@@ -204,6 +207,14 @@ mod tests {
                 .2,
             3100000000
         );
+    }
+    #[test]
+    fn flattened_cpu_sample_keeps_the_leaf_symbol() {
+        let input = "15726/15731 235.688711771: cpu-clock/freq=99,call-graph=dwarf/: ";
+        let row = parse_header(&format!("{input}ffffffff9fde6d0b apparmor_inode_getattr"))
+            .unwrap();
+        assert_eq!(row.2, 235688711771);
+        assert_eq!(row.4, "ffffffff9fde6d0b apparmor_inode_getattr");
     }
 }
 
