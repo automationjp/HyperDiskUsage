@@ -18,7 +18,7 @@ version = "0.5.0-beta.6"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automationjp/HyperDiskUsage"
-homepage = "https://github.com/automationjp/HyperDiskUsage#readme"
+homepage = "https://hyperdu.automation.jp/"
 # `cargo wix init` / `cargo wix print` refuse to generate a WiX source without
 # this field, and neither `--manufacturer` nor `--owner` substitutes for it --
 # both are applied after the manifest is read, so the read fails first. The MSI

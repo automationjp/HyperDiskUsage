@@ -41,8 +41,8 @@ languages:
 # Published versions, shared by status labels and installation commands.
 # Update only after the matching release assets and registry versions exist.
 versions:
-  cli: 0.5.0-beta.5
-  gui: 0.5.0-beta.5
+  cli: 0.5.0-beta.6
+  gui: 0.5.0-beta.6
 
 plugins: []
 

@@ -143,7 +143,15 @@ THIRD_PARTY=(
     "scripts/package/winget.ps1|MinimumOSVersion|10.0.17763.0"
 )
 
+# Crate READMEs are packaged into the crate and become its crates.io page, which
+# can never be edited after publishing. They must name the version they ship
+# with; tracking the published release left 0.5.0-beta.6 on crates.io saying
+# 0.5.0-beta.5. Their wording states which version the README belongs to and
+# never claims that it is already published.
 WORKSPACE_FILES=(
+    hyperdu/README.md hyperdu/README.en.md hyperdu/README.zh-CN.md
+    hyperdu-core/README.md hyperdu-core/README.en.md hyperdu-core/README.zh-CN.md
+    hyperdu-gui/README.md hyperdu-gui/README.en.md hyperdu-gui/README.zh-CN.md
     packaging/man/hyperdu.1
     plugin/plugin.json
     scripts/package/snap.sh
@@ -158,8 +166,6 @@ WORKSPACE_FILES=(
 RELEASE_FILES=(
     bucket/hyperdu.json
     README.md README.en.md README.zh-CN.md
-    hyperdu/README.md hyperdu/README.en.md hyperdu/README.zh-CN.md
-    hyperdu-gui/README.md hyperdu-gui/README.en.md hyperdu-gui/README.zh-CN.md
     plugin/README.md plugin/README.en.md plugin/README.zh-CN.md
     site/_config.yml
 )
