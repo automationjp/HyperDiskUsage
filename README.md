@@ -13,10 +13,10 @@
 
 ## 公開済みベータ版を使う
 
-**v0.5.0-beta.6 は公開済みです。** [GitHub Release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.6)とcrates.ioから導入できます。「未公開」ではありませんが、安定版ではなくベータ版のため、CLI・MCPスキーマ・出力形式は変更される可能性があります。
+**v0.5.0-beta.7 は公開済みです。** [GitHub Release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.7)とcrates.ioから導入できます。「未公開」ではありませんが、安定版ではなくベータ版のため、CLI・MCPスキーマ・出力形式は変更される可能性があります。
 
 ```bash
-cargo install hyperdu --locked --version 0.5.0-beta.6
+cargo install hyperdu --locked --version 0.5.0-beta.7
 hyperdu . --top 20
 ```
 
@@ -96,7 +96,7 @@ Summary:
 ## GUI
 
 ```bash
-cargo install hyperdu-gui --locked --version 0.5.0-beta.6
+cargo install hyperdu-gui --locked --version 0.5.0-beta.7
 hyperdu-gui
 ```
 
@@ -171,7 +171,7 @@ tokeiは中身を読んで行数を数える別の処理なので、**速度比�
 
 ## 配布とプラットフォーム
 
-[公開済みRelease](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.6)で、Windows x86_64のCLI / GUI、Linux x86_64（glibc / musl）・aarch64のバイナリと配布形式を選べます。ファイル名と提供形式はReleaseのAssetsを確認してください。パッケージ生成用manifestが存在することと、ストアへの登録完了は別です。
+[公開済みRelease](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.7)で、Windows x86_64のCLI / GUI、Linux x86_64（glibc / musl）・aarch64のバイナリと配布形式を選べます。ファイル名と提供形式はReleaseのAssetsを確認してください。パッケージ生成用manifestが存在することと、ストアへの登録完了は別です。
 
 ```powershell
 scoop bucket add hyperdu https://github.com/automationjp/HyperDiskUsage

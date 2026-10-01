@@ -13,10 +13,10 @@
 
 ## Use the published beta
 
-**v0.5.0-beta.6 is published**, both on [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.6) and crates.io. It is a beta, not an unreleased preview and not a stable release: CLI options, MCP schemas, and output formats may still change.
+**v0.5.0-beta.7 is published**, both on [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.7) and crates.io. It is a beta, not an unreleased preview and not a stable release: CLI options, MCP schemas, and output formats may still change.
 
 ```bash
-cargo install hyperdu --locked --version 0.5.0-beta.6
+cargo install hyperdu --locked --version 0.5.0-beta.7
 hyperdu . --top 20
 ```
 
@@ -96,7 +96,7 @@ Normal top output ranks **directories by physical size**, including when `--appa
 ## GUI
 
 ```bash
-cargo install hyperdu-gui --locked --version 0.5.0-beta.6
+cargo install hyperdu-gui --locked --version 0.5.0-beta.7
 hyperdu-gui
 ```
 
@@ -171,7 +171,7 @@ tokei reads contents and counts lines, a different job, so **no speed ratio is s
 
 ## Distribution and platform status
 
-The [published release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.6) provides Windows x86_64 and Linux x86_64 (glibc / musl) / aarch64 CLI and GUI binaries. Choose the available formats from its Assets list. A packaging manifest does not establish registration in a package store.
+The [published release](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.7) provides Windows x86_64 and Linux x86_64 (glibc / musl) / aarch64 CLI and GUI binaries. Choose the available formats from its Assets list. A packaging manifest does not establish registration in a package store.
 
 ```powershell
 scoop bucket add hyperdu https://github.com/automationjp/HyperDiskUsage
