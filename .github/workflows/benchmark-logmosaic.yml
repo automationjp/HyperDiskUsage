@@ -1,0 +1,71 @@
+name: benchmark-logmosaic
+on:
+  pull_request:
+    paths:
+      - 'bench/hyperdu-bench/**'
+      - 'hyperdu-core/**'
+      - '.github/workflows/benchmark-logmosaic.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: benchmark-logmosaic-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - name: Native benchmark and driver tests
+        run: cargo test --manifest-path bench/hyperdu-bench/Cargo.toml --all-targets
+      - name: Diagnostic compile review
+        run: cargo clippy --manifest-path bench/hyperdu-bench/Cargo.toml --all-targets
+      - name: Record dependency lock and formatting delta
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p evidence
+          if test -f bench/hyperdu-bench/Cargo.lock; then cp bench/hyperdu-bench/Cargo.lock evidence/Cargo.lock; fi
+          cargo fmt --manifest-path bench/hyperdu-bench/Cargo.toml
+          git diff -- bench/hyperdu-bench > evidence/format.patch
+          rustc -vV > evidence/rustc.txt
+          git rev-parse HEAD > evidence/commit.txt
+          echo '--- LOCK BEGIN ---'
+          cat evidence/Cargo.lock || true
+          echo '--- LOCK END ---'
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: benchmark-native-${{ matrix.os }}
+          path: evidence/
+          retention-days: 7
+  logmosaic-roundtrip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: automationjp/logmosaic
+          ref: 662947a47d33ccd5a641479137b2796a9a92fb00
+          path: .logmosaic-contract
+          persist-credentials: false
+      - name: Build the real, separately licensed collector
+        working-directory: .logmosaic-contract
+        run: cargo build --locked -p logmosaic-agent
+      - name: Run real LogMosaic roundtrip (no mock)
+        shell: bash
+        run: |
+          export LOGMOSAIC_TEST_AGENT="$GITHUB_WORKSPACE/.logmosaic-contract/target/debug/logmosaic-agent"
+          cargo test --manifest-path bench/hyperdu-bench/Cargo.toml --test e2e real_logmosaic_roundtrip -- --ignored --nocapture
