@@ -6,10 +6,10 @@ OS固有のメタデータ取得と並列走査を使うディスク使用量ア
 
 ## インストール
 
-このREADMEは `0.5.0-beta.6` のものです。[Webサイト](https://hyperdu.automation.jp/) · [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases)
+このREADMEは `0.5.0-beta.7` のものです。[Webサイト](https://hyperdu.automation.jp/) · [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases)
 
 ```bash
-cargo install hyperdu --locked --version 0.5.0-beta.6
+cargo install hyperdu --locked --version 0.5.0-beta.7
 ```
 
 クレート名も実行コマンドも `hyperdu` です。旧名 `hyperdu-cli` ではありません。MCPは `hyperdu mcp` を実行した場合だけ起動します。ソースビルドにはRust 1.88以降とOSのビルドツールが必要です。配布済みバイナリの実行にRustは不要です。[環境別セットアップ](../docs/setup.md)

@@ -7,11 +7,11 @@
 一般用户可使用 [`hyperdu`](https://crates.io/crates/hyperdu) 命令；
 此 crate 用于将扫描功能嵌入自己的应用。
 
-从 crates.io 使用（本 README 对应 `0.5.0-beta.6`）：
+从 crates.io 使用（本 README 对应 `0.5.0-beta.7`）：
 
 ```toml
 [dependencies]
-hyperdu-core = "0.5.0-beta.6"
+hyperdu-core = "0.5.0-beta.7"
 ```
 
 从仓库 checkout 集成时，按路径依赖：

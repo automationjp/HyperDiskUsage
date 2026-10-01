@@ -7,11 +7,11 @@
 通常の利用には [`hyperdu`](https://crates.io/crates/hyperdu) コマンドを使ってください。
 このクレートはアプリケーションへ走査機能を組み込むためのライブラリです。
 
-crates.ioから使う場合（このREADMEは `0.5.0-beta.6` のものです）:
+crates.ioから使う場合（このREADMEは `0.5.0-beta.7` のものです）:
 
 ```toml
 [dependencies]
-hyperdu-core = "0.5.0-beta.6"
+hyperdu-core = "0.5.0-beta.7"
 ```
 
 リポジトリのcheckoutから組み込む場合は、パスで指定します。

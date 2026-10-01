@@ -6,10 +6,10 @@
 
 ## 安装
 
-本 README 对应 `0.5.0-beta.6`。[网站](https://hyperdu.automation.jp/) · [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases)
+本 README 对应 `0.5.0-beta.7`。[网站](https://hyperdu.automation.jp/) · [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases)
 
 ```bash
-cargo install hyperdu --locked --version 0.5.0-beta.6
+cargo install hyperdu --locked --version 0.5.0-beta.7
 ```
 
 crate 和命令名称都是 `hyperdu`，不是已废弃的 `hyperdu-cli`。仅执行 `hyperdu mcp` 时才启动 MCP。源码构建需要 Rust 1.88 或更高版本及对应平台构建工具；运行预构建二进制文件不需要 Rust。[环境设置](../docs/zh-CN/setup.md)

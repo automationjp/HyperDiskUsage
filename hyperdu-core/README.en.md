@@ -7,11 +7,11 @@ Walks a directory tree in parallel and reports logical size, physical size on di
 and file counts per directory. Most users want the [`hyperdu`](https://crates.io/crates/hyperdu)
 command; this crate embeds the scanner in your application.
 
-From crates.io (this README ships with `0.5.0-beta.6`):
+From crates.io (this README ships with `0.5.0-beta.7`):
 
 ```toml
 [dependencies]
-hyperdu-core = "0.5.0-beta.6"
+hyperdu-core = "0.5.0-beta.7"
 ```
 
 From a repository checkout, depend on the path instead:

@@ -8,10 +8,10 @@ A Windows / Linux desktop interface for exploring disk usage. It reuses `hyperdu
 
 ## Install
 
-This README ships with `0.5.0-beta.6` ([website](https://hyperdu.automation.jp/)). Use the GUI binaries in [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.6), or install from crates.io. Running a prebuilt binary does not require Rust.
+This README ships with `0.5.0-beta.7` ([website](https://hyperdu.automation.jp/)). Use the GUI binaries in [GitHub Releases](https://github.com/automationjp/HyperDiskUsage/releases/tag/v0.5.0-beta.7), or install from crates.io. Running a prebuilt binary does not require Rust.
 
 ```bash
-cargo install hyperdu-gui --locked --version 0.5.0-beta.6
+cargo install hyperdu-gui --locked --version 0.5.0-beta.7
 hyperdu-gui
 ```
 
