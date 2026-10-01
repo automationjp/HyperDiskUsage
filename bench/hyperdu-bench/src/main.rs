@@ -84,6 +84,8 @@ fn output_directory(requested: &Path, root: &Path) -> Result<PathBuf> {
     );
     ensure!(!out.starts_with(root), "output must be outside the dataset");
     let mut builder = fs::DirBuilder::new();
+    // The parent must already exist; never create an unchecked parent chain.
+    builder.recursive(false);
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
