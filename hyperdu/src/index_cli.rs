@@ -109,7 +109,7 @@ mod linux {
             "physical_bytes": bytes, "files": files, "directory_count": index.len(),
             "freshness": "stale", "monitoring": false,
         });
-        println!("{}", serde_json::to_string(&output)?);
+        crate::print_line(format_args!("{}", serde_json::to_string(&output)?));
         Ok(())
     }
 }

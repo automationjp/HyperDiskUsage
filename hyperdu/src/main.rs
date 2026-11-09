@@ -2,7 +2,10 @@ use std::{
     fs::File,
     io::{IsTerminal, Write},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 mod index_cli;
@@ -12,6 +15,46 @@ mod progress_view;
 use anyhow::{Context, Result};
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use humansize::{format_size, BINARY};
+
+/// Set once stdout's reader has gone away, so the remaining lines are dropped
+/// instead of retried one failing write at a time.
+static STDOUT_CLOSED: AtomicBool = AtomicBool::new(false);
+
+/// Whether a write failed because the process reading stdout closed the pipe.
+///
+/// Windows reports that as `ERROR_NO_DATA` (232) or `ERROR_BROKEN_PIPE` (109),
+/// and std maps neither to `ErrorKind::BrokenPipe`. On Unix the kind is enough:
+/// `EPIPE` is also raw OS error 32 there, which means something else on Windows.
+fn is_closed_pipe(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::BrokenPipe
+        || (cfg!(windows) && matches!(e.raw_os_error(), Some(232) | Some(109)))
+}
+
+/// Write one line to stdout, giving up quietly once its reader is gone.
+///
+/// `hyperdu … | head` closes the pipe partway through the listing. GNU du ends
+/// quietly there, while `println!` panics on the write error — and that panic
+/// also skipped the `--csv` / `--json` exports, which run after the listing.
+pub(crate) fn print_line(args: std::fmt::Arguments<'_>) {
+    if STDOUT_CLOSED.load(Ordering::Relaxed) {
+        return;
+    }
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    match writeln!(out, "{args}") {
+        Ok(()) => {}
+        Err(e) if is_closed_pipe(&e) => STDOUT_CLOSED.store(true, Ordering::Relaxed),
+        // Anything else (a full disk behind `> file`) is a real failure and
+        // keeps the pre-existing behaviour of `println!`.
+        Err(e) => panic!("failed printing to stdout: {e}"),
+    }
+}
+
+/// `println!` for result output: see [`print_line`].
+macro_rules! outln {
+    () => { $crate::print_line(std::format_args!("")) };
+    ($($arg:tt)*) => { $crate::print_line(std::format_args!($($arg)*)) };
+}
 
 // Cross-platform filesystem stats (total/free) for a given path's volume.
 //
@@ -587,7 +630,7 @@ fn main() -> Result<()> {
     if std::env::args().any(|a| a == "/help" || a == "/?") {
         let mut cmd = Args::command();
         cmd.print_help()?;
-        println!();
+        outln!();
         return Ok(());
     }
     // Usage errors exit 1, not clap's 2.
@@ -984,11 +1027,16 @@ fn main() -> Result<()> {
         // are already summed and stay whole, which is the point: the `Total:`
         // line sits right above a `Disk: used=...` read from the filesystem.
         map.retain(|p, _| within_display_depth(p, &roots, max_depth));
-        let v = hyperdu_core::top_by_physical(map, args.top);
+        // `--csv` / `--json` save the directory rows from before the `--top`
+        // limit, so an export needs every row sorted (`0` = no limit) while the
+        // listing alone only needs the top ones. Keeping the limit when nothing
+        // is exported is what lets `top_by_physical` skip ordering the rest.
+        let exporting = args.csv.is_some() || args.json.is_some() || args.verbose;
+        let v = hyperdu_core::top_by_physical(map, if exporting { 0 } else { args.top });
 
-        println!("Top {} under {} (physical desc):", args.top, root.display());
+        outln!("Top {} under {} (physical desc):", args.top, root.display());
         for (i, (p, s)) in v.iter().take(args.top).enumerate() {
-            println!(
+            outln!(
                 "{:>3}. {:<} | phys={} | log={} | files={}",
                 i + 1,
                 p.display(),
@@ -997,14 +1045,14 @@ fn main() -> Result<()> {
                 s.files
             );
         }
-        println!();
-        println!("Summary:");
+        outln!();
+        outln!("Summary:");
         if root_totals.len() == 1 {
-            println!("  Root: {}", root.display());
+            outln!("  Root: {}", root.display());
         } else {
-            println!("  Roots: {} (別デバイスは並列に走査)", root_totals.len());
+            outln!("  Roots: {} (別デバイスは並列に走査)", root_totals.len());
             for (r, s) in &root_totals {
-                println!(
+                outln!(
                     "    {} | phys={} | log={} | files={}",
                     r.display(),
                     format_size(s.physical, BINARY),
@@ -1013,16 +1061,16 @@ fn main() -> Result<()> {
                 );
             }
         }
-        println!("  Elapsed: {:.3}s", dt.as_secs_f64());
+        outln!("  Elapsed: {:.3}s", dt.as_secs_f64());
         // The profile may cap the worker count; report what actually runs.
-        println!("  Threads: {}", hyperdu_core::effective_threads(&opt));
+        outln!("  Threads: {}", hyperdu_core::effective_threads(&opt));
         // Print the active exclusions. They change the totals, so a comparison
         // against du that does not account for them is not a fair one.
         if opt.exclude_contains.is_empty()
             && opt.exclude_regex.is_empty()
             && opt.exclude_glob.is_empty()
         {
-            println!("  Excludes: (none)");
+            outln!("  Excludes: (none)");
         } else {
             let mut parts: Vec<String> = Vec::new();
             if !opt.exclude_contains.is_empty() {
@@ -1034,10 +1082,10 @@ fn main() -> Result<()> {
             if !opt.exclude_glob.is_empty() {
                 parts.push(format!("glob[{}]", opt.exclude_glob.join(",")));
             }
-            println!("  Excludes: {}", parts.join(" "));
+            outln!("  Excludes: {}", parts.join(" "));
         }
-        println!("  Follow links: {}", args.follow_links);
-        println!(
+        outln!("  Follow links: {}", args.follow_links);
+        outln!(
             "  Total: files={} | phys={} | log={} | dirs={}",
             total_stat.files,
             format_size(total_stat.physical, BINARY),
@@ -1053,7 +1101,7 @@ fn main() -> Result<()> {
             } else {
                 0.0
             };
-            println!(
+            outln!(
                 "  Disk: total={} | used={} | free={} | usage={:.1}%",
                 format_size(vol_total, BINARY),
                 format_size(used, BINARY),
@@ -1067,11 +1115,11 @@ fn main() -> Result<()> {
         let auto_csv = args.verbose.then(|| PathBuf::from("hyperdu-report.csv"));
         if let Some(csv_path) = args.csv.as_ref().or(auto_csv.as_ref()) {
             hyperdu_core::report::write_csv(File::create(csv_path)?, &v)?;
-            println!("wrote CSV: {}", csv_path.display());
+            outln!("wrote CSV: {}", csv_path.display());
         }
         if let Some(json_path) = args.json.as_ref().or(auto_json.as_ref()) {
             hyperdu_core::report::write_json(File::create(json_path)?, &v)?;
-            println!("wrote JSON: {}", json_path.display());
+            outln!("wrote JSON: {}", json_path.display());
         }
         // Optional classification after scan
         if let Some(mode) = &args.classify {
@@ -1080,7 +1128,7 @@ fn main() -> Result<()> {
                 _ => hyperdu_core::classify::ClassifyMode::Basic,
             };
             let class_stats = hyperdu_core::classify::classify_directory(&root, &opt, cmode);
-            println!(
+            outln!(
                 "classify: categories={} extensions={} top_entries={}",
                 class_stats.by_category.len(),
                 class_stats.by_extension.len(),
@@ -1096,7 +1144,7 @@ fn main() -> Result<()> {
                     "top_consumers": class_stats.top_consumers.iter().rev().take(200).map(|(sz, v)| serde_json::json!({"size": sz, "paths": v})).collect::<Vec<_>>()
                 }))?;
                 file.write_all(json.as_bytes())?;
-                println!("wrote class-report: {}", p.display());
+                outln!("wrote class-report: {}", p.display());
             }
             if let Some(p) = args.class_report_csv.as_ref().or(auto_ccsv.as_ref()) {
                 let mut wtr = csv::Writer::from_path(p)?;
@@ -1108,7 +1156,7 @@ fn main() -> Result<()> {
                     wtr.write_record(["extension", k, &v.files.to_string(), &v.bytes.to_string()])?;
                 }
                 wtr.flush()?;
-                println!("wrote class-report-csv: {}", p.display());
+                outln!("wrote class-report-csv: {}", p.display());
             }
         }
         Ok(())
@@ -1200,14 +1248,14 @@ fn main() -> Result<()> {
                         };
                         let blocks = div_ceil(bytes, bs as u64);
                         if print_time {
-                            println!(
+                            outln!(
                                 "{}\t{}\t{}",
                                 blocks,
                                 format_time(&p, time_kind, time_style),
                                 p.display()
                             );
                         } else {
-                            println!("{}\t{}", blocks, p.display());
+                            outln!("{}\t{}", blocks, p.display());
                         }
                     }
                 }
@@ -1247,14 +1295,14 @@ fn main() -> Result<()> {
                         };
                         let blocks = div_ceil(bytes, bs as u64);
                         if print_time {
-                            println!(
+                            outln!(
                                 "{}\t{}\t{}",
                                 blocks,
                                 format_time(&p, time_kind, time_style),
                                 p.display()
                             );
                         } else {
-                            println!("{}\t{}", blocks, p.display());
+                            outln!("{}\t{}", blocks, p.display());
                         }
                     }
                 }
@@ -1298,14 +1346,14 @@ fn main() -> Result<()> {
                             };
                             let blocks = div_ceil(bytes, bs as u64);
                             if print_time {
-                                println!(
+                                outln!(
                                     "{}\t{}\t{}",
                                     blocks,
                                     format_time(&p, time_kind, time_style),
                                     p.display()
                                 );
                             } else {
-                                println!("{}\t{}", blocks, p.display());
+                                outln!("{}\t{}", blocks, p.display());
                             }
                         }
                     };
