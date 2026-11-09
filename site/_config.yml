@@ -20,6 +20,14 @@ repository: automationjp/HyperDiskUsage
 # `hyperdu`, not `hyperdu-cli`. The latter is the retired name.
 published_cli_url: https://crates.io/crates/hyperdu
 
+# The implementer, and the copyright holder in LICENSE. The footer names it on
+# every page, so the site says who builds HyperDU rather than leaving that to
+# the GitHub organization name. The name itself is per-language in
+# `_data/copy.json`: the English page uses the registered English name, and the
+# Chinese page keeps the Japanese one, which is how the company writes itself
+# where no Chinese name exists.
+organization_url: https://automation.jp/
+
 # Live source/documentation links, NOT the installation or measurement version.
 # Installation uses versions below. Historical measurements keep their own
 # commit in _data/benchmarks.json; never relabel them as a newer measurement.
