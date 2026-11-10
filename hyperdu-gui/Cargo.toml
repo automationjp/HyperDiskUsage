@@ -6,7 +6,7 @@ description = "Hyper-fast GUI disk usage analyzer (Windows/Linux)."
 license.workspace = true
 # Inherited only here and in hyperdu: cargo-wix needs it to build the MSI.
 authors.workspace = true
-rust-version = "1.85"
+rust-version = "1.92"
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
@@ -30,7 +30,7 @@ egui = "0.32"
 # to reduce platform toolchain deps and build flakes.
 eframe = { version = "0.32", default-features = false, features = ["glow", "x11", "wayland", "default_fonts"] }
 egui_extras = "0.32"
-rfd = "0.15"
+rfd = "0.18"
 log = "0.4"
 env_logger = "0.11"
 hyperdu-core = { workspace = true }
@@ -55,7 +55,10 @@ priority = "optional"
 depends = "$auto"
 # The UI is Japanese, English or Simplified Chinese and egui bundles no CJK face;
 # without one every Japanese or Chinese label is tofu. Noto CJK covers both.
-recommends = "fonts-noto-cjk"
+# rfd opens the save/folder dialogs through the XDG portal by dlopen()ing libdbus,
+# which $auto cannot see, and runs `zenity` when that fails; with neither the
+# dialog never opens and export looks cancelled.
+recommends = "fonts-noto-cjk, libdbus-1-3, xdg-desktop-portal-gtk | xdg-desktop-portal-backend | zenity"
 maintainer = "HyperDU Maintainers <maintainers@example.com>"
 extended-description = "Hyper-fast disk usage analyzer GUI."
 # An explicit assets list turns OFF cargo-deb's automatic binary inclusion, so the
@@ -88,3 +91,8 @@ assets = [
   { source = "../README.md", dest = "/usr/share/doc/hyperdu-gui/README.md", mode = "644" },
   { source = "../LICENSE", dest = "/usr/share/doc/hyperdu-gui/LICENSE", mode = "644" },
 ]
+
+# Weak deps for the file dialogs: auto-req misses the dlopen()ed libdbus (see deb).
+[package.metadata.generate-rpm.recommends]
+dbus-libs = "*"
+"(xdg-desktop-portal or zenity)" = ""

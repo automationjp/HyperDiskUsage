@@ -99,9 +99,9 @@ Agent SkillはCLIを使った手順であり、MCPサーバを動かさずに利
 | MFTとInteractive | MFT成功時は `BatchFallback(Mft)` と `BatchCompleted` で一括配送を明示。MFT失敗から通常列挙へ戻る動作とは別 |
 | Linux index | `refresh` が保存値を更新し、`show` は保存値を `stale` として読む。自動追従watcherではない |
 | macOS | 実装の存在と検証・配布を区別。現行CIとReleaseはWindows / Linux |
-| 最低Rust版 | 現行ソースはcore 1.82、GUI 1.85、CLI 1.88。各最低版でlocked default構成の全ターゲットをLinux / Windows CIで確認 |
+| 最低Rust版 | 現行ソースはcore 1.82、GUI 1.92、CLI 1.88。各最低版でlocked default構成の全ターゲットをLinux / Windows CIで確認 |
 
-現在のmanifestはcore 1.82、GUI 1.85、CLI 1.88に整合させています。`.github/workflows/regression.yml` はこの3版とLinux / Windowsの6条件で `cargo check --locked --all-targets` を実行します。対象はコミット済みlockfileのdefault構成で、未検証のoptional featureや将来の依存更新まで一括保証するものではありません。公開済みベータ版のmanifestは不変です。
+現在のmanifestはcore 1.82、GUI 1.92、CLI 1.88に整合させています。`.github/workflows/regression.yml` はこの3版とLinux / Windowsの6条件で `cargo check --locked --all-targets` を実行します。対象はコミット済みlockfileのdefault構成で、未検証のoptional featureや将来の依存更新まで一括保証するものではありません。公開済みベータ版のmanifestは不変です。
 
 現行ソースのMFTは、説明できない親参照・循環・重複・オーバーフローを部分結果にしません。DOS別名を含む名前数を確認し、複数フォルダにまたがるハードリンクや未解決の名前は通常列挙へ戻します。リンク非追従ではsymlink / junctionを除外し、WOF・クラウドなど未知のreparse tagや欠損DATAはMFTを不採用にします。制御した読み取り専用NTFS fixtureで全ディレクトリ行の完全一致と、曖昧な名前空間でのfallbackを別々に検証します。live volumeの変更・ACL・未対応レイアウトまで完全一致を保証するものではなく、既存の許容差を広げる変更でもありません。
 

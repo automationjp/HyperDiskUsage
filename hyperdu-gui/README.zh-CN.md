@@ -22,7 +22,7 @@ cargo install --locked --path hyperdu-gui
 cargo run --release -p hyperdu-gui
 ```
 
-源码构建请使用较新的 stable Rust。当前 GUI 源码声明最低 Rust 1.85，并在 Linux / Windows 检查；已发布 Beta 包的 manifest 不会改变，安装公开包请使用较新的 stable。Linux 需要 X11 / Wayland 开发库，Windows 需要构建环境及桌面会话。macOS 不在当前 GUI Release 范围内。[环境设置](../docs/zh-CN/setup.md) · [最低版本说明（日语）](../docs/developer-guide.md)
+源码构建请使用较新的 stable Rust。当前 GUI 源码声明最低 Rust 1.92，并在 Linux / Windows 检查；已发布 Beta 包的 manifest 不会改变，安装公开包请使用较新的 stable。Linux 需要 X11 / Wayland 开发库，Windows 需要构建环境及桌面会话。macOS 不在当前 GUI Release 范围内。[环境设置](../docs/zh-CN/setup.md) · [最低版本说明（日语）](../docs/developer-guide.md)
 
 ## 操作与结果交付
 

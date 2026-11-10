@@ -17,8 +17,8 @@
 
 ## 環境の準備
 
-配布済みバイナリの実行にRustは不要です。ソースからのCLI（MCP同梱）またはworkspace全体の
-ビルドにはRust 1.88+、core/GUIの宣言上の最低版は1.75です。WindowsはMSVCとWindows SDK、
+配布済みバイナリの実行にRustは不要です。ソースからのCLI（MCP同梱）の
+ビルドにはRust 1.88+、GUIとworkspace全体には1.92+、coreの宣言上の最低版は1.82です。WindowsはMSVCとWindows SDK、
 Linuxはネイティブビルドツール、Linux GUIはX11/Waylandの開発ライブラリが必要です。
 詳しいコマンドと検証範囲は[セットアップ](setup.md)を参照してください。
 

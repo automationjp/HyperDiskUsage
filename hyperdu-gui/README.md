@@ -22,7 +22,7 @@ cargo install --locked --path hyperdu-gui
 cargo run --release -p hyperdu-gui
 ```
 
-ソースビルドには新しいstable Rustを使ってください。現在のGUIソースはRust 1.85を最低版とし、Linux / Windowsで確認します。公開済みベータ版の古いmanifestは変更されないため、公開版の導入には新しいstableを使用します。LinuxにはX11 / Waylandの開発ライブラリ、Windowsには通常のデスクトップセッションとビルド環境が必要です。macOSは現行GUI Releaseの対象外です。[セットアップ](../docs/setup.md) · [最低版の注意](../docs/developer-guide.md#6-正確性と対応範囲を誤解しない)
+ソースビルドには新しいstable Rustを使ってください。現在のGUIソースはRust 1.92を最低版とし、Linux / Windowsで確認します。公開済みベータ版の古いmanifestは変更されないため、公開版の導入には新しいstableを使用します。LinuxにはX11 / Waylandの開発ライブラリ、Windowsには通常のデスクトップセッションとビルド環境が必要です。macOSは現行GUI Releaseの対象外です。[セットアップ](../docs/setup.md) · [最低版の注意](../docs/developer-guide.md#6-正確性と対応範囲を誤解しない)
 
 ## 操作と結果の届け方
 

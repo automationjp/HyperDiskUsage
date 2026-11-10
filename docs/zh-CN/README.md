@@ -16,8 +16,8 @@
 
 ## 准备环境
 
-运行预编译包无需 Rust。构建 CLI（包含 MCP）或整个 workspace 需要 Rust 1.88+；
-core/GUI 声明的最低版本为 1.75。Windows 源码构建使用 MSVC 和 Windows SDK。
+运行预编译包无需 Rust。构建 CLI（包含 MCP）需要 Rust 1.88+，GUI 或整个 workspace 需要 1.92+；
+core 声明的最低版本为 1.82。Windows 源码构建使用 MSVC 和 Windows SDK。
 Linux 需要原生构建工具，Linux GUI 还需要 X11/Wayland 开发库。
 命令和验证范围见[环境配置](setup.md)。
 

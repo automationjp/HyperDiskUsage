@@ -14,7 +14,7 @@ scoop install hyperdu
 hyperdu --version
 ```
 
-For Linux, select x86_64 glibc, x86_64 musl, or aarch64 glibc to match the environment. The GUI needs a Windows desktop session or Linux X11 / Wayland environment; use the CLI on headless servers. macOS is outside current release and CI targets, including GUI distribution.
+For Linux, select x86_64 glibc, x86_64 musl, or aarch64 glibc to match the environment. The GUI needs a Windows desktop session or Linux X11 / Wayland environment; use the CLI on headless servers. On Linux the GUI save and folder dialogs use the XDG desktop portal through `libdbus-1` (`xdg-desktop-portal` plus a desktop backend), or `zenity` when that is unavailable. The `.deb` / `.rpm` declare them as recommended dependencies; archive and AppImage users must provide one themselves. With neither, the dialog does not open and an export is treated as cancelled. macOS is outside current release and CI targets, including GUI distribution.
 
 ## 2. Declared Rust versions are not verified build guarantees
 
@@ -22,9 +22,9 @@ For Linux, select x86_64 glibc, x86_64 musl, or aarch64 glibc to match the envir
 |---|---:|
 | `hyperdu-core` | 1.82 |
 | `hyperdu` (CLI + MCP) | 1.88 |
-| `hyperdu-gui` | 1.85 |
+| `hyperdu-gui` | 1.92 |
 
-CI explicitly invokes each compiler on Linux and Windows (six conditions), using `cargo check --locked --all-targets` for the committed lockfile's default configuration. The full workspace requires at least 1.88 because it includes the CLI. Published beta manifests remain immutable. Use a recent stable Rust for published installations and ordinary development.
+CI explicitly invokes each compiler on Linux and Windows (six conditions), using `cargo check --locked --all-targets` for the committed lockfile's default configuration. The full workspace requires at least 1.92 because it includes the GUI. Published beta manifests remain immutable. Use a recent stable Rust for published installations and ordinary development.
 
 ```bash
 rustup toolchain install stable

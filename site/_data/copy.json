@@ -64,6 +64,9 @@
       {"title": "Developer guide", "text": "従来方式との違い、コードの入口、組み込み方", "path": "docs/developer-guide.md", "revision": "main"}
     ],
     "footer": "ディスクの容量を、何が使っているか。すばやく把握する。",
+    "built_by": "開発元:",
+    "organization": "株式会社自動処理",
+    "organization_lang": "ja",
     "back_top": "ページの先頭へ",
     "doc_prefix": "docs/",
     "plugin_path": "plugin/README.md",
@@ -137,6 +140,9 @@
       {"title": "Developer guide", "text": "Code entry points and integration (Japanese)", "path": "docs/developer-guide.md", "revision": "main"}
     ],
     "footer": "See what is using your disk space. Quickly.",
+    "built_by": "Built by",
+    "organization": "Automation co,.ltd",
+    "organization_lang": "en",
     "back_top": "Back to top",
     "doc_prefix": "docs/en/",
     "plugin_path": "plugin/README.en.md",
@@ -210,6 +216,9 @@
       {"title": "开发者指南", "text": "代码入口与集成方式（日语）", "path": "docs/developer-guide.md", "revision": "main"}
     ],
     "footer": "快速了解磁盘空间的去向。",
+    "built_by": "开发方:",
+    "organization": "株式会社自動処理",
+    "organization_lang": "ja",
     "back_top": "返回顶部",
     "doc_prefix": "docs/zh-CN/",
     "plugin_path": "plugin/README.zh-CN.md",

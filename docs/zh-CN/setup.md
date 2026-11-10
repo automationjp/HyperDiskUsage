@@ -14,7 +14,7 @@ scoop install hyperdu
 hyperdu --version
 ```
 
-Linux 请根据环境选择 x86_64 glibc、x86_64 musl 或 aarch64 glibc。GUI 需要 Windows 桌面会话或 Linux X11 / Wayland 环境；headless server 请使用 CLI。macOS 不在当前 Release 和 CI 范围内，也不提供 GUI 发行版。
+Linux 请根据环境选择 x86_64 glibc、x86_64 musl 或 aarch64 glibc。GUI 需要 Windows 桌面会话或 Linux X11 / Wayland 环境；headless server 请使用 CLI。Linux GUI 的保存和文件夹选择对话框通过 `libdbus-1` 使用 XDG desktop portal（`xdg-desktop-portal` 及桌面对应的 backend），不可用时改用 `zenity`。`.deb` / `.rpm` 将它们声明为推荐依赖；压缩包版和 AppImage 需要用户自行安装其一。两者都没有时对话框不会打开，导出会被视为取消。macOS 不在当前 Release 和 CI 范围内，也不提供 GUI 发行版。
 
 ## 2. 声明的 Rust 版本不等于已验证的构建保证
 
@@ -22,9 +22,9 @@ Linux 请根据环境选择 x86_64 glibc、x86_64 musl 或 aarch64 glibc。GUI �
 |---|---:|
 | `hyperdu-core` | 1.82 |
 | `hyperdu`（CLI + MCP） | 1.88 |
-| `hyperdu-gui` | 1.85 |
+| `hyperdu-gui` | 1.92 |
 
-CI 在 Linux / Windows 的6个条件下显式使用各编译器，为已提交 lockfile 的默认配置执行 `cargo check --locked --all-targets`。整个 workspace 包含 CLI，至少需要1.88。已发布 Beta 包的 manifest 不变，安装公开包及通常开发请使用较新的 stable Rust。
+CI 在 Linux / Windows 的6个条件下显式使用各编译器，为已提交 lockfile 的默认配置执行 `cargo check --locked --all-targets`。整个 workspace 包含 GUI，至少需要1.92。已发布 Beta 包的 manifest 不变，安装公开包及通常开发请使用较新的 stable Rust。
 
 ```bash
 rustup toolchain install stable

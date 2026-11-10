@@ -21,6 +21,10 @@ PINS = {
     'softprops/action-gh-release': 'efb35369e0ad2afab669f228072c1b0d510eae64',
     'Swatinem/rust-cache': '49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c',
     'mozilla-actions/sccache-action': 'fd02668681acd5f960e1372061bee5e3e987195c',
+    # One upstream commit (the v4 tag, reviewed 2026-11-10) for all three.
+    'github/codeql-action/init': '33d7b85da1a04171e211befe2c739303b9a4c066',
+    'github/codeql-action/analyze': '33d7b85da1a04171e211befe2c739303b9a4c066',
+    'github/codeql-action/upload-sarif': '33d7b85da1a04171e211befe2c739303b9a4c066',
     # Composite shell actions, with no nested JavaScript action.
     'dtolnay/rust-toolchain': '6bed0761d98439e5a578e2877258200ad565ba87',
     'taiki-e/install-action': 'c3ec0de9ae7f1019cea21aa96aa0a895b9552063',

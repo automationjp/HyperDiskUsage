@@ -17,7 +17,7 @@ Installation, scan-engine design, and verification guidance.
 ## Prepare the environment
 
 Running a prebuilt binary does not require Rust. Building the CLI (including MCP)
-or the whole workspace requires Rust 1.88+; core/GUI declare a minimum of 1.75.
+requires Rust 1.88+, the GUI or the whole workspace 1.92+; core declares a minimum of 1.82.
 Windows source builds use MSVC and the Windows SDK. Linux needs native build tools,
 and the Linux GUI needs X11/Wayland development libraries. See [setup](setup.md)
 for commands and verification boundaries.
