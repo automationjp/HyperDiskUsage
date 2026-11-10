@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use hyperdu_core::volume;
 use rmcp::{
     handler::server::wrapper::{Json, Parameters},
-    model::{Implementation, ServerCapabilities, ServerInfo},
+    model::{Implementation, ServerCapabilities, ServerConfig},
     schemars,
     service::RequestContext,
     tool, tool_handler, tool_router,
@@ -336,11 +336,11 @@ where
 
 #[tool_handler]
 impl ServerHandler for HyperDuServer {
-    fn get_info(&self) -> ServerInfo {
-        // `ServerInfo` and `Implementation` are #[non_exhaustive], so rmcp can
+    fn get_info(&self) -> ServerConfig {
+        // `ServerConfig` and `Implementation` are #[non_exhaustive], so rmcp can
         // add fields without breaking us -- at the cost of not being
         // constructible as a literal. Build from the default and fill in.
-        let mut info = ServerInfo::default();
+        let mut info = ServerConfig::default();
         info.instructions = Some(
             "HyperDU exposes disk usage as structured data. To answer \"why is the disk \
              full\", call list_volumes first to find the volume under pressure, then \
