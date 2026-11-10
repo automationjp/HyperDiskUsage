@@ -8,6 +8,7 @@ type-complexity-threshold = 500
 
 # No `msrv` here on purpose. Clippy falls back to each package's own
 # `rust-version`, which is what we want now that the crates no longer agree:
-# core and gui declare 1.75, while hyperdu needs 1.88 for built-in MCP.
+# core declares 1.82, hyperdu needs 1.88 for built-in MCP, and gui needs 1.92
+# for rfd 0.18.
 # Pinning one version workspace-wide would lint hyperdu against a floor it
 # does not have, and clippy warns about the mismatch rather than picking one.

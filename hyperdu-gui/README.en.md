@@ -22,7 +22,7 @@ cargo install --locked --path hyperdu-gui
 cargo run --release -p hyperdu-gui
 ```
 
-Use a recent stable Rust for source builds. Current GUI source declares Rust 1.85 and checks that floor on Linux / Windows. Published beta manifests remain immutable; install the published package with a recent stable toolchain. Linux needs X11 / Wayland development libraries; Windows needs its build environment and a desktop session. macOS is not a current GUI release target. [Setup](../docs/en/setup.md) · [Minimum-version caveat (Japanese)](../docs/developer-guide.md)
+Use a recent stable Rust for source builds. Current GUI source declares Rust 1.92 and checks that floor on Linux / Windows. Published beta manifests remain immutable; install the published package with a recent stable toolchain. Linux needs X11 / Wayland development libraries; Windows needs its build environment and a desktop session. macOS is not a current GUI release target. [Setup](../docs/en/setup.md) · [Minimum-version caveat (Japanese)](../docs/developer-guide.md)
 
 ## Operation and delivery modes
 

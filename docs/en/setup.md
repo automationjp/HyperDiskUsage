@@ -22,9 +22,9 @@ For Linux, select x86_64 glibc, x86_64 musl, or aarch64 glibc to match the envir
 |---|---:|
 | `hyperdu-core` | 1.82 |
 | `hyperdu` (CLI + MCP) | 1.88 |
-| `hyperdu-gui` | 1.85 |
+| `hyperdu-gui` | 1.92 |
 
-CI explicitly invokes each compiler on Linux and Windows (six conditions), using `cargo check --locked --all-targets` for the committed lockfile's default configuration. The full workspace requires at least 1.88 because it includes the CLI. Published beta manifests remain immutable. Use a recent stable Rust for published installations and ordinary development.
+CI explicitly invokes each compiler on Linux and Windows (six conditions), using `cargo check --locked --all-targets` for the committed lockfile's default configuration. The full workspace requires at least 1.92 because it includes the GUI. Published beta manifests remain immutable. Use a recent stable Rust for published installations and ordinary development.
 
 ```bash
 rustup toolchain install stable

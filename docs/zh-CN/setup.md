@@ -22,9 +22,9 @@ Linux 请根据环境选择 x86_64 glibc、x86_64 musl 或 aarch64 glibc。GUI �
 |---|---:|
 | `hyperdu-core` | 1.82 |
 | `hyperdu`（CLI + MCP） | 1.88 |
-| `hyperdu-gui` | 1.85 |
+| `hyperdu-gui` | 1.92 |
 
-CI 在 Linux / Windows 的6个条件下显式使用各编译器，为已提交 lockfile 的默认配置执行 `cargo check --locked --all-targets`。整个 workspace 包含 CLI，至少需要1.88。已发布 Beta 包的 manifest 不变，安装公开包及通常开发请使用较新的 stable Rust。
+CI 在 Linux / Windows 的6个条件下显式使用各编译器，为已提交 lockfile 的默认配置执行 `cargo check --locked --all-targets`。整个 workspace 包含 GUI，至少需要1.92。已发布 Beta 包的 manifest 不变，安装公开包及通常开发请使用较新的 stable Rust。
 
 ```bash
 rustup toolchain install stable

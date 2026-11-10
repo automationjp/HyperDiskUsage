@@ -6,7 +6,7 @@ description = "Hyper-fast GUI disk usage analyzer (Windows/Linux)."
 license.workspace = true
 # Inherited only here and in hyperdu: cargo-wix needs it to build the MSI.
 authors.workspace = true
-rust-version = "1.85"
+rust-version = "1.92"
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
@@ -30,7 +30,7 @@ egui = "0.32"
 # to reduce platform toolchain deps and build flakes.
 eframe = { version = "0.32", default-features = false, features = ["glow", "x11", "wayland", "default_fonts"] }
 egui_extras = "0.32"
-rfd = "0.15"
+rfd = "0.18"
 log = "0.4"
 env_logger = "0.11"
 hyperdu-core = { workspace = true }
