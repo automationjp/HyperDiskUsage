@@ -14,7 +14,7 @@ scoop install hyperdu
 hyperdu --version
 ```
 
-Linuxはx86_64 glibc、x86_64 musl、aarch64 glibcから環境に合う配布物を選びます。GUIにはWindowsのデスクトップセッション、またはLinuxのX11 / Wayland環境が必要です。headless serverではCLIを使います。macOSは現行Release・CIの対象ではなく、GUIも提供対象外です。
+Linuxはx86_64 glibc、x86_64 musl、aarch64 glibcから環境に合う配布物を選びます。GUIにはWindowsのデスクトップセッション、またはLinuxのX11 / Wayland環境が必要です。headless serverではCLIを使います。Linux GUIの保存・フォルダ選択ダイアログは、`libdbus-1` 経由のXDG desktop portal（`xdg-desktop-portal` と各デスクトップのbackend）か、無ければ `zenity` を使います。`.deb` / `.rpm` は推奨依存として宣言しますが、アーカイブ版やAppImageでは利用者が用意します。どちらも無いとダイアログが開かず、エクスポートは取り消し扱いになります。macOSは現行Release・CIの対象ではなく、GUIも提供対象外です。
 
 ## 2. Rustの宣言値と、ビルドできる環境を区別する
 

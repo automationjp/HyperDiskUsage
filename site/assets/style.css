@@ -1018,6 +1018,10 @@ td {
 .site-foot p a:hover {
   text-decoration:underline;
 }
+/* The organization link sits inside a sentence, so colour alone cannot mark it. */
+.site-foot>div p a {
+  text-decoration:underline;
+}
 
 .top-link {
   font-size:17px;

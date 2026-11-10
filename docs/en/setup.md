@@ -14,7 +14,7 @@ scoop install hyperdu
 hyperdu --version
 ```
 
-For Linux, select x86_64 glibc, x86_64 musl, or aarch64 glibc to match the environment. The GUI needs a Windows desktop session or Linux X11 / Wayland environment; use the CLI on headless servers. macOS is outside current release and CI targets, including GUI distribution.
+For Linux, select x86_64 glibc, x86_64 musl, or aarch64 glibc to match the environment. The GUI needs a Windows desktop session or Linux X11 / Wayland environment; use the CLI on headless servers. On Linux the GUI save and folder dialogs use the XDG desktop portal through `libdbus-1` (`xdg-desktop-portal` plus a desktop backend), or `zenity` when that is unavailable. The `.deb` / `.rpm` declare them as recommended dependencies; archive and AppImage users must provide one themselves. With neither, the dialog does not open and an export is treated as cancelled. macOS is outside current release and CI targets, including GUI distribution.
 
 ## 2. Declared Rust versions are not verified build guarantees
 

@@ -14,7 +14,7 @@ scoop install hyperdu
 hyperdu --version
 ```
 
-Linux 请根据环境选择 x86_64 glibc、x86_64 musl 或 aarch64 glibc。GUI 需要 Windows 桌面会话或 Linux X11 / Wayland 环境；headless server 请使用 CLI。macOS 不在当前 Release 和 CI 范围内，也不提供 GUI 发行版。
+Linux 请根据环境选择 x86_64 glibc、x86_64 musl 或 aarch64 glibc。GUI 需要 Windows 桌面会话或 Linux X11 / Wayland 环境；headless server 请使用 CLI。Linux GUI 的保存和文件夹选择对话框通过 `libdbus-1` 使用 XDG desktop portal（`xdg-desktop-portal` 及桌面对应的 backend），不可用时改用 `zenity`。`.deb` / `.rpm` 将它们声明为推荐依赖；压缩包版和 AppImage 需要用户自行安装其一。两者都没有时对话框不会打开，导出会被视为取消。macOS 不在当前 Release 和 CI 范围内，也不提供 GUI 发行版。
 
 ## 2. 声明的 Rust 版本不等于已验证的构建保证
 
